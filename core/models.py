@@ -1,6 +1,6 @@
 """Pydantic 데이터 모델: 포트폴리오 분석 결과 구조.
 
-# AIDEV-NOTE: pydantic-models; 
+# AIDEV-NOTE: pydantic-models;
 # - AssetMetrics: 각 자산의 분석 결과 (CAGR, Sharpe, RC, etc.)
 # - PortfolioMetrics: 포트폴리오 수준 결과
 # - ProposalRow: 리밸런싱 제안 행
@@ -14,7 +14,7 @@ import numpy as np
 
 class AssetMetrics(BaseModel):
     """자산별 분석 지표.
-    
+
     # AIDEV-NOTE: metrics-precision; NaN 값은 None으로 변환하여 JSON 직렬화 호환성 보장
     """
 
@@ -30,6 +30,12 @@ class AssetMetrics(BaseModel):
     return_contribution: float | None = Field(None, description="수익기여도")
     weight: float = Field(..., ge=0, le=1, description="현재 가중치")
     efficiency_score: float | None = Field(None, ge=0, le=1, description="효율 점수 E")
+    return_total: float | None = Field(
+        None, description="YTD 수익률 (소수, 예: 0.1234 = 12.34%)"
+    )
+    efficiency_score_prime: float | None = Field(
+        None, ge=0, le=1, description="보정된 효율 점수 E′"
+    )
 
     @field_validator("*", mode="before")
     @classmethod
@@ -84,6 +90,10 @@ class ProposalRow(BaseModel):
     efficiency_score: float | None = Field(None, description="효율 점수")
     rc_over_pct: float = Field(..., description="RC_Over (%)")
     rc_target_pct: float = Field(..., description="RC_Target (%)")
+    return_total: float | None = Field(None, description="누적 수익률")
+    efficiency_score_prime: float | None = Field(
+        None, description="보정된 효율 점수 E′"
+    )
     within_hysteresis: bool = Field(..., description="히스테리시스 대역 내")
     below_min_trade: bool = Field(..., description="최소거래 미만")
     should_execute: bool = Field(..., description="실행 여부")
@@ -109,15 +119,19 @@ class RCViolation(BaseModel):
 
 class RebalancingResult(BaseModel):
     """전체 리밸런싱 분석 결과.
-    
+
     # AIDEV-NOTE: result-schema; 평가 단계의 모든 출력을 단일 스키마로 캡슐화
     """
 
     asset_metrics: List[AssetMetrics] = Field(..., description="자산별 지표")
     portfolio_metrics: PortfolioMetrics = Field(..., description="포트폴리오 지표")
-    benchmark_metrics: Optional[BenchmarkMetrics] = Field(None, description="벤치마크 지표")
+    benchmark_metrics: Optional[BenchmarkMetrics] = Field(
+        None, description="벤치마크 지표"
+    )
     proposal_rows: List[ProposalRow] = Field(..., description="리밸런싱 제안")
     rc_violations: List[RCViolation] = Field(..., description="RC 상한선 위반")
     sell_list: List[ProposalRow] = Field(default_factory=list, description="축소 대상")
     buy_list: List[ProposalRow] = Field(default_factory=list, description="증가 대상")
-    fine_tune_list: List[ProposalRow] = Field(default_factory=list, description="세부 조정 대상")
+    fine_tune_list: List[ProposalRow] = Field(
+        default_factory=list, description="세부 조정 대상"
+    )

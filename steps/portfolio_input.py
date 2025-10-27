@@ -10,7 +10,7 @@ def show_portfolio_input() -> pd.DataFrame | None:
 
     Returns:
         정규화된 자산 배분 데이터프레임 또는 None (입력 미완료 시)
-        
+
     # AIDEV-NOTE: pydantic-integration; Asset 객체는 .model_dump()로 dict로 변환하여 DataFrame 생성
     """
     st.subheader("1️⃣ 포트폴리오 입력")
@@ -38,16 +38,38 @@ BTC-USD, 5.0"""
         if st.button("텍스트 파싱"):
             assets = parse_text_to_assets(text)
     elif input_mode == "CSV 업로드":
-        st.write("필수 CSV 칼럼: ticker, allocation")
+        st.write("필수 CSV 칼럼: ticker, allocation (선택: return_total)")
         file = st.file_uploader("CSV 업로드", type=["csv"])
         if file:
             df = pd.read_csv(file)
+            # AIDEV-NOTE: column-mapping-ko-en; 한글→영문 컬럼 매핑 (가중치→allocation, 누적수익률→return_total)
+            col_mapping = {
+                "가중치": "allocation",
+                "누적수익률": "return_total",
+                "전체기간수익률": "return_total",
+                "수익률": "return_total",
+                "현재수익률": "return_total",
+            }
+            df.rename(columns=col_mapping, inplace=True)
+
             if {"ticker", "allocation"}.issubset(df.columns):
                 try:
-                    assets = [
-                        Asset(ticker=str(r.ticker).upper(), allocation=float(r.allocation))
-                        for r in df.itertuples(index=False)
-                    ]
+                    asset_list = []
+                    for r in df.itertuples(index=False):
+                        total = None
+                        if hasattr(r, "return_total") and r.return_total:
+                            try:
+                                total = float(r.return_total) / 100.0  # % → 소수
+                            except (ValueError, TypeError):
+                                total = None
+                        asset_list.append(
+                            Asset(
+                                ticker=str(r.ticker).upper(),
+                                allocation=float(r.allocation),
+                                return_total=total,
+                            )
+                        )
+                    assets = asset_list
                 except ValidationError as e:
                     st.error(f"❌ CSV 검증 실패:\n{e}")
                     return None
@@ -57,17 +79,23 @@ BTC-USD, 5.0"""
         # 수동 편집 모드
         df_edit = pd.DataFrame(
             [
-                {"ticker": "SPY", "allocation": 40.0},
-                {"ticker": "AAPL", "allocation": 20.0},
-                {"ticker": "MSFT", "allocation": 20.0},
-                {"ticker": "TSLA", "allocation": 20.0},
+                {"ticker": "SPY", "allocation": 40.0, "return_total": None},
+                {"ticker": "AAPL", "allocation": 20.0, "return_total": None},
+                {"ticker": "MSFT", "allocation": 20.0, "return_total": None},
+                {"ticker": "TSLA", "allocation": 20.0, "return_total": None},
             ]
         )
         edited = st.data_editor(df_edit, num_rows="dynamic", width="stretch")
         if st.button("위 표 사용"):
             try:
                 assets = [
-                    Asset(ticker=str(r.ticker).upper(), allocation=float(r.allocation))
+                    Asset(
+                        ticker=str(r.ticker).upper(),
+                        allocation=float(r.allocation),
+                        return_total=float(r.return_total) / 100.0
+                        if r.return_total
+                        else None,
+                    )
                     for r in edited.itertuples(index=False)
                 ]
             except ValidationError as e:
@@ -81,7 +109,12 @@ BTC-USD, 5.0"""
     # AIDEV-NOTE: input-validation; 외부 입력(사용자 텍스트/CSV/편집)의 유효성을 먼저 검증하여 후속 계산 오류 방지
     # Pydantic Asset 객체를 dict로 변환하여 DataFrame 생성
     asset_df = pd.DataFrame([a.model_dump() for a in assets])
-    asset_df = asset_df.groupby("ticker", as_index=False)["allocation"].sum()
+    asset_df = asset_df.groupby("ticker", as_index=False).agg(
+        {
+            "allocation": "sum",
+            "return_total": "first",  # 첫 번째 return_total 유지 (중복 제거 시)
+        }
+    )
 
     # Pydantic 검증으로 이미 유효성 확인됨, 추가 검사는 최소화
     # (Pydantic의 Field(..., ge=0)로 음수 체크 완료)

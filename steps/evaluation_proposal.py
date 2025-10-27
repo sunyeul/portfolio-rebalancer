@@ -9,11 +9,11 @@ from utils.helpers import show_quadrant_explanations
 def show_evaluation_proposal(rc_over_thresh_pct: float, e_thresh: float, bench: str):
     """평가 & 실행 계획 제안 단계를 표시하고 처리합니다.
 
-    # AIDEV-NOTE: rc-over-e-quadrant; X축 RC_Over%, Y축 효율점수 E로 2×2 사분면 분류
+    # AIDEV-NOTE: rc-over-e-quadrant; X축 RC_Over%, Y축 효율점수 E′(보정)로 2×2 사분면 분류
 
     Args:
         rc_over_thresh_pct: RC_Over 임계값 (%)
-        e_thresh: 효율 점수 E 임계값
+        e_thresh: 효율 점수 E′ 임계값
         bench: 벤치마크 티커
     """
     st.subheader("3️⃣ 평가 & 실행 계획 제안")
@@ -50,9 +50,11 @@ def show_evaluation_proposal(rc_over_thresh_pct: float, e_thresh: float, bench: 
     rc_target = tgt.fillna(0)
     mdf["RC_Target"] = rc_target
     mdf["RC_Over"] = (mdf["위험기여도"] - mdf["RC_Target"]).clip(lower=0)
-    mdf["효율E"] = mdf["E"]
 
-    # 2×2 사분면 분류: RC_Over (X축) vs E (Y축)
+    # E′ 사용 (보정된 효율 점수); E′ 없으면 E 폴백
+    mdf["효율E"] = mdf["E′"] if "E′" in mdf.columns else mdf["E"]
+
+    # 2×2 사분면 분류: RC_Over (X축) vs E′ (Y축)
     rc_over_pct = mdf["RC_Over"] * 100  # 백분율로 표시
     over_thresh = rc_over_pct > rc_over_thresh_pct
     good_eff = mdf["효율E"] >= e_thresh
@@ -138,9 +140,10 @@ def show_evaluation_proposal(rc_over_thresh_pct: float, e_thresh: float, bench: 
             "현재%": (current_w * 100).round(2).values,
             "목표%": (tgt * 100).round(2).values,
             "갭%": (gap * 100).round(2).values,
-            "E": mdf["효율E"].round(2).values,
+            "E′": mdf["효율E"].round(2).values,
             "RC_Over%": rc_over_pct.round(2).values,
             "RC_Target%": (rc_target * 100).round(2).values,
+            "return_total%": (mdf["return_total"] * 100).round(2).values,
         }
     )
 
@@ -169,7 +172,7 @@ def show_evaluation_proposal(rc_over_thresh_pct: float, e_thresh: float, bench: 
     sell_list = sell_list.sort_values(["현재%", "RC_Over%"], ascending=[False, False])
 
     buy_list = proposal[(proposal["갭%"] > 0) & proposal["실행"]].copy()
-    buy_list = buy_list.sort_values(["갭%", "E"], ascending=[False, False])
+    buy_list = buy_list.sort_values(["갭%", "E′"], ascending=[False, False])
 
     fine_tune = proposal[
         (proposal["사분면"].isin(["Q1 핵심", "Q2 성장"]))
@@ -283,5 +286,7 @@ def show_evaluation_proposal(rc_over_thresh_pct: float, e_thresh: float, bench: 
             - **현금중립**: 매도합 = 매수합 (비례 스케일링).
             - **RC 상한**: min(12%, 1.5×RC_Target).
             - **벤치마크**: 참고 메트릭 및 IR 계산용 (가중치 제외).
+            - **return_total**: 사용자 입력값 우선; 미제공 시 가격 데이터 기준 누적 수익률 계산. Winsorize(2.5/97.5) 전처리.
+            - **효율 점수 E′**: E + 0.2×quantile(return_total) (모멘텀 가중치는 사이드바에서 조정 가능).
             """
         )

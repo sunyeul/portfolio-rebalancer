@@ -59,3 +59,24 @@ def ensure_tickers_exist(prices: pd.DataFrame, tickers: List[str]) -> List[str]:
         st.warning(f"{missing}에 대한 가격 데이터 없음. 무시됨.")
     present = [t for t in tickers if t in prices.columns]
     return present
+
+
+def compute_ytd_returns(prices: pd.DataFrame) -> dict[str, float]:
+    """각 티커의 YTD 수익률을 계산합니다.
+
+    # AIDEV-NOTE: ytd-fallback-computation; return_ytd 미제공 시 가격 데이터로부터 계산하는 폴백
+
+    Args:
+        prices: 가격 데이터프레임 (칼럼=티커)
+
+    Returns:
+        {ticker: ytd_return} 딕셔너리 (소수점 형식)
+    """
+    result = {}
+    for ticker in prices.columns:
+        px = prices[ticker].dropna()
+        if len(px) >= 2 and px.iloc[0] > 0:
+            result[ticker] = (px.iloc[-1] - px.iloc[0]) / px.iloc[0]
+        else:
+            result[ticker] = float("nan")
+    return result

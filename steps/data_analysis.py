@@ -4,7 +4,11 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from utils.data_fetcher import ensure_tickers_exist, fetch_prices
+from utils.data_fetcher import (
+    ensure_tickers_exist,
+    fetch_prices,
+    compute_ytd_returns,
+)
 from utils.helpers import show_metric_help_expander
 from utils.metrics import (
     annualize_cov,
@@ -23,16 +27,21 @@ from utils.metrics import (
     winsorize_returns,
     alpha,
     beta,
+    apply_momentum_adjustment,
+    preprocess_return_total,
 )
 
 
-def show_data_analysis(period: int | str, rf: float, bench: str):
+def show_data_analysis(
+    period: int | str, rf: float, bench: str, momentum_weight: float = 0.2
+):
     """데이터 조회 & 보강 단계를 표시하고 처리합니다.
 
     Args:
         period: 평가 기간 (정수: 개월 수 또는 문자열: 'YTD', 'Max')
         rf: 무위험 수익률 (연간, 소수)
         bench: 벤치마크 티커
+        momentum_weight: 모멘텀 가중치 (E′ 계산용, 기본값: 0.2)
     """
     st.subheader("2️⃣ 데이터 조회 & 보강")
 
@@ -205,6 +214,32 @@ def show_data_analysis(period: int | str, rf: float, bench: str):
     # AIDEV-NOTE: efficiency-score-computation; E = 0.6·Sharpe_norm + 0.4·IR_norm (z-score→CDF 정규화)
     metrics_df["E"] = compute_efficiency_score(metrics_df["샤프"], metrics_df["IR"])
 
+    # return_total 수집 및 보강
+    # AIDEV-NOTE: return-total-enrichment; 사용자 입력 return_total 우선, 미제공 시 가격 데이터에서 계산
+    asset_return_map = dict(zip(asset_df["ticker"], asset_df["return_total"]))
+    computed_returns = compute_ytd_returns(prices[weights_no_bench.index])
+
+    metrics_df["return_total"] = metrics_df.index.map(
+        lambda t: asset_return_map.get(t)
+        if pd.notna(asset_return_map.get(t))
+        else computed_returns.get(t, np.nan)
+    )
+
+    # return_total 전처리: winsorize + 선택적 log1p
+    # AIDEV-NOTE: return-total-preprocess; 극단값 완화 (winsorize 2.5/97.5 + log1p 선택)
+    return_total_preprocessed = preprocess_return_total(
+        metrics_df["return_total"], lower=0.025, upper=0.975, use_log=False
+    )
+
+    # E′ 보정: 모멘텀 조정 적용 (전처리된 return_total 사용)
+    e_prime, return_quantile = apply_momentum_adjustment(
+        metrics_df["E"],
+        return_total_preprocessed,
+        momentum_weight=momentum_weight,
+    )
+    metrics_df["E′"] = e_prime
+    metrics_df["수익률분위"] = return_quantile
+
     st.markdown("### 보강된 데이터 (자산별)")
     st.dataframe(
         metrics_df.style.format(
@@ -215,8 +250,10 @@ def show_data_analysis(period: int | str, rf: float, bench: str):
                 "최대낙폭": "{:.2%}",
                 "IR": "{:.2f}",
                 "E": "{:.2f}",
+                "E′": "{:.2f}",
                 "베타": "{:.2f}",
                 "알파": "{:.2%}",
+                "return_total": "{:.2%}",
                 "위험기여도": "{:.2%}",
                 "수익기여도": "{:.2%}",
                 "가중치": "{:.2%}",

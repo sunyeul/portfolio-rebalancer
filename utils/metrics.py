@@ -306,3 +306,87 @@ def alpha(asset_cagr: float, asset_beta: float, bench_cagr: float, rf: float) ->
 
     expected_return = rf + asset_beta * (bench_cagr - rf)
     return asset_cagr - expected_return
+
+
+def compute_ytd_return(prices: pd.Series) -> float:
+    """연초누적 수익률(YTD)를 계산합니다.
+
+    # AIDEV-NOTE: ytd-proxy-computation; 가격 시리즈의 첫 거래일(연초) 대비 마지막 거래일의 수익률
+
+    Args:
+        prices: 가격 시리즈
+
+    Returns:
+        YTD 수익률 (소수점 형식, 예: 0.1234 = 12.34%)
+    """
+    if prices.empty or len(prices) < 2:
+        return np.nan
+    first_price = prices.iloc[0]
+    last_price = prices.iloc[-1]
+    if first_price <= 0:
+        return np.nan
+    return (last_price - first_price) / first_price
+
+
+def apply_momentum_adjustment(
+    efficiency_scores: pd.Series,
+    return_ytd_series: pd.Series,
+    momentum_weight: float = 0.2,
+) -> tuple[pd.Series, pd.Series]:
+    """효율 점수에 수익률 모멘텀 보정을 적용합니다.
+
+    # AIDEV-NOTE: momentum-adjustment-formula; E′ = E + momentum_weight × quantile(return_ytd)
+    # - quantile은 0~1로 정규화된 순위값 (rank(pct=True))
+    # - return_ytd 없는 자산은 0.5(중앙값)로 설정
+
+    Args:
+        efficiency_scores: 원본 효율 점수 E 시리즈
+        return_ytd_series: YTD 수익률 시리즈 (NaN 포함 가능)
+        momentum_weight: 모멘텀 가중치 (기본값: 0.2)
+
+    Returns:
+        (보정된 효율 점수 E′, 정규화된 수익률 분위수)
+    """
+    # 정규화: rank percentile (0~1)
+    ytd_filled = return_ytd_series.fillna(return_ytd_series.median())
+    ytd_quantile = ytd_filled.rank(pct=True, method="average")
+
+    # E′ = E + momentum_weight × quantile
+    efficiency_prime = efficiency_scores + momentum_weight * ytd_quantile
+    efficiency_prime = efficiency_prime.clip(lower=0, upper=1.0)  # [0, 1] 범위 제한
+
+    return efficiency_prime, ytd_quantile
+
+
+def preprocess_return_total(
+    returns: pd.Series,
+    lower: float = 0.025,
+    upper: float = 0.975,
+    use_log: bool = False,
+) -> pd.Series:
+    """누적 수익률(return_total)을 전처리합니다.
+
+    # AIDEV-NOTE: return-total-preprocessing; winsorize + 선택적 log1p로 극단값 완화
+
+    Args:
+        returns: 누적 수익률 시리즈 (소수점 형식, 예: 0.1234 = 12.34%)
+        lower: 하단 분위수 (기본값: 2.5%)
+        upper: 상단 분위수 (기본값: 97.5%)
+        use_log: log1p 변환 여부 (극단값 완화, 기본값: False)
+
+    Returns:
+        전처리된 수익률 시리즈
+    """
+    result = returns.copy()
+
+    # Step 1: Winsorize
+    q_lower = result.quantile(lower)
+    q_upper = result.quantile(upper)
+    result = result.clip(lower=q_lower, upper=q_upper)
+
+    # Step 2: Optional log transformation
+    if use_log:
+        # log1p(r): log(1 + r)로 극단값 압축
+        result = np.log1p(result)
+
+    return result

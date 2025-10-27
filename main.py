@@ -67,6 +67,16 @@ st.sidebar.caption(
     f"임계값: RC_Over > {rc_over_thresh_pct:.1f}% (과노출) & E ≥ {e_thresh:.2f} (효율)으로 사분면 정의."
 )
 
+# AIDEV-NOTE: momentum-weight-control; E′ 계산용 모멘텀 가중치(0.1~0.3), 기본값 0.2
+momentum_weight = st.sidebar.slider(
+    "모멘텀 가중치 (E′ 보정용)",
+    min_value=0.0,
+    max_value=0.5,
+    value=0.2,
+    step=0.05,
+    help="높을수록 YTD 수익률이 효율 점수에 더 크게 영향을 줍니다.",
+)
+
 # ==============================
 # 단계 1: 포트폴리오 입력
 # ==============================
@@ -75,7 +85,7 @@ show_portfolio_input()
 # ==============================
 # 단계 2: 데이터 조회 & 보강
 # ==============================
-show_data_analysis(period, rf, bench)
+show_data_analysis(period, rf, bench, momentum_weight)
 
 # ==============================
 # 단계 3: 평가 & 실행 계획 제안
