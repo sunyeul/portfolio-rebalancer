@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - SESSION_SECRET_KEY=${SESSION_SECRET_KEY:-dev-secret-key-change-in-production}
+    volumes:
+      - ./static:/app/static
+      - ./templates:/app/templates
+    restart: unless-stopped
+
+  # Redis (optional, for production session storage)
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   restart: unless-stopped

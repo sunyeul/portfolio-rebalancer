@@ -1,0 +1,34 @@
+<div class="p-6">
+    <h2 class="text-xl font-semibold mb-4">3️⃣ 평가 & 실행 계획 제안</h2>
+
+    <div id="evaluation_container">
+        <p class="text-gray-500 text-sm mb-4">먼저 단계 2를 완료해주세요.</p>
+        <form id="evaluation_form" hx-post="/api/evaluation/run" hx-target="#evaluation_results" hx-swap="innerHTML">
+            <input type="hidden" name="rc_over_thresh_pct" id="evaluation_rc_over_thresh" value="1.5">
+            <input type="hidden" name="e_thresh" id="evaluation_e_thresh" value="0.5">
+            <button 
+                type="submit"
+                id="run_evaluation_btn"
+                class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                disabled>
+                평가 실행
+            </button>
+        </form>
+    </div>
+
+    <div id="evaluation_results" class="mt-4">
+        <!-- Evaluation results will be rendered here -->
+    </div>
+</div>
+
+<script>
+// Update button state based on step 2 completion
+document.body.addEventListener('htmx:afterSwap', function(event) {
+    if (event.detail.target.id === 'analysis_results') {
+        const btn = document.getElementById('run_evaluation_btn');
+        if (btn) {
+            btn.disabled = false;
+        }
+    }
+});
+</script>

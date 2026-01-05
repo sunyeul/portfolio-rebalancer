@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="flex flex-col lg:flex-row gap-6">
+        <!-- Sidebar -->
+        <aside class="lg:w-64 flex-shrink-0">
+            <div class="bg-white rounded-lg shadow p-4 sticky top-4">
+                <h2 class="text-lg font-semibold mb-4">⚙️ 설정</h2>
+                
+                <!-- Period Selection -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">평가 기간 선택</label>
+                    <div class="flex gap-2">
+                        <input type="radio" name="period_mode" value="months" id="period_months" checked class="peer/month">
+                        <label for="period_months" class="text-sm">개월</label>
+                        <input type="radio" name="period_mode" value="ytd" id="period_ytd" class="peer/ytd">
+                        <label for="period_ytd" class="text-sm">YTD</label>
+                        <input type="radio" name="period_mode" value="max" id="period_max" class="peer/max">
+                        <label for="period_max" class="text-sm">Max</label>
+                    </div>
+                    <input type="number" id="period_months_input" value="12" min="1" max="120" class="mt-2 w-full px-3 py-2 border border-gray-300 rounded-md">
+                </div>
+
+                <!-- Risk-free Rate -->
+                <div class="mb-4">
+                    <label for="rf" class="block text-sm font-medium text-gray-700 mb-2">무위험 수익률 (연간, %)</label>
+                    <input type="number" id="rf" value="0.0" step="0.1" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                </div>
+
+                <!-- Benchmark -->
+                <div class="mb-4">
+                    <label for="bench" class="block text-sm font-medium text-gray-700 mb-2">벤치마크 티커</label>
+                    <input type="text" id="bench" value="SPY" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                </div>
+
+                <!-- RC Over Threshold -->
+                <div class="mb-4">
+                    <label for="rc_over_thresh" class="block text-sm font-medium text-gray-700 mb-2">RC_Over 임계값 (%)</label>
+                    <input type="number" id="rc_over_thresh" value="1.5" step="0.1" min="0.0" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                </div>
+
+                <!-- E Threshold -->
+                <div class="mb-4">
+                    <label for="e_thresh" class="block text-sm font-medium text-gray-700 mb-2">효율 점수 E 임계값</label>
+                    <input type="number" id="e_thresh" value="0.5" step="0.05" min="0.0" max="1.0" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                </div>
+
+                <!-- Momentum Weight -->
+                <div class="mb-4">
+                    <label for="momentum_weight" class="block text-sm font-medium text-gray-700 mb-2">모멘텀 가중치 (E′ 보정용)</label>
+                    <input type="range" id="momentum_weight" value="0.2" min="0.0" max="0.5" step="0.05" class="w-full">
+                    <span id="momentum_weight_value" class="text-sm text-gray-600">0.2</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <div class="flex-1">
+            <!-- Step 1: Portfolio Input -->
+            <section id="step1" class="bg-white rounded-lg shadow mb-6">
+                {% include "components/portfolio_input.html" %}
+            </section>
+
+            <!-- Step 2: Data Analysis -->
+            <section id="step2" class="bg-white rounded-lg shadow mb-6">
+                {% include "components/data_analysis.html" %}
+            </section>
+
+            <!-- Step 3: Evaluation & Proposal -->
+            <section id="step3" class="bg-white rounded-lg shadow mb-6">
+                {% include "components/evaluation_proposal.html" %}
+            </section>
+        </div>
+    </div>
+</div>
+{% endblock %}

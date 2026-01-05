@@ -5,11 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "plotly>=5.24.0",
     "numpy>=2.3.4",
     "pandas>=2.3.3",
     "pydantic>=2.0.0",
-    "streamlit>=1.50.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "jinja2>=3.1.4",
+    "python-multipart>=0.0.12",
+    "redis>=5.2.0",
+    "itsdangerous>=2.2.0",
     "watchdog>=6.0.0",
     "yfinance>=0.2.66",
     "scipy>=1.16.2",

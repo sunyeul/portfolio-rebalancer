@@ -1,6 +1,5 @@
 from typing import List
 from pydantic import BaseModel, field_validator, Field
-import streamlit as st
 import re
 
 
@@ -107,7 +106,7 @@ def parse_text_to_assets(text: str) -> List[Asset]:
                 continue
 
         if allocation is None:
-            st.warning(f"줄 {line_num}에서 배분을 찾을 수 없음: '{line}'. 건너뜀.")
+            # AIDEV-NOTE: silent-skip; Streamlit 경고 제거, 파싱 실패는 무시하고 계속 진행
             continue
         # Pydantic 검증 실행
         try:
@@ -115,7 +114,7 @@ def parse_text_to_assets(text: str) -> List[Asset]:
                 ticker=ticker, allocation=allocation, return_total=return_total
             )
             assets.append(asset)
-        except ValueError as e:
-            st.warning(f"줄 {line_num} 검증 실패: {e}. 건너뜀.")
+        except ValueError:
+            # AIDEV-NOTE: silent-skip; 검증 실패는 무시하고 계속 진행
             continue
     return assets

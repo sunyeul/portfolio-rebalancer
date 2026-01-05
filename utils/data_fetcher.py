@@ -1,16 +1,14 @@
 from typing import List
 import pandas as pd
 import yfinance as yf
-import streamlit as st
 import time
+from functools import lru_cache
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_prices(tickers: List[str], start: str, end: str) -> pd.DataFrame:
+# AIDEV-NOTE: caching-strategy; yfinance 호출이 느려서 @lru_cache 사용 (TTL은 서비스 계층에서 관리)
+@lru_cache(maxsize=128)
+def fetch_prices(tickers: tuple[str, ...], start: str, end: str) -> pd.DataFrame:
     """주어진 티커 목록에 대한 가격 데이터를 조회합니다.
-
-    # AIDEV-NOTE: caching-strategy; yfinance 호출이 느려서 @st.cache_data(ttl=300) 사용 (단점: 캐시 무효화 사용자 통제 어려움)
-    # AIDEV-TODO: cache-ttl-config; TTL 설정을 사이드바 옵션으로 노출할지 검토 (현재는 고정 300초)
 
     Args:
         tickers: 티커 문자열 목록
@@ -25,8 +23,10 @@ def fetch_prices(tickers: List[str], start: str, end: str) -> pd.DataFrame:
 
     for attempt in range(max_retries):
         try:
+            # 튜플을 리스트로 변환
+            ticker_list = list(tickers)
             data = yf.download(
-                tickers, start=start, end=end, auto_adjust=True, progress=False
+                ticker_list, start=start, end=end, auto_adjust=True, progress=False
             )
             if isinstance(data, pd.DataFrame) and "Close" in data.columns:
                 prices = data["Close"]
@@ -44,7 +44,9 @@ def fetch_prices(tickers: List[str], start: str, end: str) -> pd.DataFrame:
                 raise
 
 
-def ensure_tickers_exist(prices: pd.DataFrame, tickers: List[str]) -> List[str]:
+def ensure_tickers_exist(
+    prices: pd.DataFrame, tickers: List[str]
+) -> tuple[List[str], List[str]]:
     """가격 데이터에 존재하는 티커만 반환합니다.
 
     Args:
@@ -52,13 +54,11 @@ def ensure_tickers_exist(prices: pd.DataFrame, tickers: List[str]) -> List[str]:
         tickers: 확인할 티커 목록
 
     Returns:
-        데이터에 존재하는 티커 목록
+        (존재하는 티커 목록, 누락된 티커 목록) 튜플
     """
     missing = [t for t in tickers if t not in prices.columns]
-    if missing:
-        st.warning(f"{missing}에 대한 가격 데이터 없음. 무시됨.")
     present = [t for t in tickers if t in prices.columns]
-    return present
+    return present, missing
 
 
 def compute_ytd_returns(prices: pd.DataFrame) -> dict[str, float]:

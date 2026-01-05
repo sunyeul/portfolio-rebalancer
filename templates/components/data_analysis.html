@@ -1,0 +1,57 @@
+<div class="p-6">
+    <h2 class="text-xl font-semibold mb-4">2️⃣ 데이터 조회 & 보강</h2>
+
+    <div id="analysis_container">
+        <p class="text-gray-500 text-sm mb-4">먼저 단계 1을 완료해주세요.</p>
+        <form id="analysis_form" hx-post="/api/analysis/run" hx-target="#analysis_results" hx-swap="innerHTML">
+            <input type="hidden" name="period" id="analysis_period" value="12">
+            <input type="hidden" name="rf" id="analysis_rf" value="0.0">
+            <input type="hidden" name="bench" id="analysis_bench" value="SPY">
+            <input type="hidden" name="momentum_weight" id="analysis_momentum_weight" value="0.2">
+            <button 
+                type="submit"
+                id="run_analysis_btn"
+                class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                disabled>
+                분석 실행
+            </button>
+        </form>
+    </div>
+
+    <div id="analysis_results" class="mt-4">
+        <!-- Analysis results will be rendered here -->
+    </div>
+</div>
+
+<script>
+// Update button state based on step 1 completion
+// This will be handled by HTMX after step 1 completes
+document.body.addEventListener('htmx:afterSwap', function(event) {
+    if (event.detail.target.id === 'asset_table_container') {
+        const btn = document.getElementById('run_analysis_btn');
+        if (btn) {
+            btn.disabled = false;
+        }
+    }
+});
+
+// Update form inputs for analysis
+function updateAnalysisForm() {
+    const periodMode = document.querySelector('input[name="period_mode"]:checked').value;
+    let period = '';
+    if (periodMode === 'months') {
+        period = document.getElementById('period_months_input').value;
+    } else {
+        period = periodMode.toUpperCase();
+    }
+    
+    // Create hidden inputs for analysis form
+    const form = document.getElementById('run_analysis_btn').closest('form') || document.createElement('form');
+    form.innerHTML = `
+        <input type="hidden" name="period" value="${period}">
+        <input type="hidden" name="rf" value="${document.getElementById('rf').value / 100}">
+        <input type="hidden" name="bench" value="${document.getElementById('bench').value}">
+        <input type="hidden" name="momentum_weight" value="${document.getElementById('momentum_weight').value}">
+    `;
+}
+</script>

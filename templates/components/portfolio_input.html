@@ -1,0 +1,64 @@
+<div class="p-6">
+    <h2 class="text-xl font-semibold mb-4">1️⃣ 포트폴리오 입력</h2>
+
+    <!-- Input Mode Selection -->
+    <div class="mb-4">
+        <div class="flex gap-4 mb-4">
+            <input type="radio" name="input_mode" value="text" id="input_text" checked class="peer/text">
+            <label for="input_text" class="cursor-pointer">텍스트 붙여넣기</label>
+            <input type="radio" name="input_mode" value="csv" id="input_csv" class="peer/csv">
+            <label for="input_csv" class="cursor-pointer">CSV 업로드</label>
+            <input type="radio" name="input_mode" value="manual" id="input_manual" class="peer/manual">
+            <label for="input_manual" class="cursor-pointer">수동 편집기</label>
+        </div>
+    </div>
+
+    <!-- Text Input Mode -->
+    <div id="text_input_mode" class="input-mode-panel">
+        <form hx-post="/api/portfolio/parse-text" hx-target="#asset_table_container" hx-swap="innerHTML">
+            <textarea name="text" rows="8" class="w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-sm">TSLA, 13.88
+SPY, 18.96
+MSFT, 12.0
+GOOGL, 10.0
+AMZN, 9.0
+AAPL, 8.0
+BTC-USD, 5.0</textarea>
+            <button type="submit" class="mt-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">텍스트 파싱</button>
+        </form>
+    </div>
+
+    <!-- CSV Upload Mode -->
+    <div id="csv_input_mode" class="input-mode-panel hidden">
+        <form hx-post="/api/portfolio/upload-csv" hx-target="#asset_table_container" hx-swap="innerHTML" hx-encoding="multipart/form-data">
+            <p class="text-sm text-gray-600 mb-2">필수 CSV 칼럼: ticker, allocation (선택: return_total)</p>
+            <input type="file" name="file" accept=".csv" class="mb-2">
+            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">CSV 업로드</button>
+        </form>
+    </div>
+
+    <!-- Manual Edit Mode -->
+    <div id="manual_input_mode" class="input-mode-panel hidden">
+        <div id="manual_editor" class="mb-2">
+            <!-- Manual editor will be rendered here -->
+        </div>
+        <button type="button" id="manual_submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">위 표 사용</button>
+    </div>
+
+    <!-- Asset Table Container -->
+    <div id="asset_table_container" class="mt-4">
+        <p class="text-gray-500 text-sm">입력을 제공하고 해당 버튼을 눌러 파싱하거나 사용합니다.</p>
+    </div>
+</div>
+
+<script>
+// Input mode switching
+document.querySelectorAll('input[name="input_mode"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+        document.querySelectorAll('.input-mode-panel').forEach(panel => {
+            panel.classList.add('hidden');
+        });
+        const mode = this.value;
+        document.getElementById(`${mode}_input_mode`).classList.remove('hidden');
+    });
+});
+</script>

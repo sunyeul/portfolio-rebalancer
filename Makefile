@@ -3,13 +3,13 @@
 help:
 	@echo "Portfolio Rebalancer - Available Commands"
 	@echo "=========================================="
-	@echo "  make run      - Run Streamlit app (uv run streamlit run main.py)"
+	@echo "  make run      - Run FastAPI app (uvicorn main:app --reload)"
 	@echo "  make format   - Format code with ruff"
 	@echo "  make lint     - Lint code with ruff"
 	@echo "  make clean    - Remove cache and build files"
 
 run:
-	uv run streamlit run main.py
+	uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 format:
 	uv run ruff format .
