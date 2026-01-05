@@ -90,4 +90,188 @@ document.body.addEventListener('htmx:afterSwap', function(event) {
             setTimeout(initQuadrantChart, 50);
         }
     }
+    // Initialize tooltips after HTMX swaps content
+    setTimeout(initTooltips, 100);
+});
+
+// Global tooltip state
+let currentTooltip = {
+    element: null,
+    trigger: null,
+    timeout: null
+};
+
+// Initialize tooltips by attaching event listeners to each trigger
+function initTooltips() {
+    const tooltipTriggers = document.querySelectorAll('.tooltip-trigger');
+    
+    tooltipTriggers.forEach((trigger, index) => {
+        // Skip if already initialized (check for data attribute)
+        if (trigger.dataset.tooltipInitialized === 'true') {
+            return;
+        }
+        
+        const tooltipText = trigger.getAttribute('data-tooltip');
+        if (!tooltipText) {
+            return;
+        }
+        
+        // Mark as initialized
+        trigger.dataset.tooltipInitialized = 'true';
+        
+        trigger.addEventListener('mouseenter', function(e) {
+            // Clear any existing tooltip
+            hideTooltip();
+            
+            // Create tooltip element
+            const tooltipElement = document.createElement('div');
+            tooltipElement.className = 'tooltip-content';
+            tooltipElement.textContent = tooltipText;
+            tooltipElement.style.display = 'block';
+            tooltipElement.style.visibility = 'hidden'; // Initially hidden to measure
+            document.body.appendChild(tooltipElement);
+            
+            // Store reference
+            currentTooltip.element = tooltipElement;
+            currentTooltip.trigger = trigger;
+            
+            // Force reflow to get accurate dimensions
+            const tooltipWidth = tooltipElement.offsetWidth;
+            const tooltipHeight = tooltipElement.offsetHeight;
+            
+            // Make visible for positioning
+            tooltipElement.style.visibility = 'visible';
+            
+            // Position tooltip
+            positionTooltip(trigger, tooltipElement);
+            
+            // Show tooltip with slight delay for smooth animation
+            currentTooltip.timeout = setTimeout(() => {
+                if (tooltipElement && tooltipElement.parentNode) {
+                    tooltipElement.classList.add('show');
+                    // Force opacity with inline style to override CSS
+                    tooltipElement.style.setProperty('opacity', '1', 'important');
+                }
+            }, 50);
+        });
+        
+        trigger.addEventListener('mouseleave', function() {
+            hideTooltip();
+        });
+        
+        trigger.addEventListener('mousemove', function() {
+            if (currentTooltip.element && currentTooltip.trigger === trigger) {
+                positionTooltip(trigger, currentTooltip.element);
+            }
+        });
+    });
+}
+
+function hideTooltip() {
+    if (currentTooltip.timeout) {
+        clearTimeout(currentTooltip.timeout);
+        currentTooltip.timeout = null;
+    }
+    
+    if (currentTooltip.element) {
+        currentTooltip.element.classList.remove('show');
+        setTimeout(() => {
+            if (currentTooltip.element && currentTooltip.element.parentNode) {
+                currentTooltip.element.remove();
+            }
+            currentTooltip.element = null;
+            currentTooltip.trigger = null;
+        }, 200);
+    }
+}
+
+function positionTooltip(trigger, tooltip) {
+    const triggerRect = trigger.getBoundingClientRect();
+    const tooltipWidth = tooltip.offsetWidth;
+    const tooltipHeight = tooltip.offsetHeight;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const spacing = 8;
+    const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
+    const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+    
+    // Default: show tooltip above
+    let top = triggerRect.top + scrollY - tooltipHeight - spacing;
+    let left = triggerRect.left + scrollX + (triggerRect.width / 2) - (tooltipWidth / 2);
+    let position = 'tooltip-bottom';
+    
+    // Check if tooltip goes off screen vertically
+    if (triggerRect.top - tooltipHeight - spacing < 0) {
+        // Show below instead
+        top = triggerRect.bottom + scrollY + spacing;
+        position = 'tooltip-top';
+    }
+    
+    // Check horizontal boundaries
+    if (left < scrollX + spacing) {
+        left = scrollX + spacing;
+    } else if (left + tooltipWidth > scrollX + viewportWidth - spacing) {
+        left = scrollX + viewportWidth - tooltipWidth - spacing;
+    }
+    
+    // If still doesn't fit vertically, try left/right
+    const tooltipBottom = top + tooltipHeight - scrollY;
+    if (tooltipBottom > viewportHeight || top - scrollY < 0) {
+        // Try right side
+        left = triggerRect.right + scrollX + spacing;
+        top = triggerRect.top + scrollY + (triggerRect.height / 2) - (tooltipHeight / 2);
+        position = 'tooltip-left';
+        
+        if (left + tooltipWidth > scrollX + viewportWidth) {
+            // Try left side
+            left = triggerRect.left + scrollX - tooltipWidth - spacing;
+            position = 'tooltip-right';
+        }
+        
+        // Ensure tooltip stays within viewport vertically
+        if (top - scrollY < spacing) {
+            top = scrollY + spacing;
+        } else if (top + tooltipHeight - scrollY > viewportHeight - spacing) {
+            top = scrollY + viewportHeight - tooltipHeight - spacing;
+        }
+    }
+    
+    tooltip.className = 'tooltip-content ' + position;
+    tooltip.style.position = 'absolute';
+    tooltip.style.top = top + 'px';
+    tooltip.style.left = left + 'px';
+    tooltip.style.zIndex = '10000';
+}
+
+// Initialize tooltips on page load
+document.addEventListener('DOMContentLoaded', function() {
+    initTooltips();
+    
+    // Watch for new tooltip triggers added dynamically (e.g., via HTMX)
+    const observer = new MutationObserver(function(mutations) {
+        let shouldInit = false;
+        mutations.forEach(function(mutation) {
+            if (mutation.addedNodes.length > 0) {
+                mutation.addedNodes.forEach(function(node) {
+                    if (node.nodeType === 1) { // Element node
+                        if (node.classList && node.classList.contains('tooltip-trigger')) {
+                            shouldInit = true;
+                        } else if (node.querySelector && node.querySelector('.tooltip-trigger')) {
+                            shouldInit = true;
+                        }
+                    }
+                });
+            }
+        });
+        if (shouldInit) {
+            console.log('[Tooltips] New tooltip triggers detected, reinitializing...');
+            setTimeout(initTooltips, 50);
+        }
+    });
+    
+    // Start observing
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
 });

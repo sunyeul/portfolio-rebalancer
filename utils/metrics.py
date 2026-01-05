@@ -114,6 +114,24 @@ def risk_contributions(weights: pd.Series, cov: pd.DataFrame) -> pd.Series:
     return pd.Series(rc, index=weights.index)
 
 
+def compute_rc_target(
+    target_weights: pd.Series, cov_matrix: pd.DataFrame
+) -> pd.Series:
+    """목표 포트폴리오의 이론적 위험 기여도를 계산합니다.
+
+    # AIDEV-NOTE: geometric-rc-target; 공분산 행렬을 고려한 기하학적 RC_Target 계산
+    # RC_Target_i = w_target_i * (Σ @ w_target)_i / sqrt(w_target^T @ Σ @ w_target)
+
+    Args:
+        target_weights: 목표 포트폴리오 가중치 시리즈
+        cov_matrix: 연율화된 공분산 행렬
+
+    Returns:
+        목표 포트폴리오의 위험 기여도 시리즈
+    """
+    return risk_contributions(target_weights, cov_matrix)
+
+
 def price_to_nav(price: pd.Series) -> pd.Series:
     """가격을 순자산가치(NAV)로 정규화합니다.
 
@@ -335,9 +353,9 @@ def apply_momentum_adjustment(
 ) -> tuple[pd.Series, pd.Series]:
     """효율 점수에 수익률 모멘텀 보정을 적용합니다.
 
-    # AIDEV-NOTE: momentum-adjustment-formula; E′ = E + momentum_weight × quantile(return_ytd)
-    # - quantile은 0~1로 정규화된 순위값 (rank(pct=True))
-    # - return_ytd 없는 자산은 0.5(중앙값)로 설정
+    # AIDEV-NOTE: momentum-adjustment-formula; E′ = E + momentum_weight × normalized(return_ytd)
+    # - z-score→CDF 변환으로 정규화 (Sharpe/IR과 일관성 유지)
+    # - return_ytd 없는 자산은 중앙값으로 대체
 
     Args:
         efficiency_scores: 원본 효율 점수 E 시리즈
@@ -345,17 +363,17 @@ def apply_momentum_adjustment(
         momentum_weight: 모멘텀 가중치 (기본값: 0.2)
 
     Returns:
-        (보정된 효율 점수 E′, 정규화된 수익률 분위수)
+        (보정된 효율 점수 E′, 정규화된 수익률 값)
     """
-    # 정규화: rank percentile (0~1)
+    # 정규화: z-score → CDF (Sharpe/IR과 일관성 유지)
     ytd_filled = return_ytd_series.fillna(return_ytd_series.median())
-    ytd_quantile = ytd_filled.rank(pct=True, method="average")
+    ytd_normalized = zscore_to_cdf(ytd_filled)
 
-    # E′ = E + momentum_weight × quantile
-    efficiency_prime = efficiency_scores + momentum_weight * ytd_quantile
+    # E′ = E + momentum_weight × normalized
+    efficiency_prime = efficiency_scores + momentum_weight * ytd_normalized
     efficiency_prime = efficiency_prime.clip(lower=0, upper=1.0)  # [0, 1] 범위 제한
 
-    return efficiency_prime, ytd_quantile
+    return efficiency_prime, ytd_normalized
 
 
 def preprocess_return_total(

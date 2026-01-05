@@ -9,6 +9,9 @@ from typing import NamedTuple
 import numpy as np
 import pandas as pd
 
+from utils.metrics import compute_rc_target
+from utils.optimization import calculate_orders_with_constraints
+
 
 class EvaluationResult(NamedTuple):
     """평가 결과 데이터 구조."""
@@ -32,6 +35,7 @@ def run_evaluation(
     target_weights: pd.Series | dict[str, float] | None,
     rc_over_thresh_pct: float,
     e_thresh: float,
+    cov_matrix: pd.DataFrame | None = None,
 ) -> EvaluationResult:
     """평가 & 실행 계획 제안을 실행합니다.
 
@@ -42,6 +46,7 @@ def run_evaluation(
         target_weights: 목표 가중치 (Series 또는 dict, None이면 현재 가중치 사용)
         rc_over_thresh_pct: RC_Over 임계값 (%)
         e_thresh: 효율 점수 E′ 임계값
+        cov_matrix: 연율화된 공분산 행렬 (None이면 단순 비중 기반 RC_Target 사용)
 
     Returns:
         EvaluationResult: 평가 결과
@@ -59,9 +64,19 @@ def run_evaluation(
     else:
         tgt = target_weights.reindex(mdf.index).fillna(0)
 
-    # RC 타깃 계산: 목표 가중치에 비례
-    # AIDEV-NOTE: rc-target-proportion; RC_Target = 목표 가중치 (직관적, KISS 원칙)
-    rc_target = tgt.fillna(0)
+    # RC 타깃 계산: 공분산 행렬 기반 기하학적 계산 또는 단순 비중 기반
+    # AIDEV-NOTE: geometric-rc-target; 공분산 행렬을 고려한 기하학적 RC_Target 계산
+    if cov_matrix is not None:
+        # 공분산 행렬이 제공되면 기하학적 계산
+        try:
+            rc_target = compute_rc_target(tgt.fillna(0), cov_matrix)
+            rc_target = rc_target.reindex(mdf.index).fillna(0)
+        except Exception:
+            # 계산 실패 시 폴백: 단순 비중 기반
+            rc_target = tgt.fillna(0)
+    else:
+        # 공분산 행렬이 없으면 단순 비중 기반 (하위 호환성)
+        rc_target = tgt.fillna(0)
     mdf["RC_Target"] = rc_target
     mdf["RC_Over"] = (mdf["위험기여도"] - mdf["RC_Target"]).clip(lower=0)
 
@@ -138,11 +153,13 @@ def run_evaluation(
         }
     )
 
-    # AIDEV-NOTE: trade-filtering-rules; 히스테리시스(±20%), 최소거래(1.0%p) 적용하여 과잉거래 방지
+    # AIDEV-NOTE: trade-filtering-rules; 히스테리시스(affinity-based), 최소거래(1.0%p) 적용하여 과잉거래 방지
 
-    # 히스테리시스 밴드: 목표 ±20% 내 거래 제외
-    # AIDEV-FIXME: hysteresis-definition; 갭의 절대값이 목표의 ±20% 이내면 거래 제외
-    max_gap_pct = (tgt * 0.20).clip(lower=0.01)  # 목표의 20% 또는 최소 1%
+    # 히스테리시스 밴드: Affinity 기반 (상수항 + 비례항)
+    # AIDEV-NOTE: affinity-hysteresis-band; 작은 자산도 최소한의 허용 범위 확보
+    hysteresis_constant = 0.005  # 0.5%p 상수항
+    hysteresis_factor = 0.15  # 15% 비례항
+    max_gap_pct = hysteresis_constant + (tgt * hysteresis_factor).clip(lower=hysteresis_constant)
     within_band = gap.abs() <= max_gap_pct
 
     # 최소 거래 단위: 1.0%p 이상만 처리
@@ -171,25 +188,78 @@ def run_evaluation(
         & (proposal["갭%"].abs() <= 1.0)
     ].copy()
 
-    # AIDEV-NOTE: cash-neutral-scaling; 매도합계 = 매수합계가 되도록 비례 스케일링
-    # AIDEV-FIXME: cash-neutral-edge-case; 단순 스케일링으로 RC 상한 위반 가능, 임의 플래그 추가
-
-    total_sell = sell_list["갭%"].abs().sum() if len(sell_list) > 0 else 0
-    total_buy_before_scale = buy_list["갭%"].sum() if len(buy_list) > 0 else 0
-
-    if total_buy_before_scale > 0 and total_sell > 0:
-        # 매도 규모에 맞춰 매수 스케일 조정
-        scale_factor = (
-            min(1.0, total_sell / total_buy_before_scale)
-            if total_buy_before_scale > 0
-            else 1.0
+    # AIDEV-NOTE: constrained-scaling; 현금 중립성과 RC 상한을 동시에 만족하는 반복적 스케일링
+    # 제약 조건을 고려한 주문 조정
+    if cov_matrix is not None and len(buy_list) > 0 and len(sell_list) > 0:
+        # 현재 가중치와 목표 가중치 준비
+        current_w = mdf["가중치"]
+        
+        # 초기 주문 (갭 기반, 실행 대상 자산만)
+        initial_orders = pd.Series(0.0, index=mdf.index)
+        for _, row in buy_list.iterrows():
+            ticker = row["ticker"]
+            initial_orders[ticker] = row["갭%"] / 100.0  # 양수 (매수)
+        for _, row in sell_list.iterrows():
+            ticker = row["ticker"]
+            initial_orders[ticker] = row["갭%"] / 100.0  # 음수 (매도)
+        
+        # RC 상한선 계산
+        rc_cap_single = 0.12  # 단일 자산 최대 12%
+        rc_cap_target_ratio = 1.5  # RC_Target의 1.5배
+        rc_cap = pd.Series(index=mdf.index, dtype=float)
+        for ticker in mdf.index:
+            rc_cap[ticker] = min(rc_cap_single, rc_target[ticker] * rc_cap_target_ratio)
+        
+        # 현재 RC
+        current_rc = mdf["위험기여도"]
+        
+        # 제약 조건을 만족하도록 주문 조정
+        adjusted_orders, conv_info = calculate_orders_with_constraints(
+            current_w,
+            current_w + initial_orders,  # 목표 가중치 = 현재 + 주문
+            current_rc,
+            rc_cap,
+            cov_matrix,
+            max_iterations=10,
+            tolerance=0.001,
         )
-        buy_list["조정갭%"] = (buy_list["갭%"] * scale_factor).round(2)
+        
+        # 조정된 주문을 buy_list와 sell_list에 반영
+        buy_list = buy_list.copy()
+        sell_list = sell_list.copy()
+        
+        # buy_list에 조정갭% 컬럼 추가
+        buy_list["조정갭%"] = buy_list["갭%"].copy()
+        for idx in buy_list.index:
+            ticker = buy_list.loc[idx, "ticker"]
+            if ticker in adjusted_orders.index:
+                adjusted_gap = adjusted_orders[ticker] * 100.0
+                buy_list.at[idx, "조정갭%"] = round(adjusted_gap, 2)
+        
+        # sell_list에 조정갭% 컬럼 추가
+        sell_list["조정갭%"] = sell_list["갭%"].copy()
+        for idx in sell_list.index:
+            ticker = sell_list.loc[idx, "ticker"]
+            if ticker in adjusted_orders.index:
+                adjusted_gap = adjusted_orders[ticker] * 100.0
+                sell_list.at[idx, "조정갭%"] = round(adjusted_gap, 2)
     else:
-        buy_list["조정갭%"] = buy_list["갭%"].round(2)
+        # 공분산 행렬이 없거나 실행 대상이 없으면 단순 스케일링 (하위 호환성)
+        total_sell = sell_list["갭%"].abs().sum() if len(sell_list) > 0 else 0
+        total_buy_before_scale = buy_list["갭%"].sum() if len(buy_list) > 0 else 0
 
-    if len(sell_list) > 0:
-        sell_list["조정갭%"] = sell_list["갭%"].round(2)
+        if total_buy_before_scale > 0 and total_sell > 0:
+            scale_factor = (
+                min(1.0, total_sell / total_buy_before_scale)
+                if total_buy_before_scale > 0
+                else 1.0
+            )
+            buy_list["조정갭%"] = (buy_list["갭%"] * scale_factor).round(2)
+        else:
+            buy_list["조정갭%"] = buy_list["갭%"].round(2)
+
+        if len(sell_list) > 0:
+            sell_list["조정갭%"] = sell_list["갭%"].round(2)
 
     # RC 상한선 체크 (경고)
     rc_cap_single = 0.12  # 단일 자산 최대 12%

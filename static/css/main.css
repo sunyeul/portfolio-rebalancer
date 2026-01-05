@@ -1,3 +1,80 @@
 /* Custom CSS for Portfolio Rebalancer */
 
 /* Additional Tailwind utilities if needed */
+
+/* Tooltip Styles */
+.tooltip-trigger {
+    position: relative;
+    cursor: help;
+    border-bottom: 1px dotted currentColor;
+    text-decoration: none;
+}
+
+.tooltip-content {
+    position: absolute;
+    z-index: 10000;
+    padding: 8px 12px;
+    background-color: #1f2937;
+    color: #f9fafb;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    white-space: normal;
+    max-width: 280px;
+    min-width: 150px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease-in-out;
+    word-wrap: break-word;
+    display: block;
+}
+
+.tooltip-content.show {
+    opacity: 1 !important;
+}
+
+/* Tooltip arrow */
+.tooltip-content::before {
+    content: '';
+    position: absolute;
+    width: 0;
+    height: 0;
+    border: 6px solid transparent;
+}
+
+/* Arrow pointing down (tooltip above) */
+.tooltip-content.tooltip-bottom::before {
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-top-color: #1f2937;
+    border-bottom: none;
+}
+
+/* Arrow pointing up (tooltip below) */
+.tooltip-content.tooltip-top::before {
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-bottom-color: #1f2937;
+    border-top: none;
+}
+
+/* Arrow pointing right (tooltip left) */
+.tooltip-content.tooltip-left::before {
+    right: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    border-right-color: #1f2937;
+    border-left: none;
+}
+
+/* Arrow pointing left (tooltip right) */
+.tooltip-content.tooltip-right::before {
+    left: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    border-left-color: #1f2937;
+    border-right: none;
+}

@@ -51,6 +51,22 @@ async def run_evaluation_endpoint(
     if "ticker" in metrics_df.columns:
         metrics_df = metrics_df.set_index("ticker")
 
+    # 공분산 행렬 계산을 위한 returns_smooth 가져오기
+    returns_smooth_data = session_manager.get(session_id, "returns_smooth")
+    cov_matrix = None
+    if returns_smooth_data is not None:
+        from utils.metrics import annualize_cov
+
+        returns_smooth_df = pd.DataFrame(returns_smooth_data)
+        if "Date" in returns_smooth_df.columns or "date" in returns_smooth_df.columns:
+            date_col = "Date" if "Date" in returns_smooth_df.columns else "date"
+            returns_smooth_df = returns_smooth_df.set_index(date_col)
+        # metrics_df의 티커와 일치하는 컬럼만 선택
+        common_tickers = returns_smooth_df.columns.intersection(metrics_df.index)
+        if len(common_tickers) > 0:
+            returns_smooth_subset = returns_smooth_df[common_tickers]
+            cov_matrix = annualize_cov(returns_smooth_subset)
+
     # target_weights 파싱
     target_weights_dict = None
     if target_weights:
@@ -65,6 +81,7 @@ async def run_evaluation_endpoint(
             target_weights_dict,
             rc_over_thresh_pct,
             e_thresh,
+            cov_matrix=cov_matrix,
         )
 
         return templates.TemplateResponse(

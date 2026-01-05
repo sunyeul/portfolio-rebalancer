@@ -5,19 +5,19 @@
         <h3 class="text-lg font-semibold mb-4">포트폴리오 & 벤치마크 메트릭</h3>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
             <div class="bg-gray-50 p-4 rounded">
-                <p class="text-sm text-gray-600">포트폴리오 CAGR</p>
+                <p class="text-sm text-gray-600"><span class="tooltip-trigger" data-tooltip="연복합성장률 (Compound Annual Growth Rate). 투자 기간 동안 연평균 수익률을 나타냅니다.">포트폴리오 CAGR</span></p>
                 <p class="text-xl font-bold">{{ "%.2f%%"|format(portfolio_metrics.cagr * 100) }}</p>
             </div>
             <div class="bg-gray-50 p-4 rounded">
-                <p class="text-sm text-gray-600">포트폴리오 변동성</p>
+                <p class="text-sm text-gray-600"><span class="tooltip-trigger" data-tooltip="변동성 (Volatility). 수익률의 표준편차로, 높을수록 가격 변동이 큽니다. 연율화된 값입니다.">포트폴리오 변동성</span></p>
                 <p class="text-xl font-bold">{{ "%.2f%%"|format(portfolio_metrics.volatility * 100) }}</p>
             </div>
             <div class="bg-gray-50 p-4 rounded">
-                <p class="text-sm text-gray-600">포트폴리오 샤프</p>
+                <p class="text-sm text-gray-600"><span class="tooltip-trigger" data-tooltip="샤프 지수 (Sharpe Ratio). (수익률 - 무위험이자율) / 변동성으로 계산됩니다. 위험 대비 수익률을 나타내며, 높을수록 좋습니다.">포트폴리오 샤프</span></p>
                 <p class="text-xl font-bold">{{ "%.2f"|format(portfolio_metrics.sharpe) }}</p>
             </div>
             <div class="bg-gray-50 p-4 rounded">
-                <p class="text-sm text-gray-600">포트폴리오 최대낙폭</p>
+                <p class="text-sm text-gray-600"><span class="tooltip-trigger" data-tooltip="최대 낙폭 (Maximum Drawdown). 고점 대비 최대 하락폭을 나타냅니다. 손실 위험을 평가하는 중요한 지표입니다.">포트폴리오 최대낙폭</span></p>
                 <p class="text-xl font-bold">{{ "%.2f%%"|format(portfolio_metrics.max_drawdown * 100) }}</p>
             </div>
         </div>
@@ -25,15 +25,15 @@
         {% if benchmark_metrics %}
         <div class="grid grid-cols-3 gap-4">
             <div class="bg-gray-50 p-4 rounded">
-                <p class="text-sm text-gray-600">벤치마크 CAGR</p>
+                <p class="text-sm text-gray-600"><span class="tooltip-trigger" data-tooltip="연복합성장률 (Compound Annual Growth Rate). 투자 기간 동안 연평균 수익률을 나타냅니다.">벤치마크 CAGR</span></p>
                 <p class="text-xl font-bold">{{ "%.2f%%"|format(benchmark_metrics.cagr * 100) }}</p>
             </div>
             <div class="bg-gray-50 p-4 rounded">
-                <p class="text-sm text-gray-600">벤치마크 변동성</p>
+                <p class="text-sm text-gray-600"><span class="tooltip-trigger" data-tooltip="변동성 (Volatility). 수익률의 표준편차로, 높을수록 가격 변동이 큽니다. 연율화된 값입니다.">벤치마크 변동성</span></p>
                 <p class="text-xl font-bold">{{ "%.2f%%"|format(benchmark_metrics.volatility * 100) }}</p>
             </div>
             <div class="bg-gray-50 p-4 rounded">
-                <p class="text-sm text-gray-600">벤치마크 샤프</p>
+                <p class="text-sm text-gray-600"><span class="tooltip-trigger" data-tooltip="샤프 지수 (Sharpe Ratio). (수익률 - 무위험이자율) / 변동성으로 계산됩니다. 위험 대비 수익률을 나타내며, 높을수록 좋습니다.">벤치마크 샤프</span></p>
                 <p class="text-xl font-bold">{{ "%.2f"|format(benchmark_metrics.sharpe) }}</p>
             </div>
         </div>
@@ -48,14 +48,14 @@
                 <thead class="bg-gray-50">
                     <tr>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">티커</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">CAGR</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">변동성</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">샤프</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">최대낙폭</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">IR</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">E</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">E′</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">위험기여도</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase"><span class="tooltip-trigger" data-tooltip="연복합성장률 (Compound Annual Growth Rate). 투자 기간 동안 연평균 수익률을 나타냅니다.">CAGR</span></th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase"><span class="tooltip-trigger" data-tooltip="변동성 (Volatility). 수익률의 표준편차로, 높을수록 가격 변동이 큽니다. 연율화된 값입니다.">변동성</span></th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase"><span class="tooltip-trigger" data-tooltip="샤프 지수 (Sharpe Ratio). (수익률 - 무위험이자율) / 변동성으로 계산됩니다. 위험 대비 수익률을 나타내며, 높을수록 좋습니다.">샤프</span></th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase"><span class="tooltip-trigger" data-tooltip="최대 낙폭 (Maximum Drawdown). 고점 대비 최대 하락폭을 나타냅니다. 손실 위험을 평가하는 중요한 지표입니다.">최대낙폭</span></th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase"><span class="tooltip-trigger" data-tooltip="정보 비율 (Information Ratio). (자산수익률 - 벤치마크수익률) / 추적오차로 계산됩니다. 벤치마크 대비 초과수익을 나타냅니다.">IR</span></th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase"><span class="tooltip-trigger" data-tooltip="효율 점수 (Efficiency Score). Sharpe와 IR을 z-score→CDF로 정규화하여 결합한 값입니다. 공식: E = 0.6×Sharpe_norm + 0.4×IR_norm (0~1 범위).">E</span></th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase"><span class="tooltip-trigger" data-tooltip="모멘텀 보정 효율 점수 (E′). 효율 점수 E에 YTD 수익률 모멘텀을 보정한 값입니다. 공식: E′ = E + 0.2×정규화된YTD수익률 (0~1 범위).">E′</span></th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase"><span class="tooltip-trigger" data-tooltip="위험 기여도 (Risk Contribution). 포트폴리오 전체 위험에 대한 각 자산의 기여 비율입니다. 공분산 행렬을 고려하여 계산됩니다.">위험기여도</span></th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">가중치</th>
                     </tr>
                 </thead>
@@ -90,6 +90,10 @@
 <script>
 // Enable evaluation button after analysis
 document.getElementById('run_evaluation_btn').disabled = false;
+// Initialize tooltips after analysis results are displayed
+if (typeof initTooltips === 'function') {
+    initTooltips();
+}
 </script>
 {% else %}
 <p class="text-gray-500 text-sm">분석 결과가 없습니다.</p>

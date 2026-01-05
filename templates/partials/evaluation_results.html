@@ -2,7 +2,7 @@
 <div class="space-y-6">
     <!-- Quadrant Chart -->
     <div>
-        <h3 class="text-lg font-semibold mb-4">사분면 분류 (RC_Over vs 효율E)</h3>
+        <h3 class="text-lg font-semibold mb-4">사분면 분류 (<span class="tooltip-trigger" data-tooltip="위험기여도 초과분 (RC_Over). 위험기여도가 목표치를 초과한 정도입니다. 공식: RC_Over = RC - RC_Target. 양수면 위험기여도가 목표치보다 높고, 음수면 낮습니다.">RC_Over</span> vs <span class="tooltip-trigger" data-tooltip="효율 점수 (Efficiency Score). Sharpe와 IR을 z-score→CDF로 정규화하여 결합한 값입니다. 공식: E = 0.6×Sharpe_norm + 0.4×IR_norm (0~1 범위).">효율E</span>)</h3>
         <div class="w-full" style="position: relative; height: 500px;">
             <canvas id="quadrant_chart"></canvas>
         </div>
@@ -20,11 +20,11 @@
                 <div class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200 text-sm">
                         <thead class="bg-gray-50">
-                            <tr>
-                                <th class="px-4 py-2 text-left">티커</th>
-                                <th class="px-4 py-2 text-left">현재%</th>
-                                <th class="px-4 py-2 text-left">갭%</th>
-                            </tr>
+                    <tr>
+                        <th class="px-4 py-2 text-left">티커</th>
+                        <th class="px-4 py-2 text-left"><span class="tooltip-trigger" data-tooltip="현재 포트폴리오에서의 자산 비중입니다.">현재%</span></th>
+                        <th class="px-4 py-2 text-left"><span class="tooltip-trigger" data-tooltip="목표 비중과 현재 비중의 차이입니다. 양수면 증가 필요, 음수면 감소 필요를 의미합니다.">갭%</span></th>
+                    </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
                             {% for row in sell_list %}
@@ -49,11 +49,11 @@
                 <div class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200 text-sm">
                         <thead class="bg-gray-50">
-                            <tr>
-                                <th class="px-4 py-2 text-left">티커</th>
-                                <th class="px-4 py-2 text-left">현재%</th>
-                                <th class="px-4 py-2 text-left">갭%</th>
-                            </tr>
+                    <tr>
+                        <th class="px-4 py-2 text-left">티커</th>
+                        <th class="px-4 py-2 text-left"><span class="tooltip-trigger" data-tooltip="현재 포트폴리오에서의 자산 비중입니다.">현재%</span></th>
+                        <th class="px-4 py-2 text-left"><span class="tooltip-trigger" data-tooltip="목표 비중과 현재 비중의 차이입니다. 양수면 증가 필요, 음수면 감소 필요를 의미합니다.">갭%</span></th>
+                    </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
                             {% for row in buy_list %}
@@ -79,11 +79,11 @@
             <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-200 text-sm">
                     <thead class="bg-gray-50">
-                        <tr>
-                            <th class="px-4 py-2 text-left">티커</th>
-                            <th class="px-4 py-2 text-left">현재%</th>
-                            <th class="px-4 py-2 text-left">갭%</th>
-                        </tr>
+                    <tr>
+                        <th class="px-4 py-2 text-left">티커</th>
+                        <th class="px-4 py-2 text-left"><span class="tooltip-trigger" data-tooltip="현재 포트폴리오에서의 자산 비중입니다.">현재%</span></th>
+                        <th class="px-4 py-2 text-left"><span class="tooltip-trigger" data-tooltip="목표 비중과 현재 비중의 차이입니다. 양수면 증가 필요, 음수면 감소 필요를 의미합니다.">갭%</span></th>
+                    </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
                         {% for row in fine_tune_list %}
@@ -114,8 +114,8 @@
                 <thead class="bg-gray-50">
                     <tr>
                         <th class="px-4 py-2 text-left">티커</th>
-                        <th class="px-4 py-2 text-left">현재RC%</th>
-                        <th class="px-4 py-2 text-left">RC상한%</th>
+                        <th class="px-4 py-2 text-left"><span class="tooltip-trigger" data-tooltip="현재 위험기여도 (Risk Contribution). 포트폴리오 전체 위험에 대한 각 자산의 현재 기여 비율입니다.">현재RC%</span></th>
+                        <th class="px-4 py-2 text-left"><span class="tooltip-trigger" data-tooltip="위험기여도 상한선. 각 자산의 위험기여도가 초과하면 안 되는 최대값입니다.">RC상한%</span></th>
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200">
@@ -342,6 +342,10 @@ if (document.readyState === 'loading') {
 document.body.addEventListener('htmx:afterSwap', function(event) {
     if (event.detail.target.id === 'evaluation_results') {
         setTimeout(initQuadrantChart, 50); // Small delay to ensure DOM is ready
+        // Initialize tooltips after evaluation results are displayed
+        if (typeof initTooltips === 'function') {
+            setTimeout(initTooltips, 100);
+        }
     }
 });
 </script>
