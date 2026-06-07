@@ -55,6 +55,35 @@ def test_config_option_crud_uses_soft_deactivation(monkeypatch, tmp_path):
     assert all(group["value"] != "satellite_bio" for group in active_only["groups"])
 
 
+def test_app_defined_config_values_are_read_only(monkeypatch, tmp_path):
+    client = _client_with_db(monkeypatch, tmp_path)
+
+    role_response = client.post(
+        "/api/v1/config/roles",
+        json={"code": "custom_role", "label": "사용자 역할"},
+    )
+    assert role_response.status_code == 403
+
+    thesis_response = client.patch(
+        "/api/v1/config/thesis_statuses/intact/active",
+        json={"is_active": False},
+    )
+    assert thesis_response.status_code == 403
+
+    priority_response = client.put(
+        "/api/v1/config/ips/action-priorities",
+        json=[
+            {
+                "action_code": "custom_action",
+                "label": "사용자 액션",
+                "priority": 99,
+                "is_active": True,
+            }
+        ],
+    )
+    assert priority_response.status_code == 403
+
+
 def test_ips_edits_are_loaded_by_runtime_config(monkeypatch, tmp_path):
     client = _client_with_db(monkeypatch, tmp_path)
 
