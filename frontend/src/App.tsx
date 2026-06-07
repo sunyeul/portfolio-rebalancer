@@ -250,10 +250,7 @@ export function App() {
       { accessorKey: 'ticker', header: '티커' },
       { accessorKey: 'allocation', header: '입력 비중', cell: ({ row }) => pct(row.original.allocation, false) },
       { accessorKey: 'weight', header: '정규화 비중', cell: ({ row }) => pct(row.original.weight) },
-      { accessorKey: 'group', header: '그룹', cell: ({ row }) => optionLabel(groupOptions, row.original.group) },
-      { accessorKey: 'role', header: '역할', cell: ({ row }) => optionLabel(roleOptions, row.original.role) },
-      { accessorKey: 'dca_enabled', header: 'DCA', cell: ({ row }) => (row.original.dca_enabled ? '대상' : '제외') },
-      { accessorKey: 'thesis_status', header: '투자 논리', cell: ({ row }) => optionLabel(thesisStatusOptions, row.original.thesis_status) }
+      { accessorKey: 'group', header: '그룹', cell: ({ row }) => optionLabel(groupOptions, row.original.group) }
     ],
     []
   );
