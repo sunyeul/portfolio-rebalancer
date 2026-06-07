@@ -29,7 +29,7 @@ async def run_evaluation_endpoint(
         target_weights: 목표 가중치 (JSON 문자열, None이면 현재 가중치 사용)
 
     Returns:
-        HTML 부분 (action_plan.html, quadrant_chart.html)
+        HTML 부분 (evaluation_results.html)
     """
     session_id = request.state.session_id
 
@@ -84,16 +84,35 @@ async def run_evaluation_endpoint(
             cov_matrix=cov_matrix,
         )
 
+        proposal_records = result.proposal_df.to_dict(orient="records")
+        ips_action_records = result.ips_action_df.to_dict(orient="records")
+        group_summary_records = result.group_summary_df.to_dict(orient="records")
+        session_manager.set(session_id, "proposal_df", proposal_records)
+        session_manager.set(session_id, "ips_action_df", ips_action_records)
+        session_manager.set(session_id, "group_summary_df", group_summary_records)
+
+        def action_records(action: str) -> list[dict]:
+            return [
+                row for row in ips_action_records if row.get("ips_action") == action
+            ]
+
         return templates.TemplateResponse(
             "partials/evaluation_results.html",
             {
                 "request": request,
-                "proposal_df": result.proposal_df.to_dict(orient="records"),
+                "proposal_df": proposal_records,
+                "ips_action_df": ips_action_records,
+                "group_summary": group_summary_records,
+                "increase_dca_list": action_records("increase_dca"),
+                "decrease_dca_list": action_records("decrease_dca"),
+                "review_thesis_list": action_records("review_thesis"),
+                "hold_observe_list": action_records("hold_observe"),
+                "consider_sell_list": action_records("consider_rebalance_sell"),
+                "block_action_list": action_records("block_action"),
                 "sell_list": result.sell_list.to_dict(orient="records"),
                 "buy_list": result.buy_list.to_dict(orient="records"),
                 "fine_tune_list": result.fine_tune_list.to_dict(orient="records"),
                 "rc_violations": result.rc_violations.to_dict(orient="records"),
-                "quadrant_chart_json": result.quadrant_chart_json,
             },
         )
     except EvaluationError as e:
@@ -115,7 +134,7 @@ async def download_csv(
 
     Args:
         request: FastAPI 요청 객체
-        type: 다운로드 타입 ('metrics' 또는 'proposal')
+        type: 다운로드 타입 ('metrics', 'proposal', 'ips_actions', 'group_summary')
 
     Returns:
         CSV 파일 응답
@@ -128,11 +147,20 @@ async def download_csv(
             raise HTTPException(status_code=404, detail="분석 결과가 없습니다.")
         filename = "enriched_metrics.csv"
     elif type == "proposal":
-        # 평가 결과는 세션에 저장되지 않으므로 다시 계산 필요
-        # 여기서는 간단히 에러 반환
-        raise HTTPException(
-            status_code=501, detail="제안 다운로드는 아직 구현되지 않았습니다."
-        )
+        df = session_manager.get_dataframe(session_id, "proposal_df")
+        if df is None:
+            raise HTTPException(status_code=404, detail="평가 결과가 없습니다.")
+        filename = "proposal.csv"
+    elif type == "ips_actions":
+        df = session_manager.get_dataframe(session_id, "ips_action_df")
+        if df is None:
+            raise HTTPException(status_code=404, detail="IPS 액션 결과가 없습니다.")
+        filename = "ips_actions.csv"
+    elif type == "group_summary":
+        df = session_manager.get_dataframe(session_id, "group_summary_df")
+        if df is None:
+            raise HTTPException(status_code=404, detail="그룹 요약 결과가 없습니다.")
+        filename = "group_summary.csv"
     else:
         raise HTTPException(status_code=400, detail="잘못된 타입입니다.")
 

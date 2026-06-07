@@ -36,6 +36,13 @@ class AssetMetrics(BaseModel):
     efficiency_score_prime: float | None = Field(
         None, ge=0, le=1, description="보정된 효율 점수 E′"
     )
+    dca_intensity_score: float | None = Field(
+        None, ge=0, le=1, description="정기매수 강도 참고 점수"
+    )
+    group: str = Field("ungrouped", description="IPS 관리 그룹")
+    role: str = Field("unknown", description="자산 역할")
+    dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
+    thesis_status: str = Field("unknown", description="투자 논리 상태")
 
     @field_validator("*", mode="before")
     @classmethod
@@ -83,7 +90,6 @@ class ProposalRow(BaseModel):
     """리밸런싱 제안 행."""
 
     ticker: str = Field(..., description="자산 티커")
-    quadrant: str = Field(..., description="사분면 분류 (Q1-Q4)")
     current_weight_pct: float = Field(..., description="현재 가중치 (%)")
     target_weight_pct: float = Field(..., description="목표 가중치 (%)")
     gap_pct: float = Field(..., description="갭 (%)")
@@ -94,6 +100,15 @@ class ProposalRow(BaseModel):
     efficiency_score_prime: float | None = Field(
         None, description="보정된 효율 점수 E′"
     )
+    dca_intensity_score: float | None = Field(
+        None, description="정기매수 강도 참고 점수"
+    )
+    group: str = Field("ungrouped", description="IPS 관리 그룹")
+    role: str = Field("unknown", description="자산 역할")
+    dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
+    thesis_status: str = Field("unknown", description="투자 논리 상태")
+    risk_over: bool = Field(..., description="위험기여도 초과 여부")
+    efficiency_good: bool = Field(..., description="효율 점수 양호 여부")
     within_hysteresis: bool = Field(..., description="히스테리시스 대역 내")
     below_min_trade: bool = Field(..., description="최소거래 미만")
     should_execute: bool = Field(..., description="실행 여부")
@@ -117,6 +132,31 @@ class RCViolation(BaseModel):
     status: str = Field(..., description="상태 메시지")
 
 
+class IPSActionRow(BaseModel):
+    """IPS 기반 운영 액션 행."""
+
+    ticker: str = Field(..., description="자산 티커")
+    risk_over: bool = Field(..., description="위험기여도 초과 여부")
+    efficiency_good: bool = Field(..., description="효율 점수 양호 여부")
+    ips_action: str = Field(..., description="IPS 액션 코드")
+    action_label: str = Field(..., description="표시용 액션명")
+    action_priority: int = Field(..., description="표시 우선순위")
+    reason_codes: List[str] = Field(default_factory=list, description="액션 이유 코드")
+    next_step: str = Field(..., description="다음 행동")
+    blocked_reason: str | None = Field(None, description="보류 또는 차단 이유")
+
+
+class IPSGroupSummaryRow(BaseModel):
+    """IPS 그룹 요약 행."""
+
+    group_type: str = Field(..., description="그룹 유형")
+    group: str = Field(..., description="그룹명")
+    weight: float = Field(..., description="현재 비중")
+    risk_contribution: float = Field(..., description="위험기여도")
+    avg_efficiency: float | None = Field(None, description="평균 E")
+    avg_dca_score: float | None = Field(None, description="평균 DCA강도점수")
+
+
 class RebalancingResult(BaseModel):
     """전체 리밸런싱 분석 결과.
 
@@ -129,6 +169,12 @@ class RebalancingResult(BaseModel):
         None, description="벤치마크 지표"
     )
     proposal_rows: List[ProposalRow] = Field(..., description="리밸런싱 제안")
+    ips_action_rows: List[IPSActionRow] = Field(
+        default_factory=list, description="IPS 기반 운영 액션"
+    )
+    group_summary_rows: List[IPSGroupSummaryRow] = Field(
+        default_factory=list, description="IPS 그룹 요약"
+    )
     rc_violations: List[RCViolation] = Field(..., description="RC 상한선 위반")
     sell_list: List[ProposalRow] = Field(default_factory=list, description="축소 대상")
     buy_list: List[ProposalRow] = Field(default_factory=list, description="증가 대상")

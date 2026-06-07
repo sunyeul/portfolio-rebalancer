@@ -81,15 +81,7 @@ document.addEventListener('DOMContentLoaded', function() {
     updateEvaluationForm();
 });
 
-// Handle Chart.js initialization after HTMX swaps content
 document.body.addEventListener('htmx:afterSwap', function(event) {
-    // Check if evaluation results were swapped
-    if (event.detail.target.id === 'evaluation_results') {
-        // Call the chart initialization function if it exists
-        if (typeof initQuadrantChart === 'function') {
-            setTimeout(initQuadrantChart, 50);
-        }
-    }
     // Initialize tooltips after HTMX swaps content
     setTimeout(initTooltips, 100);
 });

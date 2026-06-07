@@ -1,19 +1,13 @@
-import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
-
-from utils.helpers import show_quadrant_explanations
 
 
 def show_evaluation_proposal(rc_over_thresh_pct: float, e_thresh: float, bench: str):
     """평가 & 실행 계획 제안 단계를 표시하고 처리합니다.
 
-    # AIDEV-NOTE: rc-over-e-quadrant; X축 RC_Over%, Y축 효율점수 E′(보정)로 2×2 사분면 분류
-
     Args:
         rc_over_thresh_pct: RC_Over 임계값 (%)
-        e_thresh: 효율 점수 E′ 임계값
+        e_thresh: 효율 점수 E 임계값
         bench: 벤치마크 티커
     """
     st.subheader("3️⃣ 평가 & 실행 계획 제안")
@@ -51,76 +45,19 @@ def show_evaluation_proposal(rc_over_thresh_pct: float, e_thresh: float, bench: 
     mdf["RC_Target"] = rc_target
     mdf["RC_Over"] = (mdf["위험기여도"] - mdf["RC_Target"]).clip(lower=0)
 
-    # E′ 사용 (보정된 효율 점수); E′ 없으면 E 폴백
-    mdf["효율E"] = mdf["E′"] if "E′" in mdf.columns else mdf["E"]
+    # E는 기본 효율 판단, E′는 정기매수 강도 참고값으로 분리
+    mdf["효율E"] = mdf["E"]
+    mdf["DCA강도점수"] = mdf["E′"] if "E′" in mdf.columns else mdf["E"]
 
-    # 2×2 사분면 분류: RC_Over (X축) vs E′ (Y축)
     rc_over_pct = mdf["RC_Over"] * 100  # 백분율로 표시
-    over_thresh = rc_over_pct > rc_over_thresh_pct
-    good_eff = mdf["효율E"] >= e_thresh
+    mdf["risk_over"] = rc_over_pct > rc_over_thresh_pct
+    mdf["efficiency_good"] = mdf["효율E"] >= e_thresh
 
-    mdf["사분면"] = np.select(
-        [
-            (~over_thresh) & good_eff,  # Q1: 낮은 RC_Over & 높은 E
-            over_thresh & good_eff,  # Q2: 높은 RC_Over & 높은 E
-            (~over_thresh) & (~good_eff),  # Q3: 낮은 RC_Over & 낮은 E
-            over_thresh & (~good_eff),  # Q4: 높은 RC_Over & 낮은 E
-        ],
-        ["Q1 핵심", "Q2 성장", "Q3 개선", "Q4 위험관리"],
-        default="분류 안됨",
-    )
-
-    # 산점도 (RC_Over% vs E)
-    fig = go.Figure()
-
-    fig.add_trace(
-        go.Scatter(
-            x=rc_over_pct,
-            y=mdf["효율E"],
-            mode="markers+text",
-            marker=dict(size=10, color="rgba(0, 100, 200, 0.6)"),
-            text=mdf.index,
-            textposition="top center",
-            textfont=dict(size=8),
-            hovertemplate="<b>%{text}</b><br>RC_Over: %{x:.2f}%<br>E: %{y:.2f}<extra></extra>",
-        )
-    )
-
-    # 임계값 라인 추가
-    fig.add_vline(
-        x=rc_over_thresh_pct,
-        line_dash="dash",
-        line_color="red",
-        annotation_text="RC_Over Thresh",
-    )
-    fig.add_hline(
-        y=e_thresh,
-        line_dash="dash",
-        line_color="red",
-        annotation_text="E Thresh",
-    )
-
-    # 레이아웃 설정
-    fig.update_layout(
-        title="사분면 분류 (RC_Over vs 효율E)",
-        xaxis_title="RC_Over (%)",
-        yaxis_title="효율 점수 E",
-        height=500,
-        hovermode="closest",
-        template="plotly_white",
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    with st.expander("ℹ️ 사분면 분류 설명 보기", expanded=False):
-        st.markdown(
-            """
-            사분면 분류는 **RC_Over** (x축: 위험 기여도 초과) 와 **효율E** (y축: 효율 점수) 를 기준으로 자산을 4개 카테고리로 분류합니다.
-            """
-        )
-        show_quadrant_explanations()
+    with st.expander("ℹ️ IPS 판단 신호 설명 보기", expanded=False):
         st.markdown(
             f"""
+            IPS 운영 제안은 위험초과 여부, 효율상태, 목표 비중 갭, 실행 필터를 종합해 산출합니다.
+
             **현재 임계값:**
             - RC_Over: **{rc_over_thresh_pct:.1f}%**
             - 효율 E: **{e_thresh:.2f}**
@@ -136,14 +73,17 @@ def show_evaluation_proposal(rc_over_thresh_pct: float, e_thresh: float, bench: 
     proposal = pd.DataFrame(
         {
             "ticker": mdf.index,
-            "사분면": mdf["사분면"].values,
             "현재%": (current_w * 100).round(2).values,
             "목표%": (tgt * 100).round(2).values,
             "갭%": (gap * 100).round(2).values,
-            "E′": mdf["효율E"].round(2).values,
+            "E": mdf["E"].round(2).values,
+            "E′": mdf["DCA강도점수"].round(2).values,
+            "DCA강도점수": mdf["DCA강도점수"].round(2).values,
             "RC_Over%": rc_over_pct.round(2).values,
             "RC_Target%": (rc_target * 100).round(2).values,
             "return_total%": (mdf["return_total"] * 100).round(2).values,
+            "risk_over": mdf["risk_over"].values,
+            "efficiency_good": mdf["efficiency_good"].values,
         }
     )
 
@@ -166,18 +106,14 @@ def show_evaluation_proposal(rc_over_thresh_pct: float, e_thresh: float, bench: 
     proposal["실행"] = should_trade
 
     # 실행 규칙: 우선순위 정의
-    sell_list = proposal[
-        (proposal["사분면"] == "Q4 위험관리") & proposal["실행"]
-    ].copy()
+    sell_list = proposal[(proposal["갭%"] < 0) & proposal["실행"]].copy()
     sell_list = sell_list.sort_values(["현재%", "RC_Over%"], ascending=[False, False])
 
     buy_list = proposal[(proposal["갭%"] > 0) & proposal["실행"]].copy()
     buy_list = buy_list.sort_values(["갭%", "E′"], ascending=[False, False])
 
     fine_tune = proposal[
-        (proposal["사분면"].isin(["Q1 핵심", "Q2 성장"]))
-        & (proposal["실행"])
-        & (proposal["갭%"].abs() <= 1.0)
+        (proposal["실행"]) & (proposal["갭%"].abs() <= 1.0)
     ].copy()
 
     # AIDEV-NOTE: cash-neutral-scaling; 매도합계 = 매수합계가 되도록 비례 스케일링
@@ -203,7 +139,7 @@ def show_evaluation_proposal(rc_over_thresh_pct: float, e_thresh: float, bench: 
     st.markdown("### 📌 실행 계획 (자동 생성)")
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("**(1) 축소 / 청산 — 위험관리 (Q4)**")
+        st.markdown("**(1) 축소 / 청산 — 음수 갭**")
         if len(sell_list) > 0:
             st.dataframe(sell_list, width="stretch")
         else:
@@ -215,7 +151,7 @@ def show_evaluation_proposal(rc_over_thresh_pct: float, e_thresh: float, bench: 
         else:
             st.info("증가 대상 없음")
 
-    st.markdown("**(3) 세부 조정 — Q1/Q2 작은 조정 (|갭| ≤ 1%)**")
+    st.markdown("**(3) 세부 조정 — 작은 조정 (|갭| ≤ 1%)**")
     if len(fine_tune) > 0:
         st.dataframe(fine_tune, width="stretch")
     else:
@@ -280,7 +216,7 @@ def show_evaluation_proposal(rc_over_thresh_pct: float, e_thresh: float, bench: 
             - **효율 점수 E**: 0.6·Sharpe_norm + 0.4·IR_norm (z-score→CDF 정규화).
             - **RC_Target**: 목표 가중치에 비례 (RC_Target = target_weight).
             - **RC_Over**: max(0, RC - RC_Target).
-            - **사분면**: X축 = RC_Over > {rc_over_thresh_pct:.1f}%, Y축 = E ≥ {e_thresh:.2f}.
+            - **IPS 신호**: 위험초과 = RC_Over > {rc_over_thresh_pct:.1f}%, 효율상태 = E ≥ {e_thresh:.2f}.
             - **히스테리시스**: target ±20% 내 거래 제외.
             - **최소 거래**: 1.0%p 미만은 제외.
             - **현금중립**: 매도합 = 매수합 (비례 스케일링).

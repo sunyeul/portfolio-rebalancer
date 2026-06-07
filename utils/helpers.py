@@ -105,30 +105,6 @@ METRIC_EXPLANATIONS = {
     },
 }
 
-QUADRANT_DEFINITIONS = {
-    "Q1 핵심": {
-        "설명": "**추천**: 저위험 ✓ 고효율 ✓",
-        "상세": "RC_Over ≤ 0 & E ≥ 0.5. 탄탄하고 효율적. 포트폴리오의 기초로서 안심.",
-        "행동": "유지 또는 소폭 증가",
-    },
-    "Q2 성장": {
-        "설명": "**주시**: 고위험 ⚠ 고효율 ✓",
-        "상세": "RC_Over > 0 & E ≥ 0.5. 성장성은 높지만 위험 예산 초과. 위험 허용도에 따라 감량.",
-        "행동": "일부 감량하여 목표 도달 후 유지",
-    },
-    "Q3 개선": {
-        "설명": "**검토**: 저위험 ✓ 저효율 ⚠",
-        "상세": "RC_Over ≤ 0 & E < 0.5. 위험은 낮지만 효율이 떨어짐. 현금 보유나 다른 자산으로 교체 검토.",
-        "행동": "필요에 따라 다른 자산으로 교체",
-    },
-    "Q4 위험관리": {
-        "설명": "**축소 🛑**: 고위험 ⚠ 저효율 ⚠",
-        "상세": "RC_Over > 0 & E < 0.5. 위험도 높은데 효율이 낮음. 위험 예산 확보 및 효율성 개선을 위해 축소 후보 1순위.",
-        "행동": "단계적으로 축소·청산 검토",
-    },
-}
-
-
 def show_metric_info(metric_key: str) -> None:
     """
     지정된 지표의 설명 정보 박스를 표시합니다.
@@ -159,23 +135,3 @@ def show_metric_help_expander() -> None:
                 st.markdown(f"**상세 설명**: {meta['상세']}")
                 st.markdown(f"**계산식**: `{meta['계산']}`")
                 st.markdown(f"**해석**: {meta['해석']}")
-
-
-def show_quadrant_explanations() -> None:
-    """
-    사분면 분류의 정의와 추천 행동을 표시합니다.
-    """
-    import streamlit as st
-
-    cols = st.columns(2)
-    with cols[0]:
-        st.markdown("#### Q1 & Q2: 효율적인 자산")
-        for q in ["Q1 핵심", "Q2 성장"]:
-            d = QUADRANT_DEFINITIONS[q]
-            st.markdown(f"**{q}**: {d['설명']}\n\n{d['상세']}")
-
-    with cols[1]:
-        st.markdown("#### Q3 & Q4: 효율이 낮은 자산")
-        for q in ["Q3 개선", "Q4 위험관리"]:
-            d = QUADRANT_DEFINITIONS[q]
-            st.markdown(f"**{q}**: {d['설명']}\n\n{d['상세']}")

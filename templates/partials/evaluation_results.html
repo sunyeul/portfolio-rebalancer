@@ -1,93 +1,153 @@
 {% if proposal_df is defined and proposal_df is not none %}
 <div class="space-y-6">
-    <!-- Quadrant Chart -->
+    <!-- Group Summary -->
     <div>
-        <h3 class="text-lg font-semibold mb-4">사분면 분류 (<span class="tooltip-trigger" data-tooltip="위험기여도 초과분 (RC_Over). 위험기여도가 목표치를 초과한 정도입니다. 공식: RC_Over = RC - RC_Target. 양수면 위험기여도가 목표치보다 높고, 음수면 낮습니다.">RC_Over</span> vs <span class="tooltip-trigger" data-tooltip="효율 점수 (Efficiency Score). Sharpe와 IR을 z-score→CDF로 정규화하여 결합한 값입니다. 공식: E = 0.6×Sharpe_norm + 0.4×IR_norm (0~1 범위).">효율E</span>)</h3>
-        <div class="w-full" style="position: relative; height: 500px;">
-            <canvas id="quadrant_chart"></canvas>
+        <h3 class="text-lg font-semibold mb-4">그룹 비중 요약</h3>
+        {% if group_summary is defined and group_summary|length > 0 %}
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-2 text-left">그룹</th>
+                        <th class="px-4 py-2 text-left">유형</th>
+                        <th class="px-4 py-2 text-left">현재 비중</th>
+                        <th class="px-4 py-2 text-left">위험기여도</th>
+                        <th class="px-4 py-2 text-left">평균 E</th>
+                        <th class="px-4 py-2 text-left">평균 DCA강도</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    {% for row in group_summary %}
+                    <tr>
+                        <td class="px-4 py-2">{{ row.group }}</td>
+                        <td class="px-4 py-2">{{ row.group_type }}</td>
+                        <td class="px-4 py-2">{{ "%.2f"|format(row.weight * 100) }}%</td>
+                        <td class="px-4 py-2">{{ "%.2f"|format(row.risk_contribution * 100) }}%</td>
+                        <td class="px-4 py-2">{{ "%.2f"|format(row.avg_efficiency) }}</td>
+                        <td class="px-4 py-2">{{ "%.2f"|format(row.avg_dca_score) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
+        {% else %}
+        <p class="text-gray-500 text-sm">그룹 요약 없음</p>
+        {% endif %}
     </div>
+
+    {% macro ips_table(rows, empty_text) %}
+    {% if rows is defined and rows|length > 0 %}
+    <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200 text-sm">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-4 py-2 text-left">티커</th>
+                    <th class="px-4 py-2 text-left">그룹</th>
+                    <th class="px-4 py-2 text-left">현재%</th>
+                    <th class="px-4 py-2 text-left">목표%</th>
+                    <th class="px-4 py-2 text-left">갭%</th>
+                    <th class="px-4 py-2 text-left">위험초과</th>
+                    <th class="px-4 py-2 text-left">효율상태</th>
+                    <th class="px-4 py-2 text-left">E</th>
+                    <th class="px-4 py-2 text-left">E′</th>
+                    <th class="px-4 py-2 text-left">주요 이유</th>
+                    <th class="px-4 py-2 text-left">다음 행동</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                {% for row in rows %}
+                <tr>
+                    <td class="px-4 py-2 font-medium">{{ row.ticker }}</td>
+                    <td class="px-4 py-2">{{ row.group }}</td>
+                    <td class="px-4 py-2">{{ "%.2f"|format(row['현재%']) }}</td>
+                    <td class="px-4 py-2">{{ "%.2f"|format(row['목표%']) }}</td>
+                    <td class="px-4 py-2">{{ "%.2f"|format(row['갭%']) }}</td>
+                    <td class="px-4 py-2">{{ "예" if row.risk_over else "아니오" }}</td>
+                    <td class="px-4 py-2">{{ "양호" if row.efficiency_good else "점검" }}</td>
+                    <td class="px-4 py-2">{{ "%.2f"|format(row.E) }}</td>
+                    <td class="px-4 py-2">{{ "%.2f"|format(row['E′']) }}</td>
+                    <td class="px-4 py-2">{{ row.reason_codes_text }}</td>
+                    <td class="px-4 py-2">{{ row.next_step }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-500 text-sm">{{ empty_text }}</p>
+    {% endif %}
+    {% endmacro %}
 
     <!-- Action Plan -->
     <div>
-        <h3 class="text-lg font-semibold mb-4">📌 실행 계획 (자동 생성)</h3>
-        
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <!-- Sell List -->
-            <div>
-                <h4 class="font-medium mb-2">(1) 축소 / 청산 — 위험관리 (Q4)</h4>
-                {% if sell_list is defined and sell_list|length > 0 %}
-                <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200 text-sm">
-                        <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-4 py-2 text-left">티커</th>
-                        <th class="px-4 py-2 text-left"><span class="tooltip-trigger" data-tooltip="현재 포트폴리오에서의 자산 비중입니다.">현재%</span></th>
-                        <th class="px-4 py-2 text-left"><span class="tooltip-trigger" data-tooltip="목표 비중과 현재 비중의 차이입니다. 양수면 증가 필요, 음수면 감소 필요를 의미합니다.">갭%</span></th>
-                    </tr>
-                        </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">
-                            {% for row in sell_list %}
-                            <tr>
-                                <td class="px-4 py-2">{{ row.ticker }}</td>
-                                <td class="px-4 py-2">{{ "%.2f"|format(row['현재%']) }}</td>
-                                <td class="px-4 py-2">{{ "%.2f"|format(row['갭%']) }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <p class="text-gray-500 text-sm">축소 대상 없음</p>
-                {% endif %}
-            </div>
+        <h3 class="text-lg font-semibold mb-4">📌 IPS 기반 운영 제안</h3>
 
-            <!-- Buy List -->
-            <div>
-                <h4 class="font-medium mb-2">(2) 증가 — 양수 갭 (현금중립 스케일링)</h4>
-                {% if buy_list is defined and buy_list|length > 0 %}
-                <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200 text-sm">
-                        <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-4 py-2 text-left">티커</th>
-                        <th class="px-4 py-2 text-left"><span class="tooltip-trigger" data-tooltip="현재 포트폴리오에서의 자산 비중입니다.">현재%</span></th>
-                        <th class="px-4 py-2 text-left"><span class="tooltip-trigger" data-tooltip="목표 비중과 현재 비중의 차이입니다. 양수면 증가 필요, 음수면 감소 필요를 의미합니다.">갭%</span></th>
-                    </tr>
-                        </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">
-                            {% for row in buy_list %}
-                            <tr>
-                                <td class="px-4 py-2">{{ row.ticker }}</td>
-                                <td class="px-4 py-2">{{ "%.2f"|format(row['현재%']) }}</td>
-                                <td class="px-4 py-2">{{ "%.2f"|format(row['갭%']) }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <p class="text-gray-500 text-sm">증가 대상 없음</p>
-                {% endif %}
-            </div>
+        <div class="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded mb-4">
+            <p class="text-sm">
+                이 결과는 즉시 매매 지시가 아니라 정기매수 배분 조정과 포트폴리오 점검을 위한 참고입니다.
+                즉시매수와 즉시매도는 예외 상황으로만 검토합니다.
+            </p>
         </div>
 
-        <!-- Fine Tune List -->
-        <div>
-            <h4 class="font-medium mb-2">(3) 세부 조정 — Q1/Q2 작은 조정 (|갭| ≤ 1%)</h4>
-            {% if fine_tune_list is defined and fine_tune_list|length > 0 %}
+        <div class="space-y-5">
+            <section>
+                <h4 class="font-medium mb-2">(1) 정기매수 증액 후보</h4>
+                {{ ips_table(increase_dca_list, "정기매수 증액 후보 없음") }}
+            </section>
+            <section>
+                <h4 class="font-medium mb-2">(2) 정기매수 감액/중단 후보</h4>
+                {{ ips_table(decrease_dca_list, "정기매수 감액/중단 후보 없음") }}
+            </section>
+            <section>
+                <h4 class="font-medium mb-2">(3) 투자 논리 점검 후보</h4>
+                {{ ips_table(review_thesis_list, "투자 논리 점검 후보 없음") }}
+            </section>
+            <section>
+                <h4 class="font-medium mb-2">(4) 유지·관찰</h4>
+                {{ ips_table(hold_observe_list, "유지·관찰 대상 없음") }}
+            </section>
+            <section>
+                <h4 class="font-medium mb-2">(5) 예외적 리밸런싱 매도 검토</h4>
+                {{ ips_table(consider_sell_list, "예외적 리밸런싱 매도 검토 대상 없음") }}
+            </section>
+            <section>
+                <h4 class="font-medium mb-2">(6) 행동 보류</h4>
+                {{ ips_table(block_action_list, "행동 보류 대상 없음") }}
+            </section>
+        </div>
+
+        <details class="mt-6">
+            <summary class="cursor-pointer font-medium text-gray-700">기존 계산 기준 상세 보기</summary>
             <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200 text-sm">
+                <table class="min-w-full divide-y divide-gray-200 text-sm mt-3">
                     <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-4 py-2 text-left">티커</th>
-                        <th class="px-4 py-2 text-left"><span class="tooltip-trigger" data-tooltip="현재 포트폴리오에서의 자산 비중입니다.">현재%</span></th>
-                        <th class="px-4 py-2 text-left"><span class="tooltip-trigger" data-tooltip="목표 비중과 현재 비중의 차이입니다. 양수면 증가 필요, 음수면 감소 필요를 의미합니다.">갭%</span></th>
-                    </tr>
+                        <tr>
+                            <th class="px-4 py-2 text-left">구분</th>
+                            <th class="px-4 py-2 text-left">티커</th>
+                            <th class="px-4 py-2 text-left">현재%</th>
+                            <th class="px-4 py-2 text-left">갭%</th>
+                        </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
+                        {% for row in sell_list %}
+                        <tr>
+                            <td class="px-4 py-2">축소/청산</td>
+                            <td class="px-4 py-2">{{ row.ticker }}</td>
+                            <td class="px-4 py-2">{{ "%.2f"|format(row['현재%']) }}</td>
+                            <td class="px-4 py-2">{{ "%.2f"|format(row['갭%']) }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% for row in buy_list %}
+                        <tr>
+                            <td class="px-4 py-2">증가</td>
+                            <td class="px-4 py-2">{{ row.ticker }}</td>
+                            <td class="px-4 py-2">{{ "%.2f"|format(row['현재%']) }}</td>
+                            <td class="px-4 py-2">{{ "%.2f"|format(row['갭%']) }}</td>
+                        </tr>
+                        {% endfor %}
                         {% for row in fine_tune_list %}
                         <tr>
+                            <td class="px-4 py-2">세부 조정</td>
                             <td class="px-4 py-2">{{ row.ticker }}</td>
                             <td class="px-4 py-2">{{ "%.2f"|format(row['현재%']) }}</td>
                             <td class="px-4 py-2">{{ "%.2f"|format(row['갭%']) }}</td>
@@ -96,10 +156,7 @@
                     </tbody>
                 </table>
             </div>
-            {% else %}
-            <p class="text-gray-500 text-sm">미세 조정 대상 없음</p>
-            {% endif %}
-        </div>
+        </details>
     </div>
 
     <!-- RC Violations -->
@@ -139,216 +196,14 @@
     <!-- Download Links -->
     <div>
         <h3 class="text-lg font-semibold mb-4">⬇️ 출력 다운로드</h3>
-        <div class="flex gap-4">
+        <div class="flex flex-wrap gap-4">
             <a href="/api/evaluation/download-csv?type=metrics" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">보강된 메트릭 다운로드 (CSV)</a>
             <a href="/api/evaluation/download-csv?type=proposal" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">실행 계획 다운로드 (CSV)</a>
+            <a href="/api/evaluation/download-csv?type=ips_actions" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">IPS 액션 다운로드 (CSV)</a>
+            <a href="/api/evaluation/download-csv?type=group_summary" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">그룹 요약 다운로드 (CSV)</a>
         </div>
     </div>
 </div>
-
-<script>
-// Render Chart.js scatter chart
-// This function will be called after HTMX swaps the content
-// Make it globally accessible for HTMX event handlers
-window.initQuadrantChart = function() {
-    // Check if Chart.js is loaded
-    if (typeof Chart === 'undefined') {
-        console.error('Chart.js is not loaded');
-        setTimeout(initQuadrantChart, 100); // Retry after 100ms
-        return;
-    }
-    
-    // Check if canvas element exists
-    const canvas = document.getElementById('quadrant_chart');
-    if (!canvas) {
-        console.error('Canvas element not found');
-        return;
-    }
-    
-    // Destroy existing chart if it exists
-    if (canvas.chart) {
-        canvas.chart.destroy();
-    }
-    
-    try {
-        // Parse JSON data (it's already a JSON string from backend)
-        const chartDataJson = {{ quadrant_chart_json|safe }};
-        const chartData = typeof chartDataJson === 'string' ? JSON.parse(chartDataJson) : chartDataJson;
-        
-        if (!chartData || !chartData.datasets || !chartData.datasets[0]) {
-            console.error('Invalid chart data:', chartData);
-            return;
-        }
-        
-        const ctx = canvas.getContext('2d');
-        
-        // Register plugins
-        if (typeof ChartDataLabels !== 'undefined') {
-            Chart.register(ChartDataLabels);
-        }
-        
-        // Prepare datasets with ticker labels
-        const scatterDataset = chartData.datasets[0];
-        const scatterData = scatterDataset.data.map(point => ({
-            x: point.x,
-            y: point.y,
-            ticker: point.ticker
-        }));
-        
-        // Calculate data range for threshold lines
-        const xValues = scatterData.map(p => p.x);
-        const yValues = scatterData.map(p => p.y);
-        const xMin = Math.min(...xValues, 0);
-        const xMax = Math.max(...xValues, chartData.thresholds.rc_over * 1.2);
-        const yMin = Math.min(...yValues, 0);
-        const yMax = Math.max(...yValues, chartData.thresholds.efficiency * 1.2);
-        
-        // Create scatter chart with threshold lines as additional datasets
-        canvas.chart = new Chart(ctx, {
-            type: 'scatter',
-            data: {
-                datasets: [
-                    {
-                        label: scatterDataset.label,
-                        data: scatterData,
-                        backgroundColor: scatterDataset.backgroundColor,
-                        borderColor: scatterDataset.borderColor,
-                        pointRadius: scatterDataset.pointRadius,
-                        pointHoverRadius: scatterDataset.pointHoverRadius
-                    },
-                    // Vertical threshold line (RC_Over)
-                    {
-                        label: 'RC_Over Thresh',
-                        data: [
-                            {x: chartData.thresholds.rc_over, y: yMin},
-                            {x: chartData.thresholds.rc_over, y: yMax}
-                        ],
-                        borderColor: 'red',
-                        borderDash: [5, 5],
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        pointHoverRadius: 0,
-                        fill: false,
-                        showLine: true,
-                        tension: 0
-                    },
-                    // Horizontal threshold line (Efficiency)
-                    {
-                        label: 'E Thresh',
-                        data: [
-                            {x: xMin, y: chartData.thresholds.efficiency},
-                            {x: xMax, y: chartData.thresholds.efficiency}
-                        ],
-                        borderColor: 'red',
-                        borderDash: [5, 5],
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        pointHoverRadius: 0,
-                        fill: false,
-                        showLine: true,
-                        tension: 0
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: chartData.labels.title,
-                        font: {
-                            size: 16,
-                            weight: 'bold'
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const point = context.raw;
-                                if (point.ticker) {
-                                    return [
-                                        `티커: ${point.ticker}`,
-                                        `RC_Over: ${point.x.toFixed(2)}%`,
-                                        `E: ${point.y.toFixed(2)}`
-                                    ];
-                                }
-                                return context.dataset.label + ': ' + 
-                                    (context.parsed.x !== undefined ? `X: ${context.parsed.x.toFixed(2)}` : '') +
-                                    (context.parsed.y !== undefined ? ` Y: ${context.parsed.y.toFixed(2)}` : '');
-                            }
-                        }
-                    },
-                    legend: {
-                        display: true,
-                        labels: {
-                            filter: function(item, chart) {
-                                // Hide threshold lines from legend
-                                return !item.text.includes('Thresh');
-                            }
-                        }
-                    },
-                    datalabels: {
-                        anchor: 'top',
-                        align: 'top',
-                        offset: 5,
-                        font: {
-                            size: 8
-                        },
-                        formatter: function(value, context) {
-                            // Only show ticker labels for scatter points
-                            return context.raw && context.raw.ticker ? context.raw.ticker : '';
-                        },
-                        display: function(context) {
-                            // Only display labels for scatter points (first dataset) that have ticker property
-                            return context.datasetIndex === 0 && 
-                                   context.raw && 
-                                   context.raw.ticker !== undefined;
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        title: {
-                            display: true,
-                            text: chartData.labels.x
-                        },
-                        beginAtZero: true
-                    },
-                    y: {
-                        title: {
-                            display: true,
-                            text: chartData.labels.y
-                        },
-                        beginAtZero: true
-                    }
-                }
-            }
-        });
-    } catch (error) {
-        console.error('Error rendering chart:', error);
-        console.error('Chart data:', {{ quadrant_chart_json|safe }});
-    }
-};
-
-// Initialize chart immediately (for direct page load)
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initQuadrantChart);
-} else {
-    initQuadrantChart();
-}
-
-// Also initialize when HTMX swaps content
-document.body.addEventListener('htmx:afterSwap', function(event) {
-    if (event.detail.target.id === 'evaluation_results') {
-        setTimeout(initQuadrantChart, 50); // Small delay to ensure DOM is ready
-        // Initialize tooltips after evaluation results are displayed
-        if (typeof initTooltips === 'function') {
-            setTimeout(initTooltips, 100);
-        }
-    }
-});
-</script>
 {% else %}
 <p class="text-gray-500 text-sm">평가 결과가 없습니다.</p>
 {% endif %}

@@ -29,7 +29,7 @@ async def run_analysis_endpoint(
         momentum_weight: 모멘텀 가중치
 
     Returns:
-        HTML 부분 (metrics_table.html, quadrant_chart.html)
+        HTML 부분 (analysis_results.html)
     """
     session_id = request.state.session_id
 
