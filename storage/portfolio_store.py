@@ -71,6 +71,29 @@ def _ensure_asset(conn, ticker: str) -> int:
     return int(cursor.lastrowid)
 
 
+def _state_payload(session_state: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
+    analysis_payload = None
+    if session_state.get("metrics_df"):
+        analysis_payload = {
+            "metrics_df": session_state.get("metrics_df") or [],
+            "portfolio_metrics": session_state.get("portfolio_metrics"),
+            "benchmark_metrics": session_state.get("benchmark_metrics"),
+            "missing_tickers": session_state.get("missing_tickers") or [],
+        }
+
+    evaluation_payload = None
+    if session_state.get("proposal_df"):
+        evaluation_payload = {
+            "proposal_df": session_state.get("proposal_df") or [],
+            "ips_action_df": session_state.get("ips_action_df") or [],
+            "group_summary_df": session_state.get("group_summary_df") or [],
+            "rc_violations": session_state.get("rc_violations") or [],
+            "ips_config_snapshot": session_state.get("ips_config_snapshot"),
+        }
+
+    return session_state, analysis_payload, evaluation_payload
+
+
 def create_portfolio(name: str, description: str = "") -> dict[str, Any]:
     initialize_database()
     name = name.strip()
@@ -185,6 +208,66 @@ def get_portfolio(portfolio_id: int) -> dict[str, Any] | None:
             (portfolio_id,),
         ).fetchone()
     return _portfolio_row(row) if row else None
+
+
+def save_current_state(
+    portfolio_id: int,
+    session_data: dict[str, Any],
+) -> dict[str, Any]:
+    initialize_database()
+    if get_portfolio(portfolio_id) is None:
+        raise StorageError("포트폴리오를 찾을 수 없습니다.")
+    asset_rows = session_data.get("asset_df")
+    if not asset_rows:
+        raise StorageError("저장할 포트폴리오 입력이 없습니다.")
+
+    state_json = _json_dump(session_data)
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO portfolio_current_states (portfolio_id, state_json, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(portfolio_id) DO UPDATE SET
+                state_json = excluded.state_json,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (portfolio_id, state_json),
+        )
+        conn.execute(
+            "UPDATE portfolios SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (portfolio_id,),
+        )
+
+    current_state = get_current_state(portfolio_id)
+    if current_state is None:
+        raise StorageError("현재 상태 저장 결과를 찾을 수 없습니다.")
+    return current_state
+
+
+def get_current_state(portfolio_id: int) -> dict[str, Any] | None:
+    initialize_database()
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT portfolio_id, state_json, updated_at
+            FROM portfolio_current_states
+            WHERE portfolio_id = ?
+            """,
+            (portfolio_id,),
+        ).fetchone()
+    if row is None:
+        return None
+
+    session_state, analysis_payload, evaluation_payload = _state_payload(
+        _json_load(row["state_json"], {})
+    )
+    return {
+        "portfolio_id": row["portfolio_id"],
+        "updated_at": row["updated_at"],
+        "session_state": session_state,
+        "analysis": analysis_payload,
+        "evaluation": evaluation_payload,
+    }
 
 
 def _portfolio_row(row) -> dict[str, Any]:
