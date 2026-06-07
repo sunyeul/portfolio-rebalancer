@@ -771,129 +771,13 @@ export function App() {
                 </button>
               </div>
               <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
-                {savedSnapshots.map((snapshot) =>
-                  editingSnapshotId === snapshot.id ? (
-                    <div key={snapshot.id} className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/70 p-3">
-                      <div className="grid gap-2 sm:grid-cols-[1fr_1.2fr]">
-                        <input
-                          className="table-input w-full"
-                          value={editingSnapshotName}
-                          placeholder="스냅샷 이름"
-                          onChange={(event) => setEditingSnapshotName(event.target.value)}
-                        />
-                        <input
-                          className="table-input w-full"
-                          value={editingSnapshotNote}
-                          placeholder="메모"
-                          onChange={(event) => setEditingSnapshotNote(event.target.value)}
-                        />
-                      </div>
-                      <div className="overflow-x-auto rounded-lg border border-blue-100 bg-white">
-                        <div className="min-w-[920px] space-y-2 p-3">
-                          <div className="grid grid-cols-[0.8fr_0.7fr_0.8fr_1.1fr_1fr_0.7fr_1fr_36px] gap-2 px-1 text-xs font-bold uppercase text-slate-500">
-                            <span>티커</span>
-                            <span className="text-right">비중</span>
-                            <span className="text-right">수익률</span>
-                            <span>그룹</span>
-                            <span>역할</span>
-                            <span>DCA</span>
-                            <span>논리 상태</span>
-                            <span />
-                          </div>
-                          {editingSnapshotRows.map((row, index) => (
-                            <div key={`${row.ticker}-${index}`} className="grid grid-cols-[0.8fr_0.7fr_0.8fr_1.1fr_1fr_0.7fr_1fr_36px] items-center gap-2">
-                              <input className="table-input font-bold text-blue-700" value={String(row.ticker ?? '')} placeholder="VOO" onChange={(event) => updateEditingSnapshotRow(index, 'ticker', event.target.value)} />
-                              <input className="table-input text-right" value={String(row.allocation ?? '')} placeholder="40" type="number" onChange={(event) => updateEditingSnapshotRow(index, 'allocation', event.target.value)} />
-                              <input className="table-input text-right" value={String(row.return_total ?? '')} placeholder="%" type="number" onChange={(event) => updateEditingSnapshotRow(index, 'return_total', event.target.value)} />
-                              <select className="table-input" value={String(row.group ?? '')} onChange={(event) => updateEditingSnapshotRow(index, 'group', event.target.value)}>
-                                <option value="">그룹 선택</option>
-                                {activeGroupOptions.map((group) => (
-                                  <option key={group.value} value={group.value}>
-                                    {group.label}
-                                  </option>
-                                ))}
-                                {row.group && !groupOptions.some((group) => group.value === row.group) ? (
-                                  <option value={String(row.group)}>기타: {row.group}</option>
-                                ) : null}
-                              </select>
-                              <select className="table-input" value={String(row.role ?? '')} onChange={(event) => updateEditingSnapshotRow(index, 'role', event.target.value)}>
-                                <option value="">역할 선택</option>
-                                {activeRoleOptions.map((role) => (
-                                  <option key={role.value} value={role.value}>
-                                    {role.label}
-                                  </option>
-                                ))}
-                                {row.role && !roleOptions.some((role) => role.value === row.role) ? (
-                                  <option value={String(row.role)}>기타: {row.role}</option>
-                                ) : null}
-                              </select>
-                              <select className="table-input" value={String(row.dca_enabled ?? true)} onChange={(event) => updateEditingSnapshotRow(index, 'dca_enabled', event.target.value === 'true')}>
-                                <option value="true">ON</option>
-                                <option value="false">OFF</option>
-                              </select>
-                              <select className="table-input" value={String(row.thesis_status ?? '')} onChange={(event) => updateEditingSnapshotRow(index, 'thesis_status', event.target.value)}>
-                                <option value="">상태 선택</option>
-                                {activeThesisStatusOptions.map((status) => (
-                                  <option key={status.value} value={status.value}>
-                                    {status.label}
-                                  </option>
-                                ))}
-                                {row.thesis_status && !thesisStatusOptions.some((status) => status.value === row.thesis_status) ? (
-                                  <option value={String(row.thesis_status)}>기타: {row.thesis_status}</option>
-                                ) : null}
-                              </select>
-                              <button
-                                type="button"
-                                className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-700"
-                                title="행 삭제"
-                                onClick={() => setEditingSnapshotRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          ))}
-                          {!editingSnapshotRows.length && (
-                            <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500">
-                              저장할 포지션이 없습니다.
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <button
-                          type="button"
-                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:border-blue-300 hover:text-blue-700"
-                          onClick={() => setEditingSnapshotRows((current) => [...current, blankRow()])}
-                        >
-                          <Plus className="h-4 w-4" />
-                          행 추가
-                        </button>
-                        <div className="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 transition hover:bg-white hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-300"
-                          title="취소"
-                          disabled={updateSnapshotMutation.isPending}
-                          onClick={cancelEditingSnapshot}
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          className="grid h-9 w-9 place-items-center rounded-lg bg-blue-800 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                          title="저장"
-                          disabled={updateSnapshotMutation.isPending || !editingSnapshotRows.some((row) => row.ticker && row.allocation !== '')}
-                          onClick={saveEditedSnapshot}
-                        >
-                          {updateSnapshotMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Save className="h-4 w-4" />}
-                        </button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
+                {savedSnapshots.map((snapshot) => (
                     <div
                       key={snapshot.id}
-                      className="flex items-center gap-2 rounded-lg border border-slate-200 px-2 py-2 text-sm transition hover:border-blue-300 hover:bg-blue-50"
+                      className={cx(
+                        'flex items-center gap-2 rounded-lg border px-2 py-2 text-sm transition hover:border-blue-300 hover:bg-blue-50',
+                        editingSnapshotId === snapshot.id ? 'border-blue-300 bg-blue-50' : 'border-slate-200'
+                      )}
                     >
                       <button
                         type="button"
@@ -931,8 +815,7 @@ export function App() {
                         {deletingSnapshotId === snapshot.id ? <Loader2 className="spin h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
                       </button>
                     </div>
-                  )
-                )}
+                ))}
                 {!savedSnapshots.length && (
                   <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500">
                     저장 이력이 없습니다.
@@ -1430,6 +1313,144 @@ export function App() {
           )}
         </div>
       </section>
+      {editingSnapshotId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-labelledby="snapshot-edit-title" onClick={cancelEditingSnapshot}>
+          <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex flex-col gap-3 border-b border-slate-200 p-5 md:flex-row md:items-start md:justify-between">
+              <div>
+                <h3 id="snapshot-edit-title" className="text-xl font-semibold text-slate-950">스냅샷 편집</h3>
+                <p className="mt-1 text-sm text-slate-500">저장하면 기존 분석/평가 결과는 초기화되고 스냅샷 상태가 입력으로 돌아갑니다.</p>
+              </div>
+              <button
+                type="button"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-300"
+                title="닫기"
+                disabled={updateSnapshotMutation.isPending}
+                onClick={cancelEditingSnapshot}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+              <div className="grid gap-3 md:grid-cols-[1fr_1.4fr]">
+                <input
+                  className="table-input w-full"
+                  value={editingSnapshotName}
+                  placeholder="스냅샷 이름"
+                  onChange={(event) => setEditingSnapshotName(event.target.value)}
+                />
+                <input
+                  className="table-input w-full"
+                  value={editingSnapshotNote}
+                  placeholder="메모"
+                  onChange={(event) => setEditingSnapshotNote(event.target.value)}
+                />
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                <div className="min-w-[920px] space-y-2 p-3">
+                  <div className="grid grid-cols-[0.8fr_0.7fr_0.8fr_1.1fr_1fr_0.7fr_1fr_36px] gap-2 px-1 text-xs font-bold uppercase text-slate-500">
+                    <span>티커</span>
+                    <span className="text-right">비중</span>
+                    <span className="text-right">수익률</span>
+                    <span>그룹</span>
+                    <span>역할</span>
+                    <span>DCA</span>
+                    <span>논리 상태</span>
+                    <span />
+                  </div>
+                  {editingSnapshotRows.map((row, index) => (
+                    <div key={`${row.ticker}-${index}`} className="grid grid-cols-[0.8fr_0.7fr_0.8fr_1.1fr_1fr_0.7fr_1fr_36px] items-center gap-2">
+                      <input className="table-input font-bold text-blue-700" value={String(row.ticker ?? '')} placeholder="VOO" onChange={(event) => updateEditingSnapshotRow(index, 'ticker', event.target.value)} />
+                      <input className="table-input text-right" value={String(row.allocation ?? '')} placeholder="40" type="number" onChange={(event) => updateEditingSnapshotRow(index, 'allocation', event.target.value)} />
+                      <input className="table-input text-right" value={String(row.return_total ?? '')} placeholder="%" type="number" onChange={(event) => updateEditingSnapshotRow(index, 'return_total', event.target.value)} />
+                      <select className="table-input" value={String(row.group ?? '')} onChange={(event) => updateEditingSnapshotRow(index, 'group', event.target.value)}>
+                        <option value="">그룹 선택</option>
+                        {activeGroupOptions.map((group) => (
+                          <option key={group.value} value={group.value}>
+                            {group.label}
+                          </option>
+                        ))}
+                        {row.group && !groupOptions.some((group) => group.value === row.group) ? (
+                          <option value={String(row.group)}>기타: {row.group}</option>
+                        ) : null}
+                      </select>
+                      <select className="table-input" value={String(row.role ?? '')} onChange={(event) => updateEditingSnapshotRow(index, 'role', event.target.value)}>
+                        <option value="">역할 선택</option>
+                        {activeRoleOptions.map((role) => (
+                          <option key={role.value} value={role.value}>
+                            {role.label}
+                          </option>
+                        ))}
+                        {row.role && !roleOptions.some((role) => role.value === row.role) ? (
+                          <option value={String(row.role)}>기타: {row.role}</option>
+                        ) : null}
+                      </select>
+                      <select className="table-input" value={String(row.dca_enabled ?? true)} onChange={(event) => updateEditingSnapshotRow(index, 'dca_enabled', event.target.value === 'true')}>
+                        <option value="true">ON</option>
+                        <option value="false">OFF</option>
+                      </select>
+                      <select className="table-input" value={String(row.thesis_status ?? '')} onChange={(event) => updateEditingSnapshotRow(index, 'thesis_status', event.target.value)}>
+                        <option value="">상태 선택</option>
+                        {activeThesisStatusOptions.map((status) => (
+                          <option key={status.value} value={status.value}>
+                            {status.label}
+                          </option>
+                        ))}
+                        {row.thesis_status && !thesisStatusOptions.some((status) => status.value === row.thesis_status) ? (
+                          <option value={String(row.thesis_status)}>기타: {row.thesis_status}</option>
+                        ) : null}
+                      </select>
+                      <button
+                        type="button"
+                        className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-700"
+                        title="행 삭제"
+                        onClick={() => setEditingSnapshotRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                  {!editingSnapshotRows.length && (
+                    <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500">
+                      저장할 포지션이 없습니다.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 p-5 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:border-blue-300 hover:text-blue-700"
+                onClick={() => setEditingSnapshotRows((current) => [...current, blankRow()])}
+              >
+                <Plus className="h-4 w-4" />
+                행 추가
+              </button>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+                  disabled={updateSnapshotMutation.isPending}
+                  onClick={cancelEditingSnapshot}
+                >
+                  <X className="h-4 w-4" />
+                  취소
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  disabled={updateSnapshotMutation.isPending || !editingSnapshotRows.some((row) => row.ticker && row.allocation !== '')}
+                  onClick={saveEditedSnapshot}
+                >
+                  {updateSnapshotMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Save className="h-4 w-4" />}
+                  저장
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
