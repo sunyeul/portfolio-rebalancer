@@ -78,16 +78,14 @@ export type ConfigOption = {
   label: string;
   is_active: boolean;
   sort_order: number;
-  group_type?: string;
 };
 
 export type ConfigOptionsResponse = {
-  groups: ConfigOption[];
   thesis_statuses: ConfigOption[];
 };
 
 export type TargetAllocation = {
-  group_type: string;
+  group: string;
   min: number;
   target: number;
   max: number;
@@ -296,33 +294,6 @@ export function getConfigOptions() {
 export function getIpsConfig() {
   return requestJson<IpsConfigResponse>('/api/v1/config/ips', {
     method: 'GET'
-  });
-}
-
-export function saveConfigOption(
-  table: 'groups' | 'thesis_statuses',
-  payload: {
-    code: string;
-    label: string;
-    sort_order?: number;
-    is_active?: boolean;
-    group_type?: string;
-  }
-) {
-  return requestJson<{ option: ConfigOption }>(`/api/v1/config/${table}`, {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
-}
-
-export function setConfigOptionActive(
-  table: 'groups' | 'thesis_statuses',
-  code: string,
-  is_active: boolean
-) {
-  return requestJson<{ option: ConfigOption }>(`/api/v1/config/${table}/${code}/active`, {
-    method: 'PATCH',
-    body: JSON.stringify({ is_active })
   });
 }
 

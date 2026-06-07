@@ -60,12 +60,10 @@ import {
   loadSnapshot,
   runAnalysis,
   runEvaluation,
-  saveConfigOption,
   saveCurrentState,
   saveIpsRules,
   saveSnapshot,
   saveTargetAllocations,
-  setConfigOptionActive,
   submitPortfolio,
   updateSnapshot,
   uploadPortfolioCsv
@@ -74,13 +72,13 @@ import { blankRow, parsePortfolioText } from './lib/parser';
 import { type PortfolioRowInput, type SettingsValues, settingsSchema } from './lib/schemas';
 
 const sampleText = 'VOO 40\nQQQ 25\nSOXX 15\nUFO 3\nIONQ 2';
-const groupTypes = ['core', 'satellite', 'defensive', 'cash', 'unknown'];
+const fixedGroupOptions = [
+  { value: 'core', label: '코어' },
+  { value: 'satellite', label: '위성' },
+  { value: 'cash', label: '현금' },
+  { value: 'unclassified', label: '미분류' }
+] as const;
 type AppView = 'workbench' | 'settings';
-type OptionTable = 'groups' | 'thesis_statuses';
-type EditableOption = {
-  table: OptionTable;
-  option: ConfigOption;
-};
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
@@ -91,6 +89,11 @@ function optionLabel(options: ConfigOption[], value: string | null | undefined) 
   const option = options.find((item) => item.value === value);
   if (!option) return value;
   return option.is_active ? option.label : `${option.label} (비활성)`;
+}
+
+function groupLabel(value: string | null | undefined) {
+  const option = fixedGroupOptions.find((item) => item.value === value);
+  return option?.label ?? '미분류';
 }
 
 function pct(value: number | null | undefined, fromUnit = true) {
@@ -185,11 +188,6 @@ export function App() {
   const [editingSnapshotRows, setEditingSnapshotRows] = useState<PortfolioRowInput[]>([]);
   const [deletingSnapshotId, setDeletingSnapshotId] = useState<number | null>(null);
   const [appliedRowsSignature, setAppliedRowsSignature] = useState(() => rowsSignature(parsePortfolioText(sampleText)));
-  const [newOptionTable, setNewOptionTable] = useState<OptionTable>('groups');
-  const [newOptionCode, setNewOptionCode] = useState('');
-  const [newOptionLabel, setNewOptionLabel] = useState('');
-  const [newOptionGroupType, setNewOptionGroupType] = useState('satellite');
-  const [editingOption, setEditingOption] = useState<EditableOption | null>(null);
   const [targetAllocationRows, setTargetAllocationRows] = useState<TargetAllocation[]>([]);
   const [actionPriorityRows, setActionPriorityRows] = useState<ActionPriority[]>([]);
   const [rulesJson, setRulesJson] = useState('[]');
@@ -224,9 +222,7 @@ export function App() {
     retry: false
   });
   const savedSnapshots = snapshotsQuery.data?.snapshots ?? [];
-  const groupOptions = configOptionsQuery.data?.groups ?? [];
   const thesisStatusOptions = configOptionsQuery.data?.thesis_statuses ?? [];
-  const activeGroupOptions = groupOptions.filter((option) => option.is_active);
   const activeThesisStatusOptions = thesisStatusOptions.filter((option) => option.is_active);
 
   useEffect(() => {
@@ -416,36 +412,6 @@ export function App() {
     }
   });
 
-  const saveOptionMutation = useMutation({
-    mutationFn: () =>
-      saveConfigOption('groups', {
-        code: newOptionCode,
-        label: newOptionLabel,
-        is_active: editingOption?.option.is_active ?? true,
-        group_type: newOptionGroupType
-      }),
-    onSuccess: async () => {
-      setNewOptionCode('');
-      setNewOptionLabel('');
-      setEditingOption(null);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['config-options'] }),
-        queryClient.invalidateQueries({ queryKey: ['ips-config'] })
-      ]);
-    }
-  });
-
-  const deleteOptionMutation = useMutation({
-    mutationFn: ({ table, code }: { table: OptionTable; code: string }) =>
-      setConfigOptionActive(table, code, false),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['config-options'] }),
-        queryClient.invalidateQueries({ queryKey: ['ips-config'] })
-      ]);
-    }
-  });
-
   const saveTargetsMutation = useMutation({
     mutationFn: () => saveTargetAllocations(targetAllocationRows),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ips-config'] })
@@ -478,9 +444,9 @@ export function App() {
       { accessorKey: 'ticker', header: '티커' },
       { accessorKey: 'allocation', header: '입력 비중', cell: ({ row }) => pct(row.original.allocation, false) },
       { accessorKey: 'weight', header: '정규화 비중', cell: ({ row }) => pct(row.original.weight) },
-      { accessorKey: 'group', header: '그룹', cell: ({ row }) => optionLabel(groupOptions, row.original.group) }
+      { accessorKey: 'group', header: '그룹', cell: ({ row }) => groupLabel(row.original.group) }
     ],
-    [groupOptions]
+    []
   );
 
   const metricColumns = useMemo<ColumnDef<MetricRow>[]>(
@@ -490,9 +456,16 @@ export function App() {
       nullableNumberColumn('cagr', 'CAGR', (row) => row.cagr, pct),
       nullableNumberColumn('volatility', '변동성', (row) => row.volatility, pct),
       nullableNumberColumn('sharpe', '샤프', (row) => row.sharpe, num),
+      nullableNumberColumn('information_ratio', 'IR', (row) => row.information_ratio, num),
+      nullableNumberColumn('beta', '베타', (row) => row.beta, num),
+      nullableNumberColumn('alpha', '알파', (row) => row.alpha, pct),
       nullableNumberColumn('risk_contribution', '위험기여도', (row) => row.risk_contribution, pct),
+      nullableNumberColumn('return_total', '기간 수익률', (row) => row.return_total, pct),
       nullableNumberColumn('efficiency_score', 'E', (row) => row.efficiency_score, num),
-      nullableNumberColumn('observation_count', '관측수', (row) => row.observation_count, (value) => (value === null || value === undefined ? 'N/A' : String(value)))
+      { accessorKey: 'data_start', header: '시작일' },
+      { accessorKey: 'data_end', header: '종료일' },
+      nullableNumberColumn('observation_count', '관측수', (row) => row.observation_count, (value) => (value === null || value === undefined ? 'N/A' : String(value))),
+      nullableNumberColumn('missing_ratio', '결측률', (row) => row.missing_ratio, pct)
     ],
     []
   );
@@ -502,11 +475,29 @@ export function App() {
       { accessorKey: 'ticker', header: '티커' },
       { accessorKey: 'current_weight_pct', header: '현재', cell: ({ row }) => pct(row.original.current_weight_pct, false) },
       { accessorKey: 'target_weight_pct', header: '목표', cell: ({ row }) => pct(row.original.target_weight_pct, false) },
+      { accessorKey: 'gap_pct', header: '갭', cell: ({ row }) => pct(row.original.gap_pct, false) },
       { accessorKey: 'suggested_trade_pct', header: '제안조정', cell: ({ row }) => pct(row.original.suggested_trade_pct, false) },
+      { accessorKey: 'return_total_pct', header: '기간 수익률', cell: ({ row }) => pct(row.original.return_total_pct, false) },
       nullableNumberColumn('efficiency_score', 'E', (row) => row.efficiency_score, num),
       { accessorKey: 'rc_gap_pct', header: 'RC Gap', cell: ({ row }) => pct(row.original.rc_gap_pct, false) },
+      { accessorKey: 'rc_over_pct', header: 'RC Over', cell: ({ row }) => pct(row.original.rc_over_pct, false) },
       { accessorKey: 'should_execute', header: '실행', cell: ({ row }) => (row.original.should_execute ? '실행' : '보류') },
       { accessorKey: 'action_reason', header: '사유' }
+    ],
+    []
+  );
+
+  const actionColumns = useMemo<ColumnDef<Record<string, unknown>>[]>(
+    () => [
+      { accessorKey: 'ticker', header: '티커' },
+      { accessorKey: 'action_label', header: '액션' },
+      { accessorKey: 'next_step', header: '다음 행동' },
+      { accessorKey: 'reason_codes_text', header: '근거' },
+      { accessorKey: '판단사유', header: '판단 사유' },
+      { id: 'gap_pct', header: '갭', cell: ({ row }) => pct(valueFromRecord(row.original, '갭%'), false) },
+      { id: 'suggested_trade_pct', header: '제안조정', cell: ({ row }) => pct(valueFromRecord(row.original, '제안조정%'), false) },
+      { id: 'rc_gap_pct', header: 'RC Gap', cell: ({ row }) => pct(valueFromRecord(row.original, 'RC_Gap%'), false) },
+      { id: 'efficiency', header: 'E', cell: ({ row }) => num(valueFromRecord(row.original, 'E')) }
     ],
     []
   );
@@ -612,43 +603,13 @@ export function App() {
     deleteSnapshotMutation.mutate(snapshot.id);
   }
 
-  function saveNewOption() {
-    if (!newOptionCode.trim() || !newOptionLabel.trim()) return;
-    saveOptionMutation.mutate();
-  }
-
-  function startOptionEdit(table: OptionTable, option: ConfigOption) {
-    if (table !== 'groups') return;
-    setEditingOption({ table, option });
-    setNewOptionTable(table);
-    setNewOptionCode(option.value);
-    setNewOptionLabel(option.label);
-    setNewOptionGroupType(option.group_type ?? 'unknown');
-  }
-
-  function cancelOptionEdit() {
-    setEditingOption(null);
-    setNewOptionCode('');
-    setNewOptionLabel('');
-    setNewOptionGroupType('satellite');
-  }
-
-  function deleteOption(table: OptionTable, option: ConfigOption) {
-    if (table !== 'groups') return;
-    if (!window.confirm(`${option.label} 항목을 삭제할까요? 기존 데이터 참조를 위해 삭제 이력은 보존됩니다.`)) return;
-    if (editingOption?.table === table && editingOption.option.value === option.value) {
-      cancelOptionEdit();
-    }
-    deleteOptionMutation.mutate({ table, code: option.value });
-  }
-
   function updateTargetAllocation(index: number, field: keyof TargetAllocation, value: string) {
     setTargetAllocationRows((current) =>
       current.map((row, rowIndex) =>
         rowIndex === index
           ? {
               ...row,
-              [field]: field === 'group_type' ? value : Number(value)
+              [field]: field === 'group' ? value : Number(value)
             }
           : row
       )
@@ -678,8 +639,8 @@ export function App() {
     ? [
         evaluation.group_summary.reduce<Record<string, string | number>>(
           (acc, row) => {
-            const groupType = textFromRecord(row, 'group_type');
-            acc[groupType] = Number((valueFromRecord(row, 'weight') * 100).toFixed(2));
+            const group = textFromRecord(row, 'group');
+            acc[groupLabel(group)] = Number((valueFromRecord(row, 'weight') * 100).toFixed(2));
             return acc;
           },
           { label: '비중' }
@@ -735,7 +696,7 @@ export function App() {
             <p>
               {activeView === 'workbench'
                 ? 'Python 계산 코어를 JSON API로 호출하고, React에서 결과를 검토합니다.'
-                : '옵션과 IPS 정책을 관리하고 다음 평가에 적용합니다.'}
+                : 'IPS 목표와 투자 논리 옵션을 관리하고 다음 평가에 적용합니다.'}
             </p>
             <nav className="view-tabs" aria-label="주요 화면">
               <button
@@ -907,86 +868,27 @@ export function App() {
             </div>
             <div className="grid gap-6 xl:grid-cols-2">
               <div className="space-y-4">
-                <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-                  <input className="table-input" value={newOptionCode} placeholder="code" disabled={editingOption !== null} onChange={(event) => setNewOptionCode(event.target.value)} />
-                  <input className="table-input" value={newOptionLabel} placeholder="표시명" onChange={(event) => setNewOptionLabel(event.target.value)} />
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                    disabled={!newOptionCode.trim() || !newOptionLabel.trim() || saveOptionMutation.isPending}
-                    onClick={saveNewOption}
-                  >
-                    {saveOptionMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : editingOption ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                    {editingOption ? '수정' : '저장'}
-                  </button>
-                </div>
-                {editingOption && (
-                  <div className="flex items-center justify-between gap-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900">
-                    <span className="min-w-0 truncate">
-                      <strong>{editingOption.option.label}</strong> 편집 중
-                    </span>
-                    <button type="button" className="inline-flex items-center gap-1 text-xs font-bold text-blue-800 hover:text-blue-950" onClick={cancelOptionEdit}>
-                      <X className="h-3.5 w-3.5" />
-                      취소
-                    </button>
-                  </div>
-                )}
-                {newOptionTable === 'groups' && (
-                  <select className="table-input max-w-xs" value={newOptionGroupType} onChange={(event) => setNewOptionGroupType(event.target.value)}>
-                    {groupTypes.map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </select>
-                )}
                 <div className="grid gap-3">
-                  {[
-                    ['groups', '그룹', groupOptions],
-                    ['thesis_statuses', '투자 논리 상태', thesisStatusOptions]
-                  ].map(([table, label, options]) => (
-                    <div key={String(table)}>
-                      <div className="mb-2 text-sm font-bold text-slate-700">{String(label)}</div>
-                      <div className="grid gap-2">
-                        {(options as ConfigOption[]).map((option) => {
-                          const canManageOption = table === 'groups';
-                          return (
-                            <div key={`${table}-${option.value}`} className="grid grid-cols-[1fr_auto] items-center gap-2 rounded-lg border border-slate-200 px-3 py-2">
-                              <span className="min-w-0 truncate text-sm text-slate-700">
-                                <strong>{option.label}</strong> · {option.value}
-                                {option.group_type ? ` · ${option.group_type}` : ''}
-                                {!option.is_active && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">삭제됨</span>}
-                              </span>
-                              {canManageOption && (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-bold text-blue-800 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                    title="편집"
-                                    disabled={saveOptionMutation.isPending || deleteOptionMutation.isPending}
-                                    onClick={() => startOptionEdit(table as OptionTable, option)}
-                                  >
-                                    <Edit3 className="h-4 w-4" />
-                                    편집
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                    title="삭제"
-                                    disabled={!option.is_active || deleteOptionMutation.isPending}
-                                    onClick={() => deleteOption(table as OptionTable, option)}
-                                  >
-                                    {deleteOptionMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
-                                    삭제
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                  <div>
+                    <div className="mb-2 text-sm font-bold text-slate-700">고정 그룹</div>
+                    <div className="grid gap-2">
+                      {fixedGroupOptions.map((option) => (
+                        <div key={option.value} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                          <strong>{option.label}</strong> · {option.value}
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
+                  <div>
+                    <div className="mb-2 text-sm font-bold text-slate-700">투자 논리 상태</div>
+                    <div className="grid gap-2">
+                      {thesisStatusOptions.map((option) => (
+                        <div key={`thesis-${option.value}`} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                          <strong>{option.label}</strong> · {option.value}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -995,9 +897,6 @@ export function App() {
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <h4 className="font-semibold text-slate-950">타입별 목표 비중</h4>
                     <div className="flex gap-2">
-                      <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold text-slate-700" onClick={() => setTargetAllocationRows((current) => [...current, { group_type: 'unknown', min: 0, target: 0, max: 0 }])}>
-                        행 추가
-                      </button>
                       <button type="button" className="rounded-lg bg-blue-800 px-3 py-2 text-xs font-bold text-white disabled:bg-slate-300" disabled={saveTargetsMutation.isPending} onClick={() => saveTargetsMutation.mutate()}>
                         저장
                       </button>
@@ -1005,8 +904,8 @@ export function App() {
                   </div>
                   <div className="space-y-2">
                     {targetAllocationRows.map((row, index) => (
-                      <div key={row.group_type} className="grid grid-cols-4 gap-2">
-                        <input className="table-input" value={row.group_type} onChange={(event) => updateTargetAllocation(index, 'group_type', event.target.value)} />
+                      <div key={row.group} className="grid grid-cols-4 gap-2">
+                        <input className="table-input" value={row.group} readOnly />
                         <input className="table-input" type="number" step="0.01" value={row.min} onChange={(event) => updateTargetAllocation(index, 'min', event.target.value)} />
                         <input className="table-input" type="number" step="0.01" value={row.target} onChange={(event) => updateTargetAllocation(index, 'target', event.target.value)} />
                         <input className="table-input" type="number" step="0.01" value={row.max} onChange={(event) => updateTargetAllocation(index, 'max', event.target.value)} />
@@ -1040,7 +939,7 @@ export function App() {
                   </div>
                   <textarea className="table-input min-h-32 w-full font-mono text-xs" value={rulesJson} onChange={(event) => setRulesJson(event.target.value)} />
                 </div>
-                <ErrorLine error={saveOptionMutation.error ?? deleteOptionMutation.error ?? saveTargetsMutation.error ?? saveRulesMutation.error ?? configOptionsQuery.error ?? ipsConfigQuery.error} />
+                <ErrorLine error={saveTargetsMutation.error ?? saveRulesMutation.error ?? configOptionsQuery.error ?? ipsConfigQuery.error} />
               </div>
             </div>
           </section>
@@ -1140,14 +1039,11 @@ export function App() {
                       <input className="table-input text-right" value={String(row.allocation ?? '')} placeholder="40" type="number" onChange={(event) => updateRow(index, 'allocation', event.target.value)} />
                       <select className="table-input" value={String(row.group ?? '')} onChange={(event) => updateRow(index, 'group', event.target.value)}>
                         <option value="">그룹 선택</option>
-                        {activeGroupOptions.map((group) => (
+                        {fixedGroupOptions.map((group) => (
                           <option key={group.value} value={group.value}>
                             {group.label}
                           </option>
                         ))}
-                        {row.group && !groupOptions.some((group) => group.value === row.group) ? (
-                          <option value={String(row.group)}>기타: {row.group}</option>
-                        ) : null}
                       </select>
                       <button
                         type="button"
@@ -1279,14 +1175,11 @@ export function App() {
                       <input className="table-input text-right" value={String(row.return_total ?? '')} placeholder="자동 계산" type="number" onChange={(event) => updateRow(index, 'return_total', event.target.value)} />
                       <select className="table-input" value={String(row.group ?? '')} onChange={(event) => updateRow(index, 'group', event.target.value)}>
                         <option value="">그룹 선택</option>
-                        {activeGroupOptions.map((group) => (
+                        {fixedGroupOptions.map((group) => (
                           <option key={group.value} value={group.value}>
                             {group.label}
                           </option>
                         ))}
-                        {row.group && !groupOptions.some((group) => group.value === row.group) ? (
-                          <option value={String(row.group)}>기타: {row.group}</option>
-                        ) : null}
                       </select>
                       <label className="grid place-items-center">
                         <input className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700" checked={Boolean(row.dca_enabled)} type="checkbox" onChange={(event) => updateRow(index, 'dca_enabled', event.target.checked)} />
@@ -1347,7 +1240,15 @@ export function App() {
                     riskBudgetData={riskBudgetData}
                   />
                 )}
-                <DataTable data={evaluation?.proposal ?? []} columns={proposalColumns} emptyLabel="평가 결과가 아직 없습니다." />
+                <div className="mt-4">
+                  <DataTable data={evaluation?.ips_actions ?? []} columns={actionColumns} emptyLabel="평가 결과가 아직 없습니다." />
+                </div>
+                {evaluation && (
+                  <div className="mt-6">
+                    <h4 className="mb-3 text-sm font-bold text-slate-700">수치 제안</h4>
+                    <DataTable data={evaluation.proposal} columns={proposalColumns} emptyLabel="수치 제안이 없습니다." />
+                  </div>
+                )}
                 {evaluation && (
                   <div className="mt-4 flex flex-wrap gap-3">
                     <a className="download-link" href={csvDownloadUrl('proposal')}><Download className="h-4 w-4" /> 제안 CSV</a>
@@ -1411,14 +1312,11 @@ export function App() {
                       <input className="table-input text-right" value={String(row.return_total ?? '')} placeholder="%" type="number" onChange={(event) => updateEditingSnapshotRow(index, 'return_total', event.target.value)} />
                       <select className="table-input" value={String(row.group ?? '')} onChange={(event) => updateEditingSnapshotRow(index, 'group', event.target.value)}>
                         <option value="">그룹 선택</option>
-                        {activeGroupOptions.map((group) => (
+                        {fixedGroupOptions.map((group) => (
                           <option key={group.value} value={group.value}>
                             {group.label}
                           </option>
                         ))}
-                        {row.group && !groupOptions.some((group) => group.value === row.group) ? (
-                          <option value={String(row.group)}>기타: {row.group}</option>
-                        ) : null}
                       </select>
                       <select className="table-input" value={String(row.dca_enabled ?? true)} onChange={(event) => updateEditingSnapshotRow(index, 'dca_enabled', event.target.value === 'true')}>
                         <option value="true">ON</option>
