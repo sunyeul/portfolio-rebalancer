@@ -71,6 +71,47 @@ export type EvaluationResponse = {
   buy_list: ProposalRow[];
   fine_tune_list: ProposalRow[];
   rc_violations: Array<Record<string, unknown>>;
+  ips_config_snapshot?: Record<string, unknown> | null;
+};
+
+export type ConfigOption = {
+  value: string;
+  label: string;
+  is_active: boolean;
+  sort_order: number;
+  group_type?: string;
+};
+
+export type ConfigOptionsResponse = {
+  groups: ConfigOption[];
+  roles: ConfigOption[];
+  thesis_statuses: ConfigOption[];
+};
+
+export type TargetAllocation = {
+  group_type: string;
+  min: number;
+  target: number;
+  max: number;
+};
+
+export type ActionPriority = {
+  action_code: string;
+  label: string;
+  priority: number;
+  is_active: boolean;
+};
+
+export type IpsRule = {
+  key: string;
+  value: unknown;
+};
+
+export type IpsConfigResponse = {
+  target_allocations: TargetAllocation[];
+  action_priorities: ActionPriority[];
+  rules: IpsRule[];
+  ips_config: Record<string, unknown>;
 };
 
 export type PortfolioResponse = {
@@ -221,5 +262,65 @@ export function deleteSnapshot(snapshotId: number) {
 export function loadSnapshot(snapshotId: number) {
   return requestJson<SnapshotLoadResponse>(`/api/v1/portfolios/snapshots/${snapshotId}/load`, {
     method: 'POST'
+  });
+}
+
+export function getConfigOptions() {
+  return requestJson<ConfigOptionsResponse>('/api/v1/config/options', {
+    method: 'GET'
+  });
+}
+
+export function getIpsConfig() {
+  return requestJson<IpsConfigResponse>('/api/v1/config/ips', {
+    method: 'GET'
+  });
+}
+
+export function saveConfigOption(
+  table: 'groups' | 'roles' | 'thesis_statuses',
+  payload: {
+    code: string;
+    label: string;
+    sort_order?: number;
+    is_active?: boolean;
+    group_type?: string;
+  }
+) {
+  return requestJson<{ option: ConfigOption }>(`/api/v1/config/${table}`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function setConfigOptionActive(
+  table: 'groups' | 'roles' | 'thesis_statuses',
+  code: string,
+  is_active: boolean
+) {
+  return requestJson<{ option: ConfigOption }>(`/api/v1/config/${table}/${code}/active`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_active })
+  });
+}
+
+export function saveTargetAllocations(rows: TargetAllocation[]) {
+  return requestJson<{ target_allocations: TargetAllocation[] }>('/api/v1/config/ips/target-allocations', {
+    method: 'PUT',
+    body: JSON.stringify(rows)
+  });
+}
+
+export function saveActionPriorities(rows: ActionPriority[]) {
+  return requestJson<{ action_priorities: ActionPriority[] }>('/api/v1/config/ips/action-priorities', {
+    method: 'PUT',
+    body: JSON.stringify(rows)
+  });
+}
+
+export function saveIpsRules(rows: IpsRule[]) {
+  return requestJson<{ rules: IpsRule[] }>('/api/v1/config/ips/rules', {
+    method: 'PUT',
+    body: JSON.stringify(rows)
   });
 }
