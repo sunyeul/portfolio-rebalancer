@@ -102,6 +102,69 @@ def test_run_evaluation_uses_auto_targets_when_explicit_targets_are_absent():
     assert ufo["제안조정%"] == -20.0
 
 
+def test_run_evaluation_zeros_final_trade_when_ips_requires_thesis_review():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "UFO"],
+            "가중치": [0.75, 0.25],
+            "위험기여도": [0.4, 0.6],
+            "E": [0.8, 0.2],
+            "return_total": [0.1, -0.1],
+            "group": ["core", "satellite"],
+            "dca_enabled": [True, False],
+            "thesis_status": ["intact", "intact"],
+        }
+    ).set_index("ticker")
+
+    result = run_evaluation(
+        metrics_df,
+        None,
+        rc_over_thresh_pct=1.0,
+        e_thresh=0.5,
+    )
+
+    ufo = result.proposal_df.loc[result.proposal_df["ticker"] == "UFO"].iloc[0]
+    ufo_action = result.ips_action_df.loc[result.ips_action_df["ticker"] == "UFO"].iloc[0]
+    assert ufo_action["ips_action"] == "review_thesis"
+    assert bool(ufo["수치후보"]) is True
+    assert ufo["참고조정%"] == -5.0
+    assert bool(ufo["실행"]) is False
+    assert ufo["제안조정%"] == 0.0
+    assert ufo["판단사유"] == "투자 논리 점검"
+
+
+def test_run_evaluation_blocks_low_data_quality_final_trade():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "QQQ"],
+            "가중치": [0.4, 0.6],
+            "위험기여도": [0.2, 0.8],
+            "E": [0.8, 0.8],
+            "return_total": [0.1, 0.1],
+            "group": ["core", "core"],
+            "dca_enabled": [True, True],
+            "thesis_status": ["intact", "intact"],
+            "missing_ratio": [0.3, 0.0],
+            "observation_count": [30, 120],
+        }
+    ).set_index("ticker")
+
+    result = run_evaluation(
+        metrics_df,
+        {"VOO": 0.6, "QQQ": 0.4},
+        rc_over_thresh_pct=1.0,
+        e_thresh=0.5,
+    )
+
+    voo = result.proposal_df.loc[result.proposal_df["ticker"] == "VOO"].iloc[0]
+    voo_action = result.ips_action_df.loc[result.ips_action_df["ticker"] == "VOO"].iloc[0]
+    assert voo_action["ips_action"] == "block_action"
+    assert bool(voo["수치후보"]) is True
+    assert bool(voo["실행"]) is False
+    assert voo["제안조정%"] == 0.0
+    assert voo["판단사유"] == "행동 보류"
+
+
 def test_run_evaluation_does_not_drop_trade_flags_on_ticker_index_alignment():
     metrics_df = pd.DataFrame(
         {

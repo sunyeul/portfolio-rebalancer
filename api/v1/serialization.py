@@ -49,6 +49,8 @@ PROPOSAL_COLUMNS = {
     "efficiency_good": "efficiency_good",
     "히스테리시스제외": "within_hysteresis",
     "최소거래미만": "below_min_trade",
+    "수치후보": "numeric_candidate",
+    "참고조정%": "reference_trade_pct",
     "실행": "should_execute",
     "제안조정%": "suggested_trade_pct",
     "판단사유": "action_reason",

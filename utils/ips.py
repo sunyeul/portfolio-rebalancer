@@ -135,7 +135,7 @@ def classify_ips_action(
     group = fixed_group(row.get("group", DEFAULT_GROUP))
     dca_enabled = bool(row.get("dca_enabled", True))
     thesis_status = row.get("thesis_status", "unknown")
-    should_execute = bool(row.get("실행", False))
+    should_execute = bool(row.get("수치후보", row.get("실행", False)))
     low_data_quality = bool(row.get("data_quality_low", False))
 
     if not should_execute:
@@ -154,6 +154,14 @@ def classify_ips_action(
             next_step += " 판단이 어려운 자산보다 코어 정기매수 증액을 우선합니다."
         return _action_result(
             "review_thesis", ["unclassified_group"], ips_config, next_step=next_step
+        )
+
+    if low_data_quality:
+        return _action_result(
+            "block_action",
+            ["data_quality_low"],
+            ips_config,
+            blocked_reason="데이터 신뢰도가 낮아 실행 판단을 보류합니다.",
         )
 
     data_reasons = ["data_quality_low"] if low_data_quality else []
@@ -192,6 +200,27 @@ def classify_ips_action(
         )
 
     if risk_over and not efficiency_good:
+        prefer_dca_over_sell = bool(
+            ips_config.get("rules", {}).get("prefer_dca_over_sell", True)
+        )
+        if (
+            prefer_dca_over_sell
+            and thesis_status != "broken"
+            and gap < 0
+            and dca_enabled
+        ):
+            return _action_result(
+                "decrease_dca",
+                [
+                    "risk_over",
+                    "efficiency_low",
+                    "negative_gap",
+                    "thesis_not_broken",
+                    "prefer_dca_over_sell",
+                    *data_reasons,
+                ],
+                ips_config,
+            )
         if _sell_gate_allows(row, allocation_status):
             reason_codes = ["risk_over", "efficiency_low", "sell_gate_passed", *data_reasons]
             if thesis_status == "broken":

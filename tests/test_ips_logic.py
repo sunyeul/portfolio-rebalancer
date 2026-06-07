@@ -97,3 +97,41 @@ def test_risk_over_efficiency_low_intact_thesis_does_not_consider_sell():
 
     assert result["ips_action"] in {"decrease_dca", "review_thesis"}
     assert result["ips_action"] != "consider_rebalance_sell"
+
+
+def test_prefer_dca_over_sell_blocks_satellite_over_max_sell_until_thesis_breaks():
+    result = classify_ips_action(
+        {
+            "risk_over": True,
+            "efficiency_good": False,
+            "갭%": -3.0,
+            "실행": True,
+            "group": "satellite",
+            "dca_enabled": True,
+            "thesis_status": "intact",
+        },
+        {"core_status": "in_range", "satellite_status": "over_max"},
+        _ips_config(),
+    )
+
+    assert result["ips_action"] == "decrease_dca"
+    assert "prefer_dca_over_sell" in result["reason_codes"]
+
+
+def test_low_data_quality_blocks_otherwise_executable_action():
+    result = classify_ips_action(
+        {
+            "risk_over": False,
+            "efficiency_good": True,
+            "갭%": 3.0,
+            "실행": True,
+            "group": "core",
+            "dca_enabled": True,
+            "thesis_status": "intact",
+            "data_quality_low": True,
+        },
+        {"core_status": "under_target", "satellite_status": "in_range"},
+        _ips_config(),
+    )
+
+    assert result["ips_action"] == "block_action"

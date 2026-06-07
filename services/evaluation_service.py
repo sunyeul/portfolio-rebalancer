@@ -7,7 +7,7 @@ from typing import NamedTuple
 
 import pandas as pd
 
-from utils.metrics import compute_rc_target
+from utils.metrics import compute_rc_target, risk_contributions
 from utils.optimization import calculate_orders_with_constraints
 from utils.ips_config import load_ips_config
 from utils.ips import (
@@ -17,6 +17,13 @@ from utils.ips import (
     compute_ips_allocation_status,
     fixed_group,
 )
+
+
+FINAL_EXECUTABLE_ACTIONS = {
+    "increase_dca",
+    "decrease_dca",
+    "consider_rebalance_sell",
+}
 
 
 class EvaluationResult(NamedTuple):
@@ -116,6 +123,64 @@ def _action_reason(row: pd.Series | dict) -> str:
     if bool(row.get("data_quality_low", False)):
         reason += " · 데이터 신뢰도 낮음"
     return reason
+
+
+def _apply_ips_execution_gate(
+    proposal: pd.DataFrame,
+    ips_action_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """IPS 액션을 최종 실행 게이트로 적용합니다."""
+    gated = proposal.copy()
+    action_meta = ips_action_df.set_index("ticker")
+
+    for idx, row in gated.iterrows():
+        ticker = row["ticker"]
+        action = action_meta.loc[ticker] if ticker in action_meta.index else None
+        ips_action = action.get("ips_action") if action is not None else "hold_observe"
+        gap_pct = float(row.get("갭%", 0) or 0)
+        numeric_candidate = bool(row.get("수치후보", row.get("실행", False)))
+
+        sign_allowed = (
+            (ips_action == "increase_dca" and gap_pct > 0)
+            or (ips_action in {"decrease_dca", "consider_rebalance_sell"} and gap_pct < 0)
+        )
+        final_execute = numeric_candidate and ips_action in FINAL_EXECUTABLE_ACTIONS and sign_allowed
+
+        if final_execute:
+            gated.at[idx, "실행"] = True
+            gated.at[idx, "제안조정%"] = row["참고조정%"]
+            gated.at[idx, "판단사유"] = _action_reason(gated.loc[idx])
+        else:
+            gated.at[idx, "실행"] = False
+            gated.at[idx, "제안조정%"] = 0.0
+            if numeric_candidate and action is not None:
+                gated.at[idx, "판단사유"] = action.get("action_label", "보류")
+            else:
+                gated.at[idx, "판단사유"] = _action_reason(gated.loc[idx])
+
+    return gated
+
+
+def _post_trade_rc(
+    mdf: pd.DataFrame,
+    proposal: pd.DataFrame,
+    cov_matrix: pd.DataFrame | None,
+) -> pd.Series:
+    """최종 제안조정 반영 후 예상 RC를 계산합니다."""
+    if cov_matrix is None:
+        return mdf["위험기여도"].copy()
+
+    current = mdf["가중치"].astype(float).copy()
+    orders = proposal.set_index("ticker")["제안조정%"].reindex(current.index).fillna(0) / 100.0
+    expected = (current + orders).clip(lower=0)
+    if expected.sum() > 0:
+        expected = expected / expected.sum()
+
+    common = cov_matrix.index.intersection(expected.index)
+    if len(common) == 0:
+        return mdf["위험기여도"].copy()
+    rc = risk_contributions(expected.reindex(common), cov_matrix.loc[common, common])
+    return rc.reindex(mdf.index).fillna(mdf["위험기여도"])
 
 
 def run_evaluation(
@@ -243,8 +308,10 @@ def run_evaluation(
 
     proposal["히스테리시스제외"] = within_band.values
     proposal["최소거래미만"] = (~above_min_trade).values
+    proposal["수치후보"] = should_trade.values
     proposal["실행"] = should_trade.values
     proposal["제안조정%"] = 0.0
+    proposal["참고조정%"] = 0.0
     proposal["판단사유"] = proposal.apply(_action_reason, axis=1)
 
     # 실행 규칙: 우선순위 정의
@@ -327,17 +394,38 @@ def run_evaluation(
 
     for trade_list in (buy_list, sell_list):
         for idx, row in trade_list.iterrows():
+            proposal.at[idx, "참고조정%"] = row["제안조정%"]
             proposal.at[idx, "제안조정%"] = row["제안조정%"]
 
+    group_summary_df = compute_group_summary(mdf, ips_config_snapshot)
+    allocation_status = compute_ips_allocation_status(group_summary_df, ips_config_snapshot)
+    ips_action_df = classify_ips_actions(
+        proposal_df=proposal,
+        metrics_df=mdf,
+        group_summary_df=group_summary_df,
+        allocation_status=allocation_status,
+        ips_config=ips_config_snapshot,
+    )
+    proposal = _apply_ips_execution_gate(proposal, ips_action_df)
+    ips_action_df = classify_ips_actions(
+        proposal_df=proposal,
+        metrics_df=mdf,
+        group_summary_df=group_summary_df,
+        allocation_status=allocation_status,
+        ips_config=ips_config_snapshot,
+    )
+
+    sell_list = proposal[(proposal["갭%"] < 0) & proposal["실행"]].copy()
+    sell_list = sell_list.sort_values(["현재%", "RC_Over%"], ascending=[False, False])
+    buy_list = proposal[(proposal["갭%"] > 0) & proposal["실행"]].copy()
+    buy_list = buy_list.sort_values(["갭%", "E"], ascending=[False, False])
     fine_tune = proposal[
         (proposal["실행"]) & (proposal["갭%"].abs() <= 1.0)
     ].copy()
 
-    # RC 상한선 체크 (경고)
+    post_trade_rc = _post_trade_rc(mdf, proposal, cov_matrix)
     rc_cap_single = 0.12  # 단일 자산 최대 12%
     rc_cap_target_ratio = 1.5  # RC_Target의 1.5배
-
-    post_trade_rc = mdf["위험기여도"].copy()
     violations = []
     for ticker in mdf.index:
         rc_cap = min(rc_cap_single, rc_target[ticker] * rc_cap_target_ratio)
@@ -350,18 +438,7 @@ def run_evaluation(
                     "상태": "⚠️ 경고: RC 상한 초과 위험",
                 }
             )
-
     rc_violations_df = pd.DataFrame(violations) if violations else pd.DataFrame()
-
-    group_summary_df = compute_group_summary(mdf, ips_config_snapshot)
-    allocation_status = compute_ips_allocation_status(group_summary_df, ips_config_snapshot)
-    ips_action_df = classify_ips_actions(
-        proposal_df=proposal,
-        metrics_df=mdf,
-        group_summary_df=group_summary_df,
-        allocation_status=allocation_status,
-        ips_config=ips_config_snapshot,
-    )
 
     return EvaluationResult(
         proposal_df=proposal,

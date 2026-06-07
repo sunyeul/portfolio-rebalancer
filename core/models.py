@@ -102,8 +102,10 @@ class ProposalRow(BaseModel):
     efficiency_good: bool = Field(..., description="효율 점수 양호 여부")
     within_hysteresis: bool = Field(..., description="히스테리시스 대역 내")
     below_min_trade: bool = Field(..., description="최소거래 미만")
-    should_execute: bool = Field(..., description="실행 여부")
-    suggested_trade_pct: float = Field(..., description="제안 조정폭 (%)")
+    numeric_candidate: bool = Field(False, description="수치 필터 통과 여부")
+    reference_trade_pct: float = Field(0.0, description="IPS 게이트 전 참고 조정폭 (%)")
+    should_execute: bool = Field(..., description="IPS 게이트 후 최종 실행 여부")
+    suggested_trade_pct: float = Field(..., description="최종 제안 조정폭 (%)")
     action_reason: str = Field(..., description="판단 사유")
 
     @field_validator("efficiency_score", mode="before")

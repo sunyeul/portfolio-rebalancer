@@ -57,6 +57,8 @@ export type ProposalRow = {
   efficiency_good: boolean;
   within_hysteresis: boolean;
   below_min_trade: boolean;
+  numeric_candidate: boolean;
+  reference_trade_pct: number;
   should_execute: boolean;
   suggested_trade_pct: number;
   action_reason: string;

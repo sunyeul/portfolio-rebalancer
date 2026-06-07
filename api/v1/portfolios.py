@@ -268,7 +268,9 @@ def _proposal_frame(rows: list[dict] | None) -> pd.DataFrame:
     defaults = {
         "RC_Gap%": proposal_df["갭%"] if "갭%" in proposal_df else 0.0,
         "제안조정%": 0.0,
+        "참고조정%": proposal_df["제안조정%"] if "제안조정%" in proposal_df else 0.0,
         "판단사유": "",
+        "수치후보": proposal_df["실행"] if "실행" in proposal_df else False,
         "히스테리시스제외": False,
         "최소거래미만": False,
         "실행": False,
@@ -282,8 +284,9 @@ def _proposal_frame(rows: list[dict] | None) -> pd.DataFrame:
     else:
         proposal_df["RC_Gap%"] = proposal_df["RC_Gap%"].fillna(0.0)
     proposal_df["제안조정%"] = proposal_df["제안조정%"].fillna(0.0)
+    proposal_df["참고조정%"] = proposal_df["참고조정%"].fillna(proposal_df["제안조정%"])
     proposal_df["판단사유"] = proposal_df["판단사유"].fillna("")
-    for column in ["히스테리시스제외", "최소거래미만", "실행"]:
+    for column in ["히스테리시스제외", "최소거래미만", "수치후보", "실행"]:
         proposal_df[column] = proposal_df[column].where(proposal_df[column].notna(), False).astype(bool)
 
     return proposal_df
