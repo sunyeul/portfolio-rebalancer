@@ -1023,21 +1023,23 @@ export function App() {
                             <div className="flex items-center gap-1">
                               <button
                                 type="button"
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-blue-50 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-bold text-blue-800 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
                                 title="편집"
                                 disabled={saveOptionMutation.isPending || deleteOptionMutation.isPending}
                                 onClick={() => startOptionEdit(table as OptionTable, option)}
                               >
                                 <Edit3 className="h-4 w-4" />
+                                편집
                               </button>
                               <button
                                 type="button"
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
                                 title="삭제"
                                 disabled={!option.is_active || deleteOptionMutation.isPending}
                                 onClick={() => deleteOption(table as OptionTable, option)}
                               >
                                 {deleteOptionMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+                                삭제
                               </button>
                             </div>
                           </div>
