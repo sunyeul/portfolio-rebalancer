@@ -69,6 +69,10 @@ def test_analysis_api_stores_json_safe_metrics(monkeypatch):
                 "IR": [0.5],
                 "베타": [1.0],
                 "알파": [0.0],
+                "data_start": ["2026-06-01"],
+                "data_end": ["2026-06-04"],
+                "observation_count": [4],
+                "missing_ratio": [0.0],
                 "위험기여도": [1.0],
                 "수익기여도": [0.1],
                 "가중치": [1.0],
@@ -168,6 +172,11 @@ def test_analysis_ignores_all_null_tickers_and_keeps_mixed_exchange_dates(
     payload = response.json()
     assert payload["missing_tickers"] == ["000600.KS"]
     assert [row["ticker"] for row in payload["metrics"]] == ["005930.KS", "VOO", "SPY"]
+    samsung = payload["metrics"][0]
+    assert samsung["data_start"] == "2026-06-01"
+    assert samsung["data_end"] == "2026-06-04"
+    assert samsung["observation_count"] == 3
+    assert samsung["missing_ratio"] == 0.25
 
 
 def test_evaluation_requires_analysis_first():

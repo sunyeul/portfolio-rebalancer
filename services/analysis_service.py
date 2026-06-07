@@ -56,6 +56,33 @@ class AnalysisError(Exception):
     pass
 
 
+def _price_data_quality(prices_raw: pd.DataFrame, ticker: str) -> dict[str, object]:
+    """원본 가격 데이터 기준의 자산별 신뢰도 지표를 계산합니다."""
+    if ticker not in prices_raw.columns or len(prices_raw.index) == 0:
+        return {
+            "data_start": None,
+            "data_end": None,
+            "observation_count": 0,
+            "missing_ratio": np.nan,
+        }
+
+    series = prices_raw[ticker]
+    valid = series.dropna()
+    if valid.empty:
+        data_start = None
+        data_end = None
+    else:
+        data_start = pd.Timestamp(valid.index.min()).date().isoformat()
+        data_end = pd.Timestamp(valid.index.max()).date().isoformat()
+
+    return {
+        "data_start": data_start,
+        "data_end": data_end,
+        "observation_count": int(valid.shape[0]),
+        "missing_ratio": float(series.isna().sum() / len(series)),
+    }
+
+
 def run_analysis(
     asset_df: pd.DataFrame,
     period: int | str,
@@ -101,7 +128,8 @@ def run_analysis(
         raise AnalysisError(f"가격 데이터 조회 실패: {e}") from e
 
     present, missing = ensure_tickers_exist(prices, all_tickers)
-    prices = prices[present].ffill().dropna(how="all")
+    prices_raw = prices[present].copy()
+    prices = prices_raw.ffill().dropna(how="all")
 
     if prices.empty or len(prices.columns) == 0:
         raise AnalysisError(
@@ -180,6 +208,7 @@ def run_analysis(
                 "IR": ir,
                 "베타": asset_beta,
                 "알파": asset_alpha,
+                **_price_data_quality(prices_raw, t),
             }
         )
     metrics_df = pd.DataFrame(asset_metrics).set_index("ticker")

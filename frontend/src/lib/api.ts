@@ -19,6 +19,10 @@ export type MetricRow = {
   information_ratio: number | null;
   beta: number | null;
   alpha: number | null;
+  data_start: string | null;
+  data_end: string | null;
+  observation_count: number | null;
+  missing_ratio: number | null;
   risk_contribution: number | null;
   return_contribution: number | null;
   weight: number;
