@@ -14,6 +14,10 @@ class Asset(BaseModel):
     return_total: float | None = Field(
         None, description="누적 수익률 (0.1234 = 12.34%, 선택)"
     )
+    group: str = Field("ungrouped", description="IPS 관리 그룹")
+    role: str = Field("unknown", description="자산 역할")
+    dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
+    thesis_status: str = Field("unknown", description="투자 논리 상태")
 
     @field_validator("ticker", mode="before")
     @classmethod
@@ -44,7 +48,7 @@ class Asset(BaseModel):
     @classmethod
     def validate_return_total(cls, v: float | None) -> float | None:
         """YTD 수익률 검증: -1 ~ 5 범위 (선택 필드)."""
-        if v is None:
+        if v is None or v == "":
             return None
         try:
             val = float(v)
@@ -55,6 +59,33 @@ class Asset(BaseModel):
             return val
         except (TypeError, ValueError) as e:
             raise ValueError(f"return_total는 숫자로 변환 불가: {v}") from e
+
+    @field_validator("group", mode="before")
+    @classmethod
+    def normalize_group(cls, v: str | None) -> str:
+        """그룹은 비어 있으면 ungrouped로 정규화합니다."""
+        if v is None or str(v).strip() == "":
+            return "ungrouped"
+        return str(v).strip().lower()
+
+    @field_validator("role", "thesis_status", mode="before")
+    @classmethod
+    def normalize_text_field(cls, v: str | None) -> str:
+        """IPS 텍스트 필드는 비어 있으면 unknown으로 정규화합니다."""
+        if v is None or str(v).strip() == "":
+            return "unknown"
+        return str(v).strip().lower()
+
+    @field_validator("dca_enabled", mode="before")
+    @classmethod
+    def validate_dca_enabled(cls, v) -> bool:
+        """CSV/수동 입력의 여러 boolean 표현을 정기매수 여부로 해석합니다."""
+        if v is None or v == "":
+            return True
+        if isinstance(v, bool):
+            return v
+        s = str(v).strip().lower()
+        return s in {"true", "1", "yes", "y", "on", "정기", "가능"}
 
     class Config:
         """Pydantic 설정."""
@@ -87,10 +118,11 @@ def parse_text_to_assets(text: str) -> List[Asset]:
             parts = line.split()
         if not parts:
             continue
-        # 파트에서 숫자 찾기
+        # 파트에서 숫자와 IPS 메타데이터 찾기
         ticker = parts[0].upper()
         allocation = None
         return_total = None
+        text_tokens: list[str] = []
 
         num_count = 0
         for p in parts[1:]:
@@ -103,7 +135,8 @@ def parse_text_to_assets(text: str) -> List[Asset]:
                     return_total = num / 100.0  # % → 소수 변환
                 num_count += 1
             except ValueError:
-                continue
+                if p:
+                    text_tokens.append(p)
 
         if allocation is None:
             # AIDEV-NOTE: silent-skip; Streamlit 경고 제거, 파싱 실패는 무시하고 계속 진행
@@ -111,7 +144,12 @@ def parse_text_to_assets(text: str) -> List[Asset]:
         # Pydantic 검증 실행
         try:
             asset = Asset(
-                ticker=ticker, allocation=allocation, return_total=return_total
+                ticker=ticker,
+                allocation=allocation,
+                return_total=return_total,
+                group=text_tokens[0] if len(text_tokens) > 0 else "ungrouped",
+                role=text_tokens[1] if len(text_tokens) > 1 else "unknown",
+                thesis_status=text_tokens[2] if len(text_tokens) > 2 else "unknown",
             )
             assets.append(asset)
         except ValueError:

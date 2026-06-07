@@ -258,6 +258,31 @@ def run_analysis(
     metrics_df["E′"] = e_prime
     metrics_df["수익률분위"] = return_quantile
 
+    # IPS 메타데이터 병합
+    meta_cols = ["group", "role", "dca_enabled", "thesis_status"]
+    asset_meta = asset_df.set_index("ticker")
+    for col in meta_cols:
+        if col in asset_meta.columns:
+            metrics_df[col] = asset_meta[col].reindex(metrics_df.index)
+
+    metrics_df["group"] = metrics_df.get(
+        "group", pd.Series(index=metrics_df.index)
+    ).fillna("ungrouped")
+    metrics_df["role"] = metrics_df.get(
+        "role", pd.Series(index=metrics_df.index)
+    ).fillna("unknown")
+    metrics_df["dca_enabled"] = (
+        metrics_df.get("dca_enabled", pd.Series(True, index=metrics_df.index))
+        .fillna(True)
+        .astype(bool)
+    )
+    metrics_df["thesis_status"] = metrics_df.get(
+        "thesis_status", pd.Series(index=metrics_df.index)
+    ).fillna("unknown")
+    metrics_df["DCA강도점수"] = (
+        metrics_df["E′"] if "E′" in metrics_df.columns else metrics_df["E"]
+    )
+
     return AnalysisResult(
         prices=prices,
         returns=returns,

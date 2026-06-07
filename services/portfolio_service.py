@@ -17,6 +17,13 @@ class PortfolioInputError(Exception):
     pass
 
 
+def _get_attr(row, name: str, default=None):
+    value = getattr(row, name, default)
+    if pd.isna(value) if not isinstance(value, (list, tuple, dict)) else False:
+        return default
+    return value
+
+
 def parse_text_to_assets_service(text: str) -> tuple[List[Asset], List[str]]:
     """텍스트를 자산 목록으로 파싱합니다.
 
@@ -50,6 +57,15 @@ def parse_csv_to_assets(df: pd.DataFrame) -> tuple[List[Asset], List[str]]:
         "전체기간수익률": "return_total",
         "수익률": "return_total",
         "현재수익률": "return_total",
+        "그룹": "group",
+        "관리그룹": "group",
+        "자산군": "group",
+        "역할": "role",
+        "자산역할": "role",
+        "정기매수": "dca_enabled",
+        "정기매수대상": "dca_enabled",
+        "투자논리": "thesis_status",
+        "논리상태": "thesis_status",
     }
     df = df.rename(columns=col_mapping)
 
@@ -64,9 +80,10 @@ def parse_csv_to_assets(df: pd.DataFrame) -> tuple[List[Asset], List[str]]:
     try:
         for r in df.itertuples(index=False):
             total = None
-            if hasattr(r, "return_total") and r.return_total:
+            raw_return_total = _get_attr(r, "return_total")
+            if raw_return_total not in (None, ""):
                 try:
-                    total = float(r.return_total) / 100.0  # % → 소수
+                    total = float(raw_return_total) / 100.0  # % → 소수
                 except (ValueError, TypeError):
                     total = None
 
@@ -75,6 +92,10 @@ def parse_csv_to_assets(df: pd.DataFrame) -> tuple[List[Asset], List[str]]:
                     ticker=str(r.ticker).upper(),
                     allocation=float(r.allocation),
                     return_total=total,
+                    group=_get_attr(r, "group", "ungrouped"),
+                    role=_get_attr(r, "role", "unknown"),
+                    dca_enabled=_get_attr(r, "dca_enabled", True),
+                    thesis_status=_get_attr(r, "thesis_status", "unknown"),
                 )
                 asset_list.append(asset)
             except ValidationError as e:
@@ -110,6 +131,10 @@ def parse_manual_edit_to_assets(
                 ticker=str(row["ticker"]).upper(),
                 allocation=float(row["allocation"]),
                 return_total=return_total,
+                group=row.get("group", "ungrouped"),
+                role=row.get("role", "unknown"),
+                dca_enabled=row.get("dca_enabled", True),
+                thesis_status=row.get("thesis_status", "unknown"),
             )
             asset_list.append(asset)
         except (ValueError, ValidationError) as e:
@@ -139,10 +164,26 @@ def normalize_and_validate_assets(
 
     # AIDEV-NOTE: pydantic-integration; Asset 객체는 .model_dump()로 dict로 변환하여 DataFrame 생성
     asset_df = pd.DataFrame([a.model_dump() for a in assets])
+    raw_df = asset_df.copy()
+
+    for ticker, group in raw_df.groupby("ticker"):
+        if group["group"].nunique(dropna=True) > 1:
+            warnings.append(
+                f"{ticker}: group 값이 여러 개입니다. 첫 번째 값을 사용합니다."
+            )
+        if group["role"].nunique(dropna=True) > 1:
+            warnings.append(
+                f"{ticker}: role 값이 여러 개입니다. 첫 번째 값을 사용합니다."
+            )
+
     asset_df = asset_df.groupby("ticker", as_index=False).agg(
         {
             "allocation": "sum",
             "return_total": "first",  # 첫 번째 return_total 유지 (중복 제거 시)
+            "group": "first",
+            "role": "first",
+            "dca_enabled": "first",
+            "thesis_status": "first",
         }
     )
 
