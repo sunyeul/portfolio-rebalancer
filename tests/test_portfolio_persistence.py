@@ -107,6 +107,50 @@ def test_snapshot_can_save_latest_rows_with_groups(monkeypatch, tmp_path):
     assert payload["analysis"] is None
 
 
+def test_current_state_auto_save_does_not_create_snapshot(monkeypatch, tmp_path):
+    client = _client_with_db(monkeypatch, tmp_path)
+    portfolio_id = client.post(
+        "/api/v1/portfolios",
+        json={"name": "자동 저장 계좌"},
+    ).json()["portfolio"]["id"]
+    client.post(
+        "/api/v1/portfolio/manual",
+        json={
+            "rows": [
+                {"ticker": "VOO", "allocation": 70, "group": "core"},
+                {"ticker": "UFO", "allocation": 30, "group": "satellite_space"},
+            ]
+        },
+    )
+
+    current_response = client.post(f"/api/v1/portfolios/{portfolio_id}/current-state")
+    assert current_response.status_code == 200
+    assert [row["ticker"] for row in current_response.json()["portfolio"]["assets"]] == [
+        "UFO",
+        "VOO",
+    ]
+
+    snapshots_response = client.get(f"/api/v1/portfolios/{portfolio_id}/snapshots")
+    assert snapshots_response.status_code == 200
+    assert snapshots_response.json()["snapshots"] == []
+
+    load_client = TestClient(app)
+    load_response = load_client.get(f"/api/v1/portfolios/{portfolio_id}/current-state")
+    assert load_response.status_code == 200
+    payload = load_response.json()
+    assert [row["group"] for row in payload["portfolio"]["assets"]] == [
+        "satellite_space",
+        "core",
+    ]
+
+    snapshot_response = load_client.post(
+        f"/api/v1/portfolios/{portfolio_id}/snapshots",
+        json={"name": "자동 저장본에서 스냅샷"},
+    )
+    assert snapshot_response.status_code == 200
+    assert snapshot_response.json()["snapshot"]["position_count"] == 2
+
+
 def test_snapshot_metadata_update_and_delete(monkeypatch, tmp_path):
     client = _client_with_db(monkeypatch, tmp_path)
     portfolio_id = client.post(
@@ -189,8 +233,7 @@ def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp
                 "수익기여도": [0.1],
                 "가중치": [1.0],
                 "E": [0.7],
-                "E′": [0.75],
-                "DCA강도점수": [0.75],
+                "DCA강도점수": [0.7],
                 "return_total": [0.2],
                 "group": ["core"],
                 "role": ["broad_etf"],
@@ -303,8 +346,7 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
                 "수익기여도": [0.1],
                 "가중치": [1.0],
                 "E": [0.7],
-                "E′": [0.75],
-                "DCA강도점수": [0.75],
+                "DCA강도점수": [0.7],
                 "return_total": [0.2],
                 "group": ["core"],
                 "role": ["broad_etf"],
@@ -333,8 +375,7 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
                 "목표%": [100.0],
                 "갭%": [0.0],
                 "E": [0.7],
-                "E′": [0.75],
-                "DCA강도점수": [0.75],
+                "DCA강도점수": [0.7],
                 "RC_Over%": [0.0],
                 "RC_Target%": [100.0],
                 "return_total%": [20.0],

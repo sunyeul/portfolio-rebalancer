@@ -6,7 +6,7 @@ import {
   useReactTable,
   type SortingState
 } from '@tanstack/react-table';
-import { ArrowUpDown } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { useState } from 'react';
 
 type DataTableProps<T> = {
@@ -40,23 +40,36 @@ export function DataTable<T>({ data, columns, emptyLabel }: DataTableProps<T>) {
         <thead className="bg-slate-50">
           {table.getHeaderGroups().map((headerGroup) => (
             <tr key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
-                <th
-                  key={header.id}
-                  className="border-b border-slate-200 px-4 py-3 text-xs font-bold uppercase tracking-normal text-slate-500"
-                >
-                  {header.isPlaceholder ? null : (
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1.5 text-inherit"
-                      onClick={header.column.getToggleSortingHandler()}
-                    >
-                      {flexRender(header.column.columnDef.header, header.getContext())}
-                      {header.column.getCanSort() && <ArrowUpDown className="h-3.5 w-3.5" />}
-                    </button>
-                  )}
-                </th>
-              ))}
+              {headerGroup.headers.map((header) => {
+                const sortState = header.column.getIsSorted();
+                const canSort = header.column.getCanSort();
+                return (
+                  <th
+                    key={header.id}
+                    aria-sort={sortState === 'asc' ? 'ascending' : sortState === 'desc' ? 'descending' : 'none'}
+                    className="border-b border-slate-200 px-4 py-3 text-xs font-bold uppercase tracking-normal text-slate-500"
+                  >
+                    {header.isPlaceholder ? null : canSort ? (
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1.5 text-inherit transition hover:text-slate-900"
+                        onClick={header.column.getToggleSortingHandler()}
+                      >
+                        {flexRender(header.column.columnDef.header, header.getContext())}
+                        {sortState === 'asc' ? (
+                          <ArrowUp className="h-3.5 w-3.5 text-blue-700" />
+                        ) : sortState === 'desc' ? (
+                          <ArrowDown className="h-3.5 w-3.5 text-blue-700" />
+                        ) : (
+                          <ArrowUpDown className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    ) : (
+                      flexRender(header.column.columnDef.header, header.getContext())
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           ))}
         </thead>

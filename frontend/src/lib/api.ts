@@ -24,7 +24,6 @@ export type MetricRow = {
   return_contribution: number | null;
   weight: number;
   efficiency_score: number | null;
-  efficiency_score_prime: number | null;
   dca_intensity_score: number | null;
   return_total: number | null;
   group: string;
@@ -46,7 +45,6 @@ export type ProposalRow = {
   target_weight_pct: number;
   gap_pct: number;
   efficiency_score: number | null;
-  efficiency_score_prime: number | null;
   dca_intensity_score: number | null;
   rc_over_pct: number;
   rc_target_pct: number;
@@ -158,6 +156,13 @@ export type SnapshotLoadResponse = {
   evaluation: EvaluationResponse | null;
 };
 
+export type CurrentStateResponse = {
+  portfolio: PortfolioResponse;
+  analysis: AnalysisResponse | null;
+  evaluation: EvaluationResponse | null;
+  updated_at: string;
+};
+
 async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
   const response = await fetch(path, {
     credentials: 'include',
@@ -191,7 +196,6 @@ export function runAnalysis(payload: {
   period: number | 'YTD' | 'Max';
   rf: number;
   bench: string;
-  momentum_weight: number;
 }) {
   return requestJson<AnalysisResponse>('/api/v1/analysis/run', {
     method: 'POST',
@@ -224,6 +228,18 @@ export function createPortfolio(payload: { name: string; description?: string })
   return requestJson<{ portfolio: SavedPortfolio }>('/api/v1/portfolios', {
     method: 'POST',
     body: JSON.stringify(payload)
+  });
+}
+
+export function getCurrentState(portfolioId: number) {
+  return requestJson<CurrentStateResponse>(`/api/v1/portfolios/${portfolioId}/current-state`, {
+    method: 'GET'
+  });
+}
+
+export function saveCurrentState(portfolioId: number) {
+  return requestJson<CurrentStateResponse>(`/api/v1/portfolios/${portfolioId}/current-state`, {
+    method: 'POST'
   });
 }
 

@@ -20,7 +20,7 @@ import {
   X
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import {
   Bar,
   BarChart,
@@ -48,6 +48,7 @@ import {
   csvDownloadUrl,
   deleteSnapshot,
   getConfigOptions,
+  getCurrentState,
   getIpsConfig,
   getSnapshot,
   listPortfolios,
@@ -57,6 +58,7 @@ import {
   runEvaluation,
   saveActionPriorities,
   saveConfigOption,
+  saveCurrentState,
   saveIpsRules,
   saveSnapshot,
   saveTargetAllocations,
@@ -96,6 +98,21 @@ function pct(value: number | null | undefined, fromUnit = true) {
 function num(value: number | null | undefined) {
   if (value === null || value === undefined) return 'N/A';
   return value.toFixed(2);
+}
+
+function nullableNumberColumn<T>(
+  id: string,
+  header: string,
+  getValue: (row: T) => number | null | undefined,
+  formatValue: (value: number | null | undefined) => string
+): ColumnDef<T> {
+  return {
+    id,
+    header,
+    accessorFn: (row) => getValue(row) ?? undefined,
+    cell: ({ row }) => formatValue(getValue(row.original)),
+    sortUndefined: 'last'
+  };
 }
 
 function shortDate(value: string | null | undefined) {
@@ -187,6 +204,12 @@ export function App() {
     queryFn: () => listSnapshots(selectedPortfolioId as number),
     enabled: selectedPortfolioId !== null
   });
+  const currentStateQuery = useQuery({
+    queryKey: ['portfolio-current-state', selectedPortfolioId],
+    queryFn: () => getCurrentState(selectedPortfolioId as number),
+    enabled: selectedPortfolioId !== null,
+    retry: false
+  });
   const savedSnapshots = snapshotsQuery.data?.snapshots ?? [];
   const groupOptions = configOptionsQuery.data?.groups ?? [];
   const roleOptions = configOptionsQuery.data?.roles ?? [];
@@ -208,34 +231,58 @@ export function App() {
     setRulesJson(JSON.stringify(ipsConfigQuery.data.rules, null, 2));
   }, [ipsConfigQuery.data]);
 
-  const { register, control, watch } = useForm<SettingsValues>({
+  useEffect(() => {
+    if (!currentStateQuery.data) return;
+    const nextRows = rowsFromAssets(currentStateQuery.data.portfolio.assets);
+    setRows(nextRows);
+    setText(nextRows.map(rowInputLine).join('\n'));
+    setAppliedRowsSignature(rowsSignature(nextRows));
+    setPortfolio(currentStateQuery.data.portfolio.assets);
+    setAnalysis(currentStateQuery.data.analysis);
+    setEvaluation(currentStateQuery.data.evaluation);
+  }, [currentStateQuery.data]);
+
+  const { register, watch } = useForm<SettingsValues>({
     defaultValues: {
       periodMode: 'months',
       months: 12,
       rfPct: 0,
       bench: 'SPY',
-      momentumWeight: 0.2,
       rcOverThreshPct: 1.5,
       eThresh: 0.5
     }
   });
   const settings = watch();
 
+  async function persistCurrentState() {
+    if (selectedPortfolioId === null) return;
+    try {
+      await saveCurrentState(selectedPortfolioId);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['portfolios'] }),
+        queryClient.invalidateQueries({ queryKey: ['portfolio-current-state', selectedPortfolioId] })
+      ]);
+    } catch {
+      // Current-state persistence is best-effort so the workflow step stays usable.
+    }
+  }
+
   const portfolioMutation = useMutation({
     mutationFn: submitPortfolio,
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       const nextRows = rowsFromAssets(data.assets);
       setRows(nextRows);
       setAppliedRowsSignature(rowsSignature(nextRows));
       setPortfolio(data.assets);
       setAnalysis(null);
       setEvaluation(null);
+      await persistCurrentState();
     }
   });
 
   const csvMutation = useMutation({
     mutationFn: uploadPortfolioCsv,
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       const nextRows = rowsFromAssets(data.assets);
       setRows(nextRows);
       setText(nextRows.map(rowInputLine).join('\n'));
@@ -243,20 +290,25 @@ export function App() {
       setPortfolio(data.assets);
       setAnalysis(null);
       setEvaluation(null);
+      await persistCurrentState();
     }
   });
 
   const analysisMutation = useMutation({
     mutationFn: runAnalysis,
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       setAnalysis(data);
       setEvaluation(null);
+      await persistCurrentState();
     }
   });
 
   const evaluationMutation = useMutation({
     mutationFn: runEvaluation,
-    onSuccess: setEvaluation
+    onSuccess: async (data) => {
+      setEvaluation(data);
+      await persistCurrentState();
+    }
   });
 
   const createPortfolioMutation = useMutation({
@@ -285,7 +337,8 @@ export function App() {
       setSnapshotName('');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['portfolios'] }),
-        queryClient.invalidateQueries({ queryKey: ['portfolio-snapshots', selectedPortfolioId] })
+        queryClient.invalidateQueries({ queryKey: ['portfolio-snapshots', selectedPortfolioId] }),
+        queryClient.invalidateQueries({ queryKey: ['portfolio-current-state', selectedPortfolioId] })
       ]);
     }
   });
@@ -339,7 +392,7 @@ export function App() {
 
   const loadSnapshotMutation = useMutation({
     mutationFn: loadSnapshot,
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       const nextRows = rowsFromAssets(data.portfolio.assets);
       setRows(nextRows);
       setText(nextRows.map(rowInputLine).join('\n'));
@@ -348,6 +401,7 @@ export function App() {
       setAnalysis(data.analysis);
       setEvaluation(data.evaluation);
       setSelectedPortfolioId(data.snapshot.portfolio_id);
+      await queryClient.invalidateQueries({ queryKey: ['portfolio-current-state', data.snapshot.portfolio_id] });
     }
   });
 
@@ -427,13 +481,12 @@ export function App() {
     () => [
       { accessorKey: 'ticker', header: '티커' },
       { accessorKey: 'weight', header: '비중', cell: ({ row }) => pct(row.original.weight) },
-      { accessorKey: 'cagr', header: 'CAGR', cell: ({ row }) => pct(row.original.cagr) },
-      { accessorKey: 'volatility', header: '변동성', cell: ({ row }) => pct(row.original.volatility) },
-      { accessorKey: 'sharpe', header: '샤프', cell: ({ row }) => num(row.original.sharpe) },
-      { accessorKey: 'risk_contribution', header: '위험기여도', cell: ({ row }) => pct(row.original.risk_contribution) },
-      { accessorKey: 'return_total', header: '기간 수익률', cell: ({ row }) => pct(row.original.return_total) },
-      { accessorKey: 'efficiency_score', header: 'E', cell: ({ row }) => num(row.original.efficiency_score) },
-      { accessorKey: 'efficiency_score_prime', header: "E'", cell: ({ row }) => num(row.original.efficiency_score_prime) }
+      nullableNumberColumn('cagr', 'CAGR', (row) => row.cagr, pct),
+      nullableNumberColumn('volatility', '변동성', (row) => row.volatility, pct),
+      nullableNumberColumn('sharpe', '샤프', (row) => row.sharpe, num),
+      nullableNumberColumn('risk_contribution', '위험기여도', (row) => row.risk_contribution, pct),
+      nullableNumberColumn('return_total', '기간 수익률', (row) => row.return_total, pct),
+      nullableNumberColumn('efficiency_score', 'E', (row) => row.efficiency_score, num)
     ],
     []
   );
@@ -446,7 +499,7 @@ export function App() {
       { accessorKey: 'gap_pct', header: '갭', cell: ({ row }) => pct(row.original.gap_pct, false) },
       { accessorKey: 'adjusted_gap_pct', header: '조정갭', cell: ({ row }) => pct(row.original.adjusted_gap_pct, false) },
       { accessorKey: 'rc_over_pct', header: 'RC Over', cell: ({ row }) => pct(row.original.rc_over_pct, false) },
-      { accessorKey: 'efficiency_score', header: 'E', cell: ({ row }) => num(row.original.efficiency_score) },
+      nullableNumberColumn('efficiency_score', 'E', (row) => row.efficiency_score, num),
       { accessorKey: 'should_execute', header: '실행', cell: ({ row }) => (row.original.should_execute ? '실행' : '보류') }
     ],
     []
@@ -479,8 +532,7 @@ export function App() {
           ? parsedSettings.months
           : parsedSettings.periodMode,
       rf: parsedSettings.rfPct / 100,
-      bench: parsedSettings.bench,
-      momentum_weight: parsedSettings.momentumWeight
+      bench: parsedSettings.bench
     });
   }
 
@@ -493,8 +545,7 @@ export function App() {
           ? parsedSettings.months
           : parsedSettings.periodMode,
       rf: parsedSettings.rfPct / 100,
-      bench: parsedSettings.bench,
-      momentum_weight: parsedSettings.momentumWeight
+      bench: parsedSettings.bench
     });
   }
 
@@ -657,16 +708,6 @@ export function App() {
             E 임계값
             <input type="number" step="0.05" min="0" max="1" {...register('eThresh')} />
           </label>
-          <Controller
-            control={control}
-            name="momentumWeight"
-            render={({ field }) => (
-              <label>
-                모멘텀 가중치 <strong>{field.value}</strong>
-                <input type="range" min="0" max="0.5" step="0.05" {...field} />
-              </label>
-            )}
-          />
         </form>
       </aside>
 
