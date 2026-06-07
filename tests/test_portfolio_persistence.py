@@ -235,7 +235,6 @@ def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp
                 "E": [0.7],
                 "return_total": [0.2],
                 "group": ["core"],
-                "role": ["broad_etf"],
                 "dca_enabled": [True],
                 "thesis_status": ["intact"],
             }
@@ -270,7 +269,6 @@ def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp
                     "ticker": "VOO",
                     "allocation": 70,
                     "group": "satellite_space",
-                    "role": "theme_etf",
                     "dca_enabled": False,
                     "thesis_status": "watch",
                 },
@@ -278,7 +276,6 @@ def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp
                     "ticker": "QQQ",
                     "allocation": 30,
                     "group": "core",
-                    "role": "broad_etf",
                     "dca_enabled": True,
                     "thesis_status": "intact",
                 },
@@ -300,7 +297,6 @@ def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp
             "allocation": 30.0,
             "return_total": None,
             "group": "core",
-            "role": "broad_etf",
             "dca_enabled": True,
             "thesis_status": "intact",
             "weight": 0.3,
@@ -310,7 +306,6 @@ def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp
             "allocation": 70.0,
             "return_total": None,
             "group": "satellite_space",
-            "role": "theme_etf",
             "dca_enabled": False,
             "thesis_status": "watch",
             "weight": 0.7,
@@ -347,7 +342,6 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
                 "E": [0.7],
                 "return_total": [0.2],
                 "group": ["core"],
-                "role": ["broad_etf"],
                 "dca_enabled": [True],
                 "thesis_status": ["intact"],
             }
@@ -373,11 +367,11 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
                 "목표%": [100.0],
                 "갭%": [0.0],
                 "E": [0.7],
+                "RC_Gap%": [0.0],
                 "RC_Over%": [0.0],
                 "RC_Target%": [100.0],
                 "return_total%": [20.0],
                 "group": ["core"],
-                "role": ["broad_etf"],
                 "dca_enabled": [True],
                 "thesis_status": ["intact"],
                 "risk_over": [False],
@@ -385,6 +379,8 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
                 "히스테리시스제외": [True],
                 "최소거래미만": [True],
                 "실행": [False],
+                "제안조정%": [0.0],
+                "판단사유": ["히스테리시스 범위 및 최소 거래 미만"],
             }
         )
         return EvaluationResult(
@@ -413,9 +409,15 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
     assert load_response.status_code == 200
     payload = load_response.json()
     assert payload["analysis"]["metrics"][0]["ticker"] == "VOO"
-    assert payload["evaluation"]["proposal"][0]["ticker"] == "VOO"
+    proposal_row = payload["evaluation"]["proposal"][0]
+    assert proposal_row["ticker"] == "VOO"
+    assert proposal_row["rc_gap_pct"] == 0.0
+    assert proposal_row["suggested_trade_pct"] == 0.0
+    assert proposal_row["action_reason"] == "히스테리시스 범위 및 최소 거래 미만"
+    assert "adjusted_gap_pct" not in proposal_row
     assert payload["evaluation"]["ips_config_snapshot"]["groups"]["core"]["type"] == "core"
 
     csv_response = load_client.get("/api/v1/evaluation/download-csv?type=proposal")
     assert csv_response.status_code == 200
     assert "VOO" in csv_response.text
+    assert "suggested_trade_pct" in csv_response.text

@@ -25,7 +25,6 @@ class PortfolioRowIn(BaseModel):
     allocation: float | str | None = None
     return_total: float | str | None = None
     group: str | None = None
-    role: str | None = None
     dca_enabled: bool | str | None = True
     thesis_status: str | None = None
 
@@ -76,4 +75,3 @@ async def parse_csv_portfolio(request: Request, file: UploadFile = File(...)):
         raise HTTPException(
             status_code=400, detail=f"CSV 파일 처리 중 오류 발생: {exc}"
         ) from exc
-

@@ -68,7 +68,6 @@ class SnapshotPortfolioRowIn(BaseModel):
     allocation: float | str | None = None
     return_total: float | str | None = None
     group: str | None = None
-    role: str | None = None
     dca_enabled: bool | str | None = True
     thesis_status: str | None = None
 

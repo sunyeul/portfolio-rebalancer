@@ -24,7 +24,6 @@ METRICS_COLUMNS = {
     "E": "efficiency_score",
     "return_total": "return_total",
     "group": "group",
-    "role": "role",
     "dca_enabled": "dca_enabled",
     "thesis_status": "thesis_status",
 }
@@ -35,11 +34,11 @@ PROPOSAL_COLUMNS = {
     "목표%": "target_weight_pct",
     "갭%": "gap_pct",
     "E": "efficiency_score",
+    "RC_Gap%": "rc_gap_pct",
     "RC_Over%": "rc_over_pct",
     "RC_Target%": "rc_target_pct",
     "return_total%": "return_total_pct",
     "group": "group",
-    "role": "role",
     "dca_enabled": "dca_enabled",
     "thesis_status": "thesis_status",
     "risk_over": "risk_over",
@@ -47,7 +46,8 @@ PROPOSAL_COLUMNS = {
     "히스테리시스제외": "within_hysteresis",
     "최소거래미만": "below_min_trade",
     "실행": "should_execute",
-    "조정갭%": "adjusted_gap_pct",
+    "제안조정%": "suggested_trade_pct",
+    "판단사유": "action_reason",
 }
 
 RC_VIOLATION_COLUMNS = {

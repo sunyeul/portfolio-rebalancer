@@ -5,7 +5,6 @@ export const portfolioRowSchema = z.object({
   allocation: z.union([z.number(), z.string()]).optional().nullable(),
   return_total: z.union([z.number(), z.string()]).optional().nullable(),
   group: z.string().optional().nullable(),
-  role: z.string().optional().nullable(),
   dca_enabled: z.union([z.boolean(), z.string()]).optional().nullable(),
   thesis_status: z.string().optional().nullable()
 });

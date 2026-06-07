@@ -14,10 +14,6 @@ OPTION_TABLES = {
         "default": "ungrouped",
         "extra_columns": ("group_type",),
     },
-    "roles": {
-        "default": "unknown",
-        "extra_columns": (),
-    },
     "thesis_statuses": {
         "default": "unknown",
         "extra_columns": (),

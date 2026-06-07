@@ -21,15 +21,6 @@ GROUP_SEEDS = [
     ("cash", "현금", "cash", 80),
 ]
 
-ROLE_SEEDS = [
-    ("unknown", "미정", 0),
-    ("broad_etf", "광범위 ETF", 10),
-    ("theme_etf", "테마 ETF", 20),
-    ("individual", "개별 종목", 30),
-    ("duplicate", "중복 포지션", 40),
-    ("small_position", "소액 포지션", 50),
-]
-
 THESIS_STATUS_SEEDS = [
     ("unknown", "미정", 0),
     ("intact", "유효", 10),
@@ -107,14 +98,6 @@ def initialize_database() -> None:
                 is_active INTEGER NOT NULL DEFAULT 1
             );
 
-            CREATE TABLE IF NOT EXISTS roles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code TEXT NOT NULL UNIQUE,
-                label TEXT NOT NULL,
-                sort_order INTEGER NOT NULL DEFAULT 999,
-                is_active INTEGER NOT NULL DEFAULT 1
-            );
-
             CREATE TABLE IF NOT EXISTS thesis_statuses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 code TEXT NOT NULL UNIQUE,
@@ -145,7 +128,6 @@ def initialize_database() -> None:
                 weight REAL NOT NULL,
                 return_total REAL,
                 group_id INTEGER NOT NULL REFERENCES groups(id),
-                role_id INTEGER NOT NULL REFERENCES roles(id),
                 dca_enabled INTEGER NOT NULL DEFAULT 1,
                 thesis_status_id INTEGER NOT NULL REFERENCES thesis_statuses(id),
                 position_order INTEGER NOT NULL DEFAULT 0,
@@ -258,7 +240,6 @@ def initialize_database() -> None:
         )
         _ensure_column(conn, "evaluation_runs", "ips_config_snapshot_json", "TEXT")
         _seed_groups(conn, update_group_type=group_type_added)
-        _seed_lookup(conn, "roles", ROLE_SEEDS)
         _seed_lookup(conn, "thesis_statuses", THESIS_STATUS_SEEDS)
         _seed_target_allocations(conn)
         _seed_action_priorities(conn)

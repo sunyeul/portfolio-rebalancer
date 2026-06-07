@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from api.v1.serialization import (
     GROUP_SUMMARY_COLUMNS,
+    METRICS_COLUMNS,
     PROPOSAL_COLUMNS,
     RC_VIOLATION_COLUMNS,
     dataframe_records,
@@ -115,6 +116,14 @@ async def download_csv(request: Request, type: str = "metrics"):
     df = session_manager.get_dataframe(session_id, key)
     if df is None:
         raise HTTPException(status_code=404, detail="다운로드할 결과가 없습니다.")
+
+    column_maps = {
+        "metrics": METRICS_COLUMNS,
+        "proposal": PROPOSAL_COLUMNS,
+        "group_summary": GROUP_SUMMARY_COLUMNS,
+    }
+    if type in column_maps:
+        df = pd.DataFrame(dataframe_records(df, column_maps[type]))
 
     return Response(
         content=df.to_csv(index=False),

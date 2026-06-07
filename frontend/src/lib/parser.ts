@@ -7,7 +7,6 @@ const fields = [
   'allocation',
   'return_total',
   'group',
-  'role',
   'dca_enabled',
   'thesis_status'
 ] as const;
@@ -31,9 +30,6 @@ const headerMap: Record<string, keyof PortfolioRowInput> = {
   그룹: 'group',
   관리그룹: 'group',
   자산군: 'group',
-  role: 'role',
-  역할: 'role',
-  자산역할: 'role',
   dcaenabled: 'dca_enabled',
   dca_enabled: 'dca_enabled',
   dca: 'dca_enabled',
@@ -52,7 +48,6 @@ export function blankRow(): PortfolioRowInput {
     allocation: '',
     return_total: '',
     group: '',
-    role: '',
     dca_enabled: true,
     thesis_status: ''
   };
@@ -113,7 +108,6 @@ function parseFreeLine(line: string): PortfolioRowInput | null {
   }
 
   row.group = textTokens[0] ?? '';
-  row.role = textTokens[1] ?? '';
   return row;
 }
 

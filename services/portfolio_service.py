@@ -20,7 +20,6 @@ class PortfolioInputError(Exception):
 
 METADATA_DEFAULTS = {
     "group": ("groups", "ungrouped"),
-    "role": ("roles", "unknown"),
     "thesis_status": ("thesis_statuses", "unknown"),
 }
 
@@ -68,8 +67,6 @@ def parse_csv_to_assets(df: pd.DataFrame) -> tuple[List[Asset], List[str]]:
         "그룹": "group",
         "관리그룹": "group",
         "자산군": "group",
-        "역할": "role",
-        "자산역할": "role",
         "정기매수": "dca_enabled",
         "정기매수대상": "dca_enabled",
         "투자논리": "thesis_status",
@@ -101,7 +98,6 @@ def parse_csv_to_assets(df: pd.DataFrame) -> tuple[List[Asset], List[str]]:
                     allocation=float(r.allocation),
                     return_total=total,
                     group=_get_attr(r, "group", "ungrouped"),
-                    role=_get_attr(r, "role", "unknown"),
                     dca_enabled=_get_attr(r, "dca_enabled", True),
                     thesis_status=_get_attr(r, "thesis_status", "unknown"),
                 )
@@ -145,7 +141,6 @@ def parse_manual_edit_to_assets(
                 allocation=float(allocation),
                 return_total=return_total,
                 group=row.get("group", "ungrouped"),
-                role=row.get("role", "unknown"),
                 dca_enabled=row.get("dca_enabled", True),
                 thesis_status=row.get("thesis_status", "unknown"),
             )
@@ -195,17 +190,12 @@ def normalize_and_validate_assets(
             warnings.append(
                 f"{ticker}: group 값이 여러 개입니다. 첫 번째 값을 사용합니다."
             )
-        if group["role"].nunique(dropna=True) > 1:
-            warnings.append(
-                f"{ticker}: role 값이 여러 개입니다. 첫 번째 값을 사용합니다."
-            )
 
     asset_df = asset_df.groupby("ticker", as_index=False).agg(
         {
             "allocation": "sum",
             "return_total": "first",  # 첫 번째 return_total 유지 (중복 제거 시)
             "group": "first",
-            "role": "first",
             "dca_enabled": "first",
             "thesis_status": "first",
         }

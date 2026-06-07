@@ -432,7 +432,6 @@ def _insert_positions(conn, snapshot_id: int, asset_rows: list[dict[str, Any]]) 
     for position_order, row in enumerate(asset_rows):
         asset_id = _ensure_asset(conn, row["ticker"])
         group_id = _ensure_lookup(conn, "groups", row.get("group"), "ungrouped")
-        role_id = _ensure_lookup(conn, "roles", row.get("role"), "unknown")
         thesis_id = _ensure_lookup(
             conn, "thesis_statuses", row.get("thesis_status"), "unknown"
         )
@@ -445,12 +444,11 @@ def _insert_positions(conn, snapshot_id: int, asset_rows: list[dict[str, Any]]) 
                 weight,
                 return_total,
                 group_id,
-                role_id,
                 dca_enabled,
                 thesis_status_id,
                 position_order
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 snapshot_id,
@@ -459,7 +457,6 @@ def _insert_positions(conn, snapshot_id: int, asset_rows: list[dict[str, Any]]) 
                 row.get("weight", 0),
                 row.get("return_total"),
                 group_id,
-                role_id,
                 1 if row.get("dca_enabled", True) else 0,
                 thesis_id,
                 position_order,
@@ -607,7 +604,7 @@ def _insert_evaluation(
                 row.get("현재%"),
                 row.get("목표%"),
                 row.get("갭%"),
-                row.get("조정갭%"),
+                row.get("제안조정%"),
                 row.get("RC_Over%"),
                 row.get("RC_Target%"),
                 1 if row.get("실행") else 0,
@@ -707,13 +704,11 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
                 pos.weight,
                 pos.return_total,
                 g.code AS group_code,
-                r.code AS role_code,
                 pos.dca_enabled,
                 ts.code AS thesis_status_code
             FROM snapshot_positions pos
             JOIN assets a ON a.id = pos.asset_id
             JOIN groups g ON g.id = pos.group_id
-            JOIN roles r ON r.id = pos.role_id
             JOIN thesis_statuses ts ON ts.id = pos.thesis_status_id
             WHERE pos.snapshot_id = ?
             ORDER BY pos.position_order ASC, a.ticker ASC
@@ -790,7 +785,6 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
                 "allocation": row["allocation"],
                 "return_total": row["return_total"],
                 "group": row["group_code"],
-                "role": row["role_code"],
                 "dca_enabled": bool(row["dca_enabled"]),
                 "thesis_status": row["thesis_status_code"],
                 "weight": row["weight"],

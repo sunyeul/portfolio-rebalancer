@@ -73,7 +73,7 @@ import { type PortfolioRowInput, type SettingsValues, settingsSchema } from './l
 const sampleText = 'VOO 40\nQQQ 25\nSOXX 15\nUFO 3\nIONQ 2';
 const groupTypes = ['core', 'satellite', 'defensive', 'cash', 'unknown'];
 type AppView = 'workbench' | 'settings';
-type OptionTable = 'groups' | 'roles' | 'thesis_statuses';
+type OptionTable = 'groups' | 'thesis_statuses';
 type EditableOption = {
   table: OptionTable;
   option: ConfigOption;
@@ -131,7 +131,6 @@ function rowsFromAssets(assets: AssetRow[]): PortfolioRowInput[] {
     allocation: asset.allocation,
     return_total: asset.return_total === null ? '' : Number((asset.return_total * 100).toFixed(4)),
     group: asset.group,
-    role: asset.role,
     dca_enabled: asset.dca_enabled,
     thesis_status: asset.thesis_status
   }));
@@ -148,7 +147,6 @@ function rowsSignature(rows: PortfolioRowInput[]) {
       allocation: row.allocation,
       return_total: row.return_total ?? '',
       group: row.group ?? '',
-      role: row.role ?? '',
       dca_enabled: row.dca_enabled ?? true,
       thesis_status: row.thesis_status ?? ''
     }))
@@ -212,10 +210,8 @@ export function App() {
   });
   const savedSnapshots = snapshotsQuery.data?.snapshots ?? [];
   const groupOptions = configOptionsQuery.data?.groups ?? [];
-  const roleOptions = configOptionsQuery.data?.roles ?? [];
   const thesisStatusOptions = configOptionsQuery.data?.thesis_statuses ?? [];
   const activeGroupOptions = groupOptions.filter((option) => option.is_active);
-  const activeRoleOptions = roleOptions.filter((option) => option.is_active);
   const activeThesisStatusOptions = thesisStatusOptions.filter((option) => option.is_active);
 
   useEffect(() => {
@@ -492,7 +488,7 @@ export function App() {
       { accessorKey: 'current_weight_pct', header: '현재', cell: ({ row }) => pct(row.original.current_weight_pct, false) },
       { accessorKey: 'target_weight_pct', header: '목표', cell: ({ row }) => pct(row.original.target_weight_pct, false) },
       { accessorKey: 'gap_pct', header: '갭', cell: ({ row }) => pct(row.original.gap_pct, false) },
-      { accessorKey: 'adjusted_gap_pct', header: '조정갭', cell: ({ row }) => pct(row.original.adjusted_gap_pct, false) },
+      { accessorKey: 'suggested_trade_pct', header: '제안조정', cell: ({ row }) => pct(row.original.suggested_trade_pct, false) },
       { accessorKey: 'rc_over_pct', header: 'RC Over', cell: ({ row }) => pct(row.original.rc_over_pct, false) },
       nullableNumberColumn('efficiency_score', 'E', (row) => row.efficiency_score, num),
       { accessorKey: 'should_execute', header: '실행', cell: ({ row }) => (row.original.should_execute ? '실행' : '보류') }
@@ -906,7 +902,6 @@ export function App() {
                 <div className="grid gap-3">
                   {[
                     ['groups', '그룹', groupOptions],
-                    ['roles', '역할', roleOptions],
                     ['thesis_statuses', '투자 논리 상태', thesisStatusOptions]
                   ].map(([table, label, options]) => (
                     <div key={String(table)}>
@@ -1134,7 +1129,7 @@ export function App() {
                   <Plus className="h-4 w-4" />
                   행 추가
                 </button>
-                <span className="text-sm text-slate-500">역할, DCA, 투자 논리는 분석 후 세부 판단값에서 입력합니다.</span>
+                <span className="text-sm text-slate-500">DCA와 투자 논리는 분석 후 세부 판단값에서 입력합니다.</span>
               </div>
             </section>
           </div>
@@ -1174,7 +1169,7 @@ export function App() {
                   <div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-100 text-sm font-bold text-violet-800">2</div>
                   <h3 className="text-xl font-semibold text-slate-950">데이터 조회 & 보강</h3>
                 </div>
-                <p className="mt-2 text-sm text-slate-500">가격 데이터를 조회하고 포트폴리오/벤치마크/자산별 지표를 계산합니다. 이후 역할, DCA, 투자 논리를 보정합니다.</p>
+                <p className="mt-2 text-sm text-slate-500">가격 데이터를 조회하고 포트폴리오/벤치마크/자산별 지표를 계산합니다. 이후 DCA와 투자 논리를 보정합니다.</p>
               </div>
               <button
                 type="button"
@@ -1226,18 +1221,17 @@ export function App() {
                 </button>
               </div>
               <div className="overflow-x-auto p-4">
-                <div className="min-w-[980px] space-y-2">
-                  <div className="grid grid-cols-[0.8fr_0.85fr_1fr_1fr_56px_1fr] gap-2 px-1 text-xs font-bold uppercase text-slate-500">
+                <div className="min-w-[820px] space-y-2">
+                  <div className="grid grid-cols-[0.8fr_0.85fr_1fr_56px_1fr] gap-2 px-1 text-xs font-bold uppercase text-slate-500">
                     <span>티커</span>
                     <span className="text-right">계좌 수익률 override</span>
                     <span>그룹</span>
-                    <span>역할</span>
                     <span className="text-center">DCA</span>
                     <span>투자 논리</span>
                   </div>
                   {rows.map((row, index) => (
                     <div
-                      className="grid grid-cols-[0.8fr_0.85fr_1fr_1fr_56px_1fr] items-center gap-2 rounded-lg border border-slate-200 bg-white p-2"
+                      className="grid grid-cols-[0.8fr_0.85fr_1fr_56px_1fr] items-center gap-2 rounded-lg border border-slate-200 bg-white p-2"
                       key={`detail-${row.ticker}-${index}`}
                     >
                       <div className="px-2 text-sm font-bold text-blue-700">{row.ticker || '미입력'}</div>
@@ -1251,17 +1245,6 @@ export function App() {
                         ))}
                         {row.group && !groupOptions.some((group) => group.value === row.group) ? (
                           <option value={String(row.group)}>기타: {row.group}</option>
-                        ) : null}
-                      </select>
-                      <select className="table-input" value={String(row.role ?? '')} onChange={(event) => updateRow(index, 'role', event.target.value)}>
-                        <option value="">역할 선택</option>
-                        {activeRoleOptions.map((role) => (
-                          <option key={role.value} value={role.value}>
-                            {role.label}
-                          </option>
-                        ))}
-                        {row.role && !roleOptions.some((role) => role.value === row.role) ? (
-                          <option value={String(row.role)}>기타: {row.role}</option>
                         ) : null}
                       </select>
                       <label className="grid place-items-center">
@@ -1362,19 +1345,18 @@ export function App() {
                 />
               </div>
               <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-                <div className="min-w-[920px] space-y-2 p-3">
-                  <div className="grid grid-cols-[0.8fr_0.7fr_0.8fr_1.1fr_1fr_0.7fr_1fr_36px] gap-2 px-1 text-xs font-bold uppercase text-slate-500">
+                <div className="min-w-[780px] space-y-2 p-3">
+                  <div className="grid grid-cols-[0.8fr_0.7fr_0.8fr_1.1fr_0.7fr_1fr_36px] gap-2 px-1 text-xs font-bold uppercase text-slate-500">
                     <span>티커</span>
                     <span className="text-right">비중</span>
                     <span className="text-right">수익률</span>
                     <span>그룹</span>
-                    <span>역할</span>
                     <span>DCA</span>
                     <span>논리 상태</span>
                     <span />
                   </div>
                   {editingSnapshotRows.map((row, index) => (
-                    <div key={`${row.ticker}-${index}`} className="grid grid-cols-[0.8fr_0.7fr_0.8fr_1.1fr_1fr_0.7fr_1fr_36px] items-center gap-2">
+                    <div key={`${row.ticker}-${index}`} className="grid grid-cols-[0.8fr_0.7fr_0.8fr_1.1fr_0.7fr_1fr_36px] items-center gap-2">
                       <input className="table-input font-bold text-blue-700" value={String(row.ticker ?? '')} placeholder="VOO" onChange={(event) => updateEditingSnapshotRow(index, 'ticker', event.target.value)} />
                       <input className="table-input text-right" value={String(row.allocation ?? '')} placeholder="40" type="number" onChange={(event) => updateEditingSnapshotRow(index, 'allocation', event.target.value)} />
                       <input className="table-input text-right" value={String(row.return_total ?? '')} placeholder="%" type="number" onChange={(event) => updateEditingSnapshotRow(index, 'return_total', event.target.value)} />
@@ -1387,17 +1369,6 @@ export function App() {
                         ))}
                         {row.group && !groupOptions.some((group) => group.value === row.group) ? (
                           <option value={String(row.group)}>기타: {row.group}</option>
-                        ) : null}
-                      </select>
-                      <select className="table-input" value={String(row.role ?? '')} onChange={(event) => updateEditingSnapshotRow(index, 'role', event.target.value)}>
-                        <option value="">역할 선택</option>
-                        {activeRoleOptions.map((role) => (
-                          <option key={role.value} value={role.value}>
-                            {role.label}
-                          </option>
-                        ))}
-                        {row.role && !roleOptions.some((role) => role.value === row.role) ? (
-                          <option value={String(row.role)}>기타: {row.role}</option>
                         ) : null}
                       </select>
                       <select className="table-input" value={String(row.dca_enabled ?? true)} onChange={(event) => updateEditingSnapshotRow(index, 'dca_enabled', event.target.value === 'true')}>

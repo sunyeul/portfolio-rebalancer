@@ -75,7 +75,6 @@ def test_analysis_api_stores_json_safe_metrics(monkeypatch):
                 "E": [0.7],
                 "return_total": [0.2],
                 "group": ["core"],
-                "role": ["broad_etf"],
                 "dca_enabled": [True],
                 "thesis_status": ["intact"],
             }
@@ -198,7 +197,6 @@ def test_evaluation_api_and_download(monkeypatch):
                 "E": [0.7],
                 "return_total": [0.2],
                 "group": ["core"],
-                "role": ["broad_etf"],
                 "dca_enabled": [True],
                 "thesis_status": ["intact"],
             }
@@ -224,11 +222,11 @@ def test_evaluation_api_and_download(monkeypatch):
                 "목표%": [100.0],
                 "갭%": [0.0],
                 "E": [0.7],
+                "RC_Gap%": [0.0],
                 "RC_Over%": [0.0],
                 "RC_Target%": [100.0],
                 "return_total%": [20.0],
                 "group": ["core"],
-                "role": ["broad_etf"],
                 "dca_enabled": [True],
                 "thesis_status": ["intact"],
                 "risk_over": [False],
@@ -236,6 +234,8 @@ def test_evaluation_api_and_download(monkeypatch):
                 "히스테리시스제외": [True],
                 "최소거래미만": [True],
                 "실행": [False],
+                "제안조정%": [0.0],
+                "판단사유": ["히스테리시스 범위 및 최소 거래 미만"],
             }
         )
         return EvaluationResult(
@@ -254,8 +254,14 @@ def test_evaluation_api_and_download(monkeypatch):
 
     response = client.post("/api/v1/evaluation/run", json={})
     assert response.status_code == 200
-    assert response.json()["proposal"][0]["current_weight_pct"] == 100.0
+    proposal_row = response.json()["proposal"][0]
+    assert proposal_row["current_weight_pct"] == 100.0
+    assert proposal_row["rc_gap_pct"] == 0.0
+    assert proposal_row["suggested_trade_pct"] == 0.0
+    assert proposal_row["action_reason"] == "히스테리시스 범위 및 최소 거래 미만"
+    assert "adjusted_gap_pct" not in proposal_row
 
     csv_response = client.get("/api/v1/evaluation/download-csv?type=proposal")
     assert csv_response.status_code == 200
     assert "VOO" in csv_response.text
+    assert "suggested_trade_pct" in csv_response.text

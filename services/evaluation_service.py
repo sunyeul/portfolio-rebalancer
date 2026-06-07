@@ -36,6 +36,38 @@ class EvaluationError(Exception):
     pass
 
 
+def _action_reason(row: pd.Series | dict) -> str:
+    """제안 행의 실행/보류 이유를 사람이 읽는 짧은 문구로 변환합니다."""
+    within_hysteresis = bool(row.get("히스테리시스제외", False))
+    below_min_trade = bool(row.get("최소거래미만", False))
+    should_execute = bool(row.get("실행", False))
+
+    if not should_execute:
+        if within_hysteresis and below_min_trade:
+            return "히스테리시스 범위 및 최소 거래 미만"
+        if within_hysteresis:
+            return "히스테리시스 범위"
+        if below_min_trade:
+            return "최소 거래 미만"
+        return "보류"
+
+    risk_over = bool(row.get("risk_over", False))
+    efficiency_good = bool(row.get("efficiency_good", False))
+    gap_pct = float(row.get("갭%", 0) or 0)
+
+    if risk_over and not efficiency_good:
+        return "위험 초과 및 효율 미달"
+    if risk_over:
+        return "위험 초과"
+    if not efficiency_good:
+        return "효율 미달"
+    if gap_pct > 0:
+        return "목표 대비 부족"
+    if gap_pct < 0:
+        return "목표 대비 초과"
+    return "실행 후보"
+
+
 def run_evaluation(
     metrics_df: pd.DataFrame,
     target_weights: pd.Series | dict[str, float] | None,
@@ -60,7 +92,6 @@ def run_evaluation(
     """
     mdf = metrics_df.copy()
     mdf["group"] = mdf.get("group", pd.Series(index=mdf.index)).fillna("ungrouped")
-    mdf["role"] = mdf.get("role", pd.Series(index=mdf.index)).fillna("unknown")
     mdf["dca_enabled"] = (
         mdf.get("dca_enabled", pd.Series(True, index=mdf.index))
         .fillna(True)
@@ -93,7 +124,8 @@ def run_evaluation(
         # 공분산 행렬이 없으면 단순 비중 기반 (하위 호환성)
         rc_target = tgt.fillna(0)
     mdf["RC_Target"] = rc_target
-    mdf["RC_Over"] = (mdf["위험기여도"] - mdf["RC_Target"]).clip(lower=0)
+    rc_gap = mdf["위험기여도"] - mdf["RC_Target"]
+    mdf["RC_Over"] = rc_gap.clip(lower=0)
 
     # E를 효율 판단과 정기매수 우선순위에 모두 사용
     mdf["효율E"] = mdf["E"]
@@ -113,11 +145,11 @@ def run_evaluation(
             "목표%": (tgt * 100).round(2).values,
             "갭%": (gap * 100).round(2).values,
             "E": mdf["E"].round(2).values,
+            "RC_Gap%": (rc_gap * 100).round(2).values,
             "RC_Over%": rc_over_pct.round(2).values,
             "RC_Target%": (rc_target * 100).round(2).values,
             "return_total%": (mdf["return_total"] * 100).round(2).values,
             "group": mdf["group"].values,
-            "role": mdf["role"].values,
             "dca_enabled": mdf["dca_enabled"].values,
             "thesis_status": mdf["thesis_status"].values,
             "risk_over": mdf["risk_over"].values,
@@ -146,6 +178,8 @@ def run_evaluation(
     proposal["히스테리시스제외"] = within_band
     proposal["최소거래미만"] = ~above_min_trade
     proposal["실행"] = should_trade
+    proposal["제안조정%"] = 0.0
+    proposal["판단사유"] = proposal.apply(_action_reason, axis=1)
 
     # 실행 규칙: 우선순위 정의
     sell_list = proposal[(proposal["갭%"] < 0) & proposal["실행"]].copy()
@@ -153,10 +187,6 @@ def run_evaluation(
 
     buy_list = proposal[(proposal["갭%"] > 0) & proposal["실행"]].copy()
     buy_list = buy_list.sort_values(["갭%", "E"], ascending=[False, False])
-
-    fine_tune = proposal[
-        (proposal["실행"]) & (proposal["갭%"].abs() <= 1.0)
-    ].copy()
 
     # AIDEV-NOTE: constrained-scaling; 현금 중립성과 RC 상한을 동시에 만족하는 반복적 스케일링
     # 제약 조건을 고려한 주문 조정
@@ -197,22 +227,20 @@ def run_evaluation(
         # 조정된 주문을 buy_list와 sell_list에 반영
         buy_list = buy_list.copy()
         sell_list = sell_list.copy()
+        buy_list["제안조정%"] = buy_list["갭%"].round(2)
+        sell_list["제안조정%"] = sell_list["갭%"].round(2)
 
-        # buy_list에 조정갭% 컬럼 추가
-        buy_list["조정갭%"] = buy_list["갭%"].copy()
         for idx in buy_list.index:
             ticker = buy_list.loc[idx, "ticker"]
             if ticker in adjusted_orders.index:
                 adjusted_gap = adjusted_orders[ticker] * 100.0
-                buy_list.at[idx, "조정갭%"] = round(adjusted_gap, 2)
+                buy_list.at[idx, "제안조정%"] = round(adjusted_gap, 2)
 
-        # sell_list에 조정갭% 컬럼 추가
-        sell_list["조정갭%"] = sell_list["갭%"].copy()
         for idx in sell_list.index:
             ticker = sell_list.loc[idx, "ticker"]
             if ticker in adjusted_orders.index:
                 adjusted_gap = adjusted_orders[ticker] * 100.0
-                sell_list.at[idx, "조정갭%"] = round(adjusted_gap, 2)
+                sell_list.at[idx, "제안조정%"] = round(adjusted_gap, 2)
     else:
         # 공분산 행렬이 없거나 실행 대상이 없으면 단순 스케일링 (하위 호환성)
         total_sell = sell_list["갭%"].abs().sum() if len(sell_list) > 0 else 0
@@ -224,12 +252,20 @@ def run_evaluation(
                 if total_buy_before_scale > 0
                 else 1.0
             )
-            buy_list["조정갭%"] = (buy_list["갭%"] * scale_factor).round(2)
+            buy_list["제안조정%"] = (buy_list["갭%"] * scale_factor).round(2)
         else:
-            buy_list["조정갭%"] = buy_list["갭%"].round(2)
+            buy_list["제안조정%"] = buy_list["갭%"].round(2)
 
         if len(sell_list) > 0:
-            sell_list["조정갭%"] = sell_list["갭%"].round(2)
+            sell_list["제안조정%"] = sell_list["갭%"].round(2)
+
+    for trade_list in (buy_list, sell_list):
+        for idx, row in trade_list.iterrows():
+            proposal.at[idx, "제안조정%"] = row["제안조정%"]
+
+    fine_tune = proposal[
+        (proposal["실행"]) & (proposal["갭%"].abs() <= 1.0)
+    ].copy()
 
     # RC 상한선 체크 (경고)
     rc_cap_single = 0.12  # 단일 자산 최대 12%

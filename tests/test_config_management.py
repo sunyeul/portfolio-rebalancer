@@ -23,7 +23,6 @@ def test_config_options_and_ips_are_seeded_from_defaults(monkeypatch, tmp_path):
         group["value"] == "core" and group["group_type"] == "core"
         for group in options["groups"]
     )
-
     ips = client.get("/api/v1/config/ips").json()
     assert ips["ips_config"]["target_allocation"]["core"]["target"] == 0.8
     assert ips["ips_config"]["groups"]["satellite_space"]["type"] == "satellite"
@@ -57,12 +56,6 @@ def test_config_option_crud_uses_soft_deactivation(monkeypatch, tmp_path):
 
 def test_app_defined_config_values_are_read_only(monkeypatch, tmp_path):
     client = _client_with_db(monkeypatch, tmp_path)
-
-    role_response = client.post(
-        "/api/v1/config/roles",
-        json={"code": "custom_role", "label": "사용자 역할"},
-    )
-    assert role_response.status_code == 403
 
     thesis_response = client.patch(
         "/api/v1/config/thesis_statuses/intact/active",
@@ -109,7 +102,6 @@ def test_unknown_input_metadata_warns_and_does_not_create_options(monkeypatch, t
                     "ticker": "VOO",
                     "allocation": 100,
                     "group": "typo_group",
-                    "role": "typo_role",
                     "thesis_status": "typo_status",
                 }
             ]
@@ -118,9 +110,8 @@ def test_unknown_input_metadata_warns_and_does_not_create_options(monkeypatch, t
     assert response.status_code == 200
     payload = response.json()
     assert payload["assets"][0]["group"] == "ungrouped"
-    assert payload["assets"][0]["role"] == "unknown"
     assert payload["assets"][0]["thesis_status"] == "unknown"
-    assert len(payload["warnings"]) == 3
+    assert len(payload["warnings"]) == 2
 
     with connect() as conn:
         row = conn.execute(

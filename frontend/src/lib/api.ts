@@ -5,7 +5,6 @@ export type AssetRow = {
   allocation: number;
   return_total: number | null;
   group: string;
-  role: string;
   dca_enabled: boolean;
   thesis_status: string;
   weight: number;
@@ -26,7 +25,6 @@ export type MetricRow = {
   efficiency_score: number | null;
   return_total: number | null;
   group: string;
-  role: string;
   dca_enabled: boolean;
   thesis_status: string;
 };
@@ -44,11 +42,11 @@ export type ProposalRow = {
   target_weight_pct: number;
   gap_pct: number;
   efficiency_score: number | null;
+  rc_gap_pct: number;
   rc_over_pct: number;
   rc_target_pct: number;
   return_total_pct: number | null;
   group: string;
-  role: string;
   dca_enabled: boolean;
   thesis_status: string;
   risk_over: boolean;
@@ -56,7 +54,8 @@ export type ProposalRow = {
   within_hysteresis: boolean;
   below_min_trade: boolean;
   should_execute: boolean;
-  adjusted_gap_pct?: number | null;
+  suggested_trade_pct: number;
+  action_reason: string;
 };
 
 export type EvaluationResponse = {
@@ -80,7 +79,6 @@ export type ConfigOption = {
 
 export type ConfigOptionsResponse = {
   groups: ConfigOption[];
-  roles: ConfigOption[];
   thesis_statuses: ConfigOption[];
 };
 
@@ -298,7 +296,7 @@ export function getIpsConfig() {
 }
 
 export function saveConfigOption(
-  table: 'groups' | 'roles' | 'thesis_statuses',
+  table: 'groups' | 'thesis_statuses',
   payload: {
     code: string;
     label: string;
@@ -314,7 +312,7 @@ export function saveConfigOption(
 }
 
 export function setConfigOptionActive(
-  table: 'groups' | 'roles' | 'thesis_statuses',
+  table: 'groups' | 'thesis_statuses',
   code: string,
   is_active: boolean
 ) {

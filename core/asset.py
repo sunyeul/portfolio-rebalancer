@@ -15,7 +15,6 @@ class Asset(BaseModel):
         None, description="누적 수익률 (0.1234 = 12.34%, 선택)"
     )
     group: str = Field("ungrouped", description="IPS 관리 그룹")
-    role: str = Field("unknown", description="자산 역할")
     dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
     thesis_status: str = Field("unknown", description="투자 논리 상태")
 
@@ -70,7 +69,7 @@ class Asset(BaseModel):
             return "ungrouped"
         return str(v).strip().lower()
 
-    @field_validator("role", "thesis_status", mode="before")
+    @field_validator("thesis_status", mode="before")
     @classmethod
     def normalize_text_field(cls, v: str | None) -> str:
         """IPS 텍스트 필드는 비어 있으면 unknown으로 정규화합니다."""
@@ -150,8 +149,7 @@ def parse_text_to_assets(text: str) -> List[Asset]:
                 allocation=allocation,
                 return_total=return_total,
                 group=text_tokens[0] if len(text_tokens) > 0 else "ungrouped",
-                role=text_tokens[1] if len(text_tokens) > 1 else "unknown",
-                thesis_status=text_tokens[2] if len(text_tokens) > 2 else "unknown",
+                thesis_status=text_tokens[1] if len(text_tokens) > 1 else "unknown",
             )
             assets.append(asset)
         except ValueError:

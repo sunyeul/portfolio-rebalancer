@@ -34,7 +34,6 @@ class AssetMetrics(BaseModel):
         None, description="YTD 수익률 (소수, 예: 0.1234 = 12.34%)"
     )
     group: str = Field("ungrouped", description="IPS 관리 그룹")
-    role: str = Field("unknown", description="자산 역할")
     dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
     thesis_status: str = Field("unknown", description="투자 논리 상태")
 
@@ -88,11 +87,11 @@ class ProposalRow(BaseModel):
     target_weight_pct: float = Field(..., description="목표 가중치 (%)")
     gap_pct: float = Field(..., description="갭 (%)")
     efficiency_score: float | None = Field(None, description="효율 점수")
+    rc_gap_pct: float = Field(..., description="RC 편차 (%)")
     rc_over_pct: float = Field(..., description="RC_Over (%)")
     rc_target_pct: float = Field(..., description="RC_Target (%)")
     return_total: float | None = Field(None, description="누적 수익률")
     group: str = Field("ungrouped", description="IPS 관리 그룹")
-    role: str = Field("unknown", description="자산 역할")
     dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
     thesis_status: str = Field("unknown", description="투자 논리 상태")
     risk_over: bool = Field(..., description="위험기여도 초과 여부")
@@ -100,7 +99,8 @@ class ProposalRow(BaseModel):
     within_hysteresis: bool = Field(..., description="히스테리시스 대역 내")
     below_min_trade: bool = Field(..., description="최소거래 미만")
     should_execute: bool = Field(..., description="실행 여부")
-    adjusted_gap_pct: float | None = Field(None, description="조정 후 갭 (%)")
+    suggested_trade_pct: float = Field(..., description="제안 조정폭 (%)")
+    action_reason: str = Field(..., description="판단 사유")
 
     @field_validator("efficiency_score", mode="before")
     @classmethod

@@ -19,7 +19,7 @@ from storage.config_store import (
 
 router = APIRouter()
 
-OptionTable = Literal["groups", "roles", "thesis_statuses"]
+OptionTable = Literal["groups", "thesis_statuses"]
 
 
 class OptionRequest(BaseModel):

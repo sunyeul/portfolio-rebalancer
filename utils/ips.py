@@ -101,13 +101,11 @@ def _action_result(
 
 def _sell_gate_allows(row: pd.Series | dict, allocation_status: dict) -> bool:
     thesis_status = row.get("thesis_status", "unknown")
-    role = row.get("role", "unknown")
     group_type = row.get("group_type", "unknown")
     gap = float(row.get("갭%", 0) or 0)
 
     return (
         thesis_status == "broken"
-        or role in {"duplicate", "small_position"}
         or (
             group_type == "satellite"
             and allocation_status.get("satellite_status") == "over_max"
@@ -221,7 +219,7 @@ def classify_ips_actions(
     ips_config: dict,
 ) -> pd.DataFrame:
     """proposal_df와 metrics_df를 합쳐 전체 IPS 액션 테이블을 생성합니다."""
-    metrics_cols = ["group", "role", "dca_enabled", "thesis_status"]
+    metrics_cols = ["group", "dca_enabled", "thesis_status"]
     meta = metrics_df[metrics_cols].copy()
     meta["group_type"] = meta["group"].map(lambda g: get_group_type(str(g), ips_config))
 
@@ -231,7 +229,6 @@ def classify_ips_actions(
         if col not in df.columns and col in meta_df.columns:
             df = df.merge(meta_df[["ticker", col]], on="ticker", how="left")
     df["group"] = df["group"].fillna("ungrouped")
-    df["role"] = df["role"].fillna("unknown")
     df["dca_enabled"] = df["dca_enabled"].fillna(True).astype(bool)
     df["thesis_status"] = df["thesis_status"].fillna("unknown")
     df["group_type"] = df["group_type"].fillna("unknown")
