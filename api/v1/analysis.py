@@ -12,6 +12,15 @@ from services.analysis_service import AnalysisError, run_analysis
 
 router = APIRouter()
 
+EVALUATION_SESSION_KEYS = (
+    "proposal_df",
+    "ips_action_df",
+    "group_summary_df",
+    "rc_violations",
+    "ips_config_snapshot",
+    "evaluation_settings",
+)
+
 
 class AnalysisRunRequest(BaseModel):
     period: int | str = Field(12, description="Month count, YTD, or Max")
@@ -78,6 +87,8 @@ async def run_analysis_endpoint(payload: AnalysisRunRequest, request: Request):
             "bench": payload.bench.upper(),
         },
     )
+    for key in EVALUATION_SESSION_KEYS:
+        session_manager.delete(session_id, key)
 
     return {
         "metrics": dataframe_records(

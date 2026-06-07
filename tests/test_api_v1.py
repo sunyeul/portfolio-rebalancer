@@ -308,3 +308,86 @@ def test_evaluation_api_and_download(monkeypatch):
     assert csv_response.status_code == 200
     assert "VOO" in csv_response.text
     assert "suggested_trade_pct" in csv_response.text
+
+
+def test_analysis_rerun_clears_stale_evaluation_outputs(monkeypatch):
+    client = TestClient(app)
+    client.post(
+        "/api/v1/portfolio/manual",
+        json={"rows": [{"ticker": "VOO", "allocation": 100}]},
+    )
+
+    def fake_run_analysis(*args, **kwargs):
+        prices = pd.DataFrame({"VOO": [1.0, 1.1]})
+        returns = pd.DataFrame({"VOO": [0.1]})
+        metrics_df = pd.DataFrame(
+            {
+                "ticker": ["VOO"],
+                "가중치": [1.0],
+                "위험기여도": [1.0],
+                "E": [0.7],
+                "return_total": [0.2],
+                "group": ["core"],
+                "dca_enabled": [True],
+                "thesis_status": ["intact"],
+            }
+        ).set_index("ticker")
+        return AnalysisResult(
+            prices=prices,
+            returns=returns,
+            returns_smooth=returns,
+            weights_no_bench=pd.Series({"VOO": 1.0}),
+            metrics_df=metrics_df,
+            port_nav=pd.Series([1.0, 1.1]),
+            bench_nav=None,
+            portfolio_metrics={"cagr": 0.1, "volatility": 0.2, "sharpe": 1.0},
+            benchmark_metrics=None,
+            missing_tickers=[],
+        )
+
+    def fake_run_evaluation(*args, **kwargs):
+        proposal = pd.DataFrame(
+            {
+                "ticker": ["VOO"],
+                "현재%": [100.0],
+                "목표%": [100.0],
+                "갭%": [0.0],
+                "E": [0.7],
+                "RC_Gap%": [0.0],
+                "RC_Over%": [0.0],
+                "RC_Target%": [100.0],
+                "return_total%": [20.0],
+                "group": ["core"],
+                "dca_enabled": [True],
+                "thesis_status": ["intact"],
+                "risk_over": [False],
+                "efficiency_good": [True],
+                "히스테리시스제외": [True],
+                "최소거래미만": [True],
+                "실행": [False],
+                "제안조정%": [0.0],
+                "판단사유": ["기존 평가"],
+            }
+        )
+        return EvaluationResult(
+            proposal_df=proposal,
+            ips_action_df=pd.DataFrame([{"ticker": "VOO", "ips_action": "hold"}]),
+            group_summary_df=pd.DataFrame([{"group": "core", "weight": 1.0}]),
+            sell_list=pd.DataFrame(),
+            buy_list=pd.DataFrame(),
+            fine_tune_list=pd.DataFrame(),
+            rc_violations=pd.DataFrame(),
+        )
+
+    monkeypatch.setattr("api.v1.analysis.run_analysis", fake_run_analysis)
+    monkeypatch.setattr("api.v1.evaluation.run_evaluation", fake_run_evaluation)
+
+    assert client.post("/api/v1/analysis/run", json={"period": 12}).status_code == 200
+    assert client.post("/api/v1/evaluation/run", json={}).status_code == 200
+    assert client.get("/api/v1/evaluation/download-csv?type=proposal").status_code == 200
+
+    assert client.post("/api/v1/analysis/run", json={"period": 6}).status_code == 200
+    response = client.get("/api/v1/evaluation/download-csv?type=proposal")
+
+    assert response.status_code == 404
+    assert "다운로드할 결과가 없습니다" in response.json()["detail"]
