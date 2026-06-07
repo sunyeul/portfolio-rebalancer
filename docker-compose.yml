@@ -7,9 +7,6 @@ services:
       - "8000:8000"
     environment:
       - SESSION_SECRET_KEY=${SESSION_SECRET_KEY:-dev-secret-key-change-in-production}
-    volumes:
-      - ./static:/app/static
-      - ./templates:/app/templates
     restart: unless-stopped
 
   # Redis (optional, for production session storage)

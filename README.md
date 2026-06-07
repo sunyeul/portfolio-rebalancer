@@ -1,233 +1,71 @@
-# 포트폴리오 리밸런서 (Portfolio Rebalancer)
+# 포트폴리오 리밸런서
 
-FastAPI 기반의 포트폴리오 평가 및 IPS 기반 운영 제안 프로토타입입니다. 티커와 배분을 입력하면 가격 데이터를 조회하고, 위험기여도와 효율점수를 계산한 뒤 IPS 원칙에 따라 정기매수 조정, 관찰, 투자 논리 점검, 예외적 리밸런싱 매도 검토를 제안합니다.
+FastAPI 계산 백엔드와 Bun/Vite/React 프론트엔드로 구성된 포트폴리오 리밸런싱 워크벤치입니다. 티커와 비중을 입력하면 가격 데이터를 조회하고, 위험기여도/효율점수/IPS 기반 실행 제안을 계산합니다.
 
-![home画面](docs/images/home.jpeg)
+## Stack
 
----
+- Backend: FastAPI, pandas, numpy, scipy, yfinance, Pydantic
+- Frontend: Bun, Vite, React, TypeScript
+- Frontend libraries: TanStack Query, TanStack Table, React Hook Form, Zod, PapaParse, Recharts, lucide-react
 
-## 핵심 특징
-
-- **3단계 워크플로우**: 입력 → 데이터 조회/보강 → 평가/제안
-- **유연한 기간 선택**: 개월 수 지정 / YTD / Max 지원
-- **다양한 티커 지원**: `yfinance` 기반, 주식/ETF/암호화폐(예: `BTC-USD`)
-- **포트폴리오/벤치마크 지표**: CAGR, 변동성, 샤프, 최대낙폭, 추적오차, 정보비율
-- **자산별 보강 데이터**: 위험기여도(RC), 수익기여도, 효율점수(E), 베타, 알파, YTD 수익률
-- **모멘텀 보정**: YTD 수익률을 반영한 효율점수 E′ 계산 (가중치 조정 가능)
-- **스무딩 처리**: 윈저라이징 + 이동평균으로 이상치 완화 및 공분산 안정화
-- **IPS 기반 운영 제안**: 위험초과, 효율상태, 목표비중 갭, 투자 논리 상태를 직접 평가해 정기매수 증액/감액, 유지·관찰, 논리 점검, 예외적 매도 검토를 제안
-- **그룹 요약**: core/satellite 등 IPS 관리 그룹별 비중과 위험기여도 요약
-- **RC 상한 체크**: 개별 자산의 위험기여도 상한선 위반 여부 확인
-- **히스테리시스 & 최소거래**: 불필요한 소액 거래 필터링
-- **CSV 다운로드**: 보강 메트릭, 실행 계획 내보내기
-
----
-
-## 빠른 시작
-
-### 요구사항
-
-- Python 3.12 이상
-- 네트워크 연결 (가격 데이터 조회용)
-- 주요 의존성: `fastapi`, `uvicorn`, `yfinance`, `pandas`, `numpy`, `scipy`, `pydantic`
-
-### 설치 및 실행 (권장: uv)
+## 실행
 
 ```bash
-# 의존성 설치 (pyproject.toml 기준)
+# Python 의존성
 uv sync
 
-# 앱 실행
-uv run uvicorn main:app --reload
+# Frontend 의존성
+cd frontend
+bun install
+cd ..
 
-# 또는
-uv run python main.py
+# API 서버
+make run
+
+# 별도 터미널에서 Vite 개발 서버
+make frontend-dev
 ```
 
-### 설치 및 실행 (대안: pip/venv)
+개발 중에는 Vite가 `/api` 요청을 `http://localhost:8000`으로 프록시합니다. 프로덕션 빌드는 FastAPI가 `frontend/dist`를 `/`로 서빙합니다.
+
+## 주요 명령어
 
 ```bash
-# 가상환경 생성 및 활성화 (예: macOS/Linux)
-python3.12 -m venv .venv
-source ./.venv/bin/activate
-
-# 의존성 설치
-pip install -r <(python - <<'PY'
-import tomllib, sys
-py=tomllib.load(open('pyproject.toml','rb'))
-print('\n'.join(py['project']['dependencies']))
-PY
-)
-
-# 앱 실행
-uvicorn main:app --reload
+make run             # FastAPI API 서버
+make frontend-dev    # Vite 개발 서버
+make dev             # API + 프론트 개발 서버
+make build-frontend  # React 앱 빌드
+uv run pytest        # 백엔드 테스트
 ```
 
-앱이 실행되면 브라우저에서 안내된 로컬 URL로 접속하세요.
-
----
-
-## 사용 방법
-
-앱 내의 안내대로 아래 흐름으로 진행합니다.
-
-1) 포트폴리오 입력
-
-- 입력 방식: 텍스트 붙여넣기, CSV 업로드(`ticker, allocation`), 수동 편집기
-- 동일 티커는 합산되며, 배분(%)는 자동으로 0~1 가중치로 정규화됩니다.
-- CSV는 IPS 메타데이터 컬럼도 지원합니다.
-
-```csv
-ticker,allocation,return_total,group,role,dca_enabled,thesis_status
-VOO,40,,core,broad_etf,true,intact
-QQQ,25,,core,growth_etf,true,intact
-SOXX,15,,core,sector_etf,true,intact
-UFO,3,,satellite_space,theme_etf,false,watch
-IONQ,2,-12,satellite_quantum,individual,false,watch
-```
-
-2) 데이터 조회 & 보강
-
-- 기간 선택: 개월 수 / YTD / Max
-- 무위험 수익률(RF), 벤치마크 티커 설정
-- 포트폴리오/벤치마크의 CAGR·변동성·샤프·최대낙폭·추적오차·정보비율 계산
-- 자산별 보강 테이블: 위험기여도(RC), 수익기여도, 효율점수(E), 베타, 알파, YTD 수익률
-- 모멘텀 보정: YTD 수익률을 반영한 효율점수 E′ 계산
-
-3) 평가 & 실행 계획 제안
-
-- 티커별 목표 가중치(%)를 입력해 현재 대비 갭 분석
-- RC_Over, E, 목표비중 갭, 그룹, 정기매수 가능 여부, 투자 논리 상태를 종합해 IPS 액션 산출
-- RC 상한선 체크: 개별 자산의 위험기여도가 설정 상한을 초과하는지 확인
-- 히스테리시스 & 최소거래 필터링으로 불필요한 소액 거래 제외
-- 자동 생성된 IPS 운영 제안: 정기매수 증액, 정기매수 감액/중단, 투자 논리 점검, 유지·관찰, 예외적 리밸런싱 매도 검토
-- 결과 CSV 다운로드 제공
-
----
-
-## 사이드바 설정
-
-- **평가 기간 선택**: 개월(기본 12) / YTD / Max
-- **무위험 수익률**(연간, %): 기본 0.0
-- **벤치마크 티커**: 기본 `SPY`
-- **RC_Over 임계값**(%): 기본 1.5 (위험 과노출 기준)
-- **효율 점수 E 임계값**: 기본 0.5 (효율성 기준)
-- **모멘텀 가중치**: 기본 0.2 (E′ 계산 시 YTD 수익률 반영 비율)
-
-임계값은 IPS 신호를 계산하는 데 사용됩니다. RC_Over 임계값은 위험초과 여부, E 임계값은 효율상태를 판단합니다.
-
----
-
-## 프로젝트 구조
-
-```text
-/portfolio_rebalancer
-├─ main.py                 # FastAPI 엔트리포인트
-├─ core/
-│  ├─ asset.py             # 자산 모델, 텍스트 파싱
-│  └─ models.py            # Pydantic 데이터 모델 (AssetMetrics, ProposalRow 등)
-├─ steps/
-│  ├─ portfolio_input.py   # 1) 입력 단계
-│  ├─ data_analysis.py     # 2) 데이터 조회 & 보강
-│  └─ evaluation_proposal.py # 3) 평가 & 실행 계획 제안
-├─ utils/
-│  ├─ data_fetcher.py      # yfinance 가격 조회, YTD 수익률 계산
-│  ├─ helpers.py           # 지표 설명 헬퍼
-│  └─ metrics.py           # 재무/리스크 계산 (CAGR, 샤프, RC, 효율점수, 스무딩 등)
-├─ docs/                   # 개발 워크플로우/정리 문서
-├─ pyproject.toml          # 의존성/툴링 설정
-├─ uv.lock                 # 의존성 잠금 파일
-└─ README.md               # 본 문서
-```
-
-모듈식 구조를 유지합니다: 페이지(`steps/`), 핵심 로직(`core/`), 유틸리티(`utils/`).
-
----
-
-## 지표 정의(요약)
-
-### 포트폴리오 수준
-
-- **CAGR**: 복합 연간 성장률
-- **변동성**: 연율화 표준편차(거래일 252일 기준)
-- **샤프 지수**: (CAGR − RF) / 변동성
-- **최대낙폭**: 피크 대비 최저점 낙폭
-- **추적오차**: 포트폴리오와 벤치마크 수익률 차이의 표준편차
-- **정보비율**: (포트폴리오 CAGR − 벤치마크 CAGR) / 추적오차
-
-### 자산별
-
-- **위험기여도(RC)**: 공분산 기반 위험 분해에서 각 자산의 비율
-- **수익기여도**: 자산 CAGR × 가중치 (근사)
-- **효율점수(E)**: Sharpe와 IR을 z-score→CDF로 정규화한 뒤 0.6:0.4로 결합한 기본 효율 점수
-- **효율점수 E′**: E에 누적/YTD 수익률 모멘텀을 반영한 정기매수 강도 참고 점수
-- **RC_Over**: 현재 RC − 목표 RC (음수는 0으로 클리핑)
-- **IPS 액션**: RC_Over, E, 목표비중 갭, 그룹, 정기매수 가능 여부, 투자 논리 상태를 종합해 산출
-- **베타**: 벤치마크 대비 민감도
-- **알파**: 벤치마크 대비 초과 수익률
-
-자세한 설명은 앱 내의 "지표 설명" 확장 영역을 참고하세요.
-
----
-
-## 개발 원칙(MVP)
-
-본 프로젝트는 다음 원칙을 따릅니다.
-
-- MVP 중심: 핵심 기능부터 빠르게 완성 → 피드백 기반 개선
-- 동작 확인 우선: 변경 후 `uv run uvicorn main:app --reload`로 즉시 검증
-- 모듈식 구조: `pages/`, `core/`, `utils/` 책임 분리
-- KISS: 과도한 추상화/최적화 금지, 필요한 때만 도입
-- YAGNI: “나중에 필요할 듯”한 불필요 기능 금지
-- 타입 힌트와 일관된 명명, 안전한 외부 입력 검증
-
-코드 내 AIDEV 주석 규칙 활용 예:
-
-```python
-# AIDEV-NOTE: cache-strategy; yfinance 호출이 느려서 @st.cache_data 사용
-# AIDEV-TODO: add-error-handling; 네트워크 실패 시 재시도 로직 미구현
-# AIDEV-FIXME: sharpe-ratio-div-zero; 분모 0 가능성 (임시 max 처리)
-```
-
----
-
-## 자주 쓰는 명령어
+프론트 검증:
 
 ```bash
-# 코드 포매팅
-uv run ruff format .
-
-# 린팅 및 자동 수정
-uv run ruff check . --fix
-
-# 앱 실행
-uv run uvicorn main:app --reload
+cd frontend
+bun run typecheck
+bun run build
 ```
 
----
+## API
 
-## 데이터 및 주의사항
+모든 애플리케이션 API는 `/api/v1` 아래에 있습니다.
 
-- **데이터 출처**: `yfinance` (조정 종가). 공급자/네트워크 상태에 따라 조회 실패/지연 가능
-- **목적**: 교육/프로토타이핑 목적이며 투자 자문이 아닙니다
-- **암호화폐/특수 티커**: 가용성/연속성 이슈가 있을 수 있습니다
-- **스무딩 처리**: 윈저라이징 + 3-window 이동평균으로 이상치 완화 (자동 적용)
-- **모멘텀 보정**: YTD 수익률을 반영한 E′ 계산으로 단기 성과를 고려 (가중치 조정 가능)
+- `POST /api/v1/portfolio/manual`
+- `POST /api/v1/portfolio/csv`
+- `POST /api/v1/analysis/run`
+- `POST /api/v1/evaluation/run`
+- `GET /api/v1/evaluation/download-csv`
 
----
+세션은 서명된 `session_id` cookie로 유지됩니다.
 
-## 트러블슈팅
+## Docker
 
-- **가격 데이터 없음 경고**: 티커 오타, 기간 과도, 휴장일, 데이터 미지원 가능성 확인
-- **빈 데이터프레임/NaN 지표**: 기간 내 데이터 부족 또는 결측치 제거 영향
-- **네트워크 오류**: 재시도 또는 기간 축소, 티커 수 축소 권장
-- **YTD 기간 선택 시 데이터 부족**: 연초부터 현재까지 데이터가 부족할 경우 개월 수 지정 권장
-- **효율점수 E/E′ 이상값**: 샤프 지수가 극단적인 경우 발생 가능, 스무딩 처리로 완화
-- **RC 상한 위반 경고**: 개별 자산의 위험기여도가 설정 상한을 초과하는 경우 표시
-- **macOS 보안 경고**: `xattr -d com.apple.quarantine ~/.local/bin/uv` 등 환경에 맞는 조치 필요
+```bash
+docker compose up --build
+```
 
----
+Docker 빌드는 Bun으로 프론트를 빌드한 뒤, Python 런타임 이미지에서 FastAPI가 빌드 산출물을 서빙합니다.
 
-## 라이선스
+## 주의
 
-사내/개인 용도 프로토타입. 별도 명시 전까지 외부 배포/상업적 이용 전 검토 필요.
+이 앱은 교육/프로토타이핑 목적입니다. 계산 결과는 투자 자문이 아니며, 데이터는 `yfinance` 공급 상태와 네트워크에 영향을 받을 수 있습니다.
