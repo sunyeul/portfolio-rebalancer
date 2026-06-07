@@ -8,26 +8,6 @@ target_allocation:
     target: 0.20
     max: 0.30
 
-groups:
-  core:
-    type: core
-  satellite_ai_infra:
-    type: satellite
-  satellite_ai_software:
-    type: satellite
-  satellite_space:
-    type: satellite
-  satellite_quantum:
-    type: satellite
-  korea_equity:
-    type: satellite
-  bond_mixed:
-    type: defensive
-  cash:
-    type: cash
-  ungrouped:
-    type: unknown
-
 action_priority:
   increase_dca: 1
   decrease_dca: 2
@@ -40,5 +20,4 @@ rules:
   default_when_uncertain: core
   immediate_buy_is_exception: true
   prefer_dca_over_sell: true
-  use_momentum_as_dca_intensity_only: true
   min_trade_pct: 0.01

@@ -2,6 +2,15 @@ from typing import List
 from pydantic import BaseModel, field_validator, Field
 import re
 
+VALID_GROUPS = {"core", "satellite", "cash", "unclassified"}
+DEFAULT_GROUP = "unclassified"
+GROUP_LABELS = {
+    "core": "코어",
+    "satellite": "위성",
+    "cash": "현금",
+    "unclassified": "미분류",
+}
+
 
 class Asset(BaseModel):
     """자산 클래스: 티커와 배분을 저장합니다.
@@ -14,7 +23,7 @@ class Asset(BaseModel):
     return_total: float | None = Field(
         None, description="누적 수익률 (0.1234 = 12.34%, 선택)"
     )
-    group: str = Field("ungrouped", description="IPS 관리 그룹")
+    group: str = Field(DEFAULT_GROUP, description="IPS 고정 그룹 분류")
     dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
     thesis_status: str = Field("unknown", description="투자 논리 상태")
 
@@ -64,10 +73,11 @@ class Asset(BaseModel):
     @field_validator("group", mode="before")
     @classmethod
     def normalize_group(cls, v: str | None) -> str:
-        """그룹은 비어 있으면 ungrouped로 정규화합니다."""
+        """그룹은 고정 분류값만 허용하고 그 외 값은 미분류로 정규화합니다."""
         if v is None or str(v).strip() == "":
-            return "ungrouped"
-        return str(v).strip().lower()
+            return DEFAULT_GROUP
+        normalized = str(v).strip().lower()
+        return normalized if normalized in VALID_GROUPS else DEFAULT_GROUP
 
     @field_validator("thesis_status", mode="before")
     @classmethod
@@ -148,7 +158,7 @@ def parse_text_to_assets(text: str) -> List[Asset]:
                 ticker=ticker,
                 allocation=allocation,
                 return_total=return_total,
-                group=text_tokens[0] if len(text_tokens) > 0 else "ungrouped",
+                group=text_tokens[0] if len(text_tokens) > 0 else DEFAULT_GROUP,
                 thesis_status=text_tokens[1] if len(text_tokens) > 1 else "unknown",
             )
             assets.append(asset)

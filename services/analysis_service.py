@@ -15,6 +15,7 @@ from utils.data_fetcher import (
     fetch_prices,
     compute_ytd_returns,
 )
+from core.asset import DEFAULT_GROUP
 from utils.metrics import (
     annualize_cov,
     cagr_from_series,
@@ -280,7 +281,7 @@ def run_analysis(
 
     metrics_df["group"] = metrics_df.get(
         "group", pd.Series(index=metrics_df.index)
-    ).fillna("ungrouped")
+    ).fillna(DEFAULT_GROUP)
     metrics_df["dca_enabled"] = (
         metrics_df.get("dca_enabled", pd.Series(True, index=metrics_df.index))
         .fillna(True)

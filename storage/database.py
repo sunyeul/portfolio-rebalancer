@@ -9,18 +9,6 @@ from pathlib import Path
 
 DEFAULT_DB_PATH = Path("data") / "portfolio_rebalancer.sqlite3"
 
-GROUP_SEEDS = [
-    ("ungrouped", "미분류", "unknown", 0),
-    ("core", "핵심 자산", "core", 10),
-    ("satellite_ai_infra", "위성: AI 인프라", "satellite", 20),
-    ("satellite_ai_software", "위성: AI 소프트웨어", "satellite", 30),
-    ("satellite_space", "위성: 우주/항공", "satellite", 40),
-    ("satellite_quantum", "위성: 양자", "satellite", 50),
-    ("korea_equity", "한국 주식", "satellite", 60),
-    ("bond_mixed", "채권/혼합", "defensive", 70),
-    ("cash", "현금", "cash", 80),
-]
-
 THESIS_STATUS_SEEDS = [
     ("unknown", "미정", 0),
     ("intact", "유효", 10),
@@ -46,7 +34,6 @@ IPS_RULE_SEEDS = [
     ("default_when_uncertain", '"core"'),
     ("immediate_buy_is_exception", "true"),
     ("prefer_dca_over_sell", "true"),
-    ("use_momentum_as_dca_intensity_only", "true"),
     ("min_trade_pct", "0.01"),
 ]
 
@@ -89,15 +76,6 @@ def initialize_database() -> None:
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
-            CREATE TABLE IF NOT EXISTS groups (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code TEXT NOT NULL UNIQUE,
-                label TEXT NOT NULL,
-                group_type TEXT NOT NULL DEFAULT 'unknown',
-                sort_order INTEGER NOT NULL DEFAULT 999,
-                is_active INTEGER NOT NULL DEFAULT 1
-            );
-
             CREATE TABLE IF NOT EXISTS thesis_statuses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 code TEXT NOT NULL UNIQUE,
@@ -127,7 +105,7 @@ def initialize_database() -> None:
                 allocation REAL NOT NULL,
                 weight REAL NOT NULL,
                 return_total REAL,
-                group_id INTEGER NOT NULL REFERENCES groups(id),
+                "group" TEXT NOT NULL DEFAULT 'unclassified',
                 dca_enabled INTEGER NOT NULL DEFAULT 1,
                 thesis_status_id INTEGER NOT NULL REFERENCES thesis_statuses(id),
                 position_order INTEGER NOT NULL DEFAULT 0,
@@ -163,7 +141,6 @@ def initialize_database() -> None:
                 return_contribution REAL,
                 weight REAL,
                 efficiency_score REAL,
-                dca_intensity_score REAL,
                 return_total REAL,
                 record_json TEXT NOT NULL
             );
@@ -179,7 +156,7 @@ def initialize_database() -> None:
             );
 
             CREATE TABLE IF NOT EXISTS ips_target_allocations (
-                group_type TEXT PRIMARY KEY,
+                "group" TEXT PRIMARY KEY,
                 min REAL NOT NULL,
                 target REAL NOT NULL,
                 max REAL NOT NULL
@@ -222,8 +199,7 @@ def initialize_database() -> None:
             CREATE TABLE IF NOT EXISTS group_summary_rows (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 evaluation_run_id INTEGER NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
-                group_type TEXT,
-                group_code TEXT,
+                "group" TEXT,
                 record_json TEXT NOT NULL
             );
 
@@ -235,11 +211,8 @@ def initialize_database() -> None:
             );
             """
         )
-        group_type_added = _ensure_column(
-            conn, "groups", "group_type", "TEXT NOT NULL DEFAULT 'unknown'"
-        )
         _ensure_column(conn, "evaluation_runs", "ips_config_snapshot_json", "TEXT")
-        _seed_groups(conn, update_group_type=group_type_added)
+        _ensure_target_allocation_table(conn)
         _seed_lookup(conn, "thesis_statuses", THESIS_STATUS_SEEDS)
         _seed_target_allocations(conn)
         _seed_action_priorities(conn)
@@ -259,21 +232,23 @@ def _ensure_column(
     return False
 
 
-def _seed_groups(conn: sqlite3.Connection, update_group_type: bool = False) -> None:
-    for code, label, group_type, sort_order in GROUP_SEEDS:
-        conn.execute(
-            """
-            INSERT INTO groups (code, label, group_type, sort_order, is_active)
-            VALUES (?, ?, ?, ?, 1)
-            ON CONFLICT(code) DO NOTHING
-            """,
-            (code, label, group_type, sort_order),
+def _ensure_target_allocation_table(conn: sqlite3.Connection) -> None:
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(ips_target_allocations)")
+    }
+    if "group" in columns:
+        return
+    conn.execute("DROP TABLE IF EXISTS ips_target_allocations")
+    conn.execute(
+        """
+        CREATE TABLE ips_target_allocations (
+            "group" TEXT PRIMARY KEY,
+            min REAL NOT NULL,
+            target REAL NOT NULL,
+            max REAL NOT NULL
         )
-        if update_group_type:
-            conn.execute(
-                "UPDATE groups SET group_type = ? WHERE code = ?",
-                (group_type, code),
-            )
+        """
+    )
 
 
 def _seed_lookup(
@@ -293,14 +268,17 @@ def _seed_lookup(
 
 
 def _seed_target_allocations(conn: sqlite3.Connection) -> None:
-    for group_type, min_value, target_value, max_value in TARGET_ALLOCATION_SEEDS:
+    conn.execute(
+        'DELETE FROM ips_target_allocations WHERE "group" NOT IN (\'core\', \'satellite\')'
+    )
+    for group, min_value, target_value, max_value in TARGET_ALLOCATION_SEEDS:
         conn.execute(
             """
-            INSERT INTO ips_target_allocations (group_type, min, target, max)
+            INSERT INTO ips_target_allocations ("group", min, target, max)
             VALUES (?, ?, ?, ?)
-            ON CONFLICT(group_type) DO NOTHING
+            ON CONFLICT("group") DO NOTHING
             """,
-            (group_type, min_value, target_value, max_value),
+            (group, min_value, target_value, max_value),
         )
 
 

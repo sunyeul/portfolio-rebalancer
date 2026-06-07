@@ -49,7 +49,7 @@ def test_portfolio_crud_and_input_only_snapshot(monkeypatch, tmp_path):
         json={
             "rows": [
                 {"ticker": "voo", "allocation": 70, "group": "core"},
-                {"ticker": "ufo", "allocation": 30, "group": "satellite_space"},
+                {"ticker": "ufo", "allocation": 30, "group": "satellite"},
             ]
         },
     )
@@ -71,13 +71,13 @@ def test_portfolio_crud_and_input_only_snapshot(monkeypatch, tmp_path):
     payload = load_response.json()
     assert [row["ticker"] for row in payload["portfolio"]["assets"]] == ["UFO", "VOO"]
     assert [row["group"] for row in payload["portfolio"]["assets"]] == [
-        "satellite_space",
+        "satellite",
         "core",
     ]
     assert payload["analysis"] is None
 
 
-def test_snapshot_can_save_latest_rows_with_groups(monkeypatch, tmp_path):
+def test_snapshot_can_save_latest_rows_with_fixed_group(monkeypatch, tmp_path):
     client = _client_with_db(monkeypatch, tmp_path)
     portfolio_id = client.post(
         "/api/v1/portfolios",
@@ -90,7 +90,7 @@ def test_snapshot_can_save_latest_rows_with_groups(monkeypatch, tmp_path):
             "name": "입력 즉시 저장",
             "rows": [
                 {"ticker": "VOO", "allocation": 70, "group": "core"},
-                {"ticker": "UFO", "allocation": 30, "group": "satellite_space"},
+                {"ticker": "UFO", "allocation": 30, "group": "satellite"},
             ],
         },
     )
@@ -102,7 +102,7 @@ def test_snapshot_can_save_latest_rows_with_groups(monkeypatch, tmp_path):
     payload = load_response.json()
     assert [row["ticker"] for row in payload["portfolio"]["assets"]] == ["UFO", "VOO"]
     assert [row["group"] for row in payload["portfolio"]["assets"]] == [
-        "satellite_space",
+        "satellite",
         "core",
     ]
     assert payload["analysis"] is None
@@ -119,7 +119,7 @@ def test_current_state_auto_save_does_not_create_snapshot(monkeypatch, tmp_path)
         json={
             "rows": [
                 {"ticker": "VOO", "allocation": 70, "group": "core"},
-                {"ticker": "UFO", "allocation": 30, "group": "satellite_space"},
+                {"ticker": "UFO", "allocation": 30, "group": "satellite"},
             ]
         },
     )
@@ -140,7 +140,7 @@ def test_current_state_auto_save_does_not_create_snapshot(monkeypatch, tmp_path)
     assert load_response.status_code == 200
     payload = load_response.json()
     assert [row["group"] for row in payload["portfolio"]["assets"]] == [
-        "satellite_space",
+        "satellite",
         "core",
     ]
 
@@ -330,7 +330,7 @@ def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp
                 {
                     "ticker": "VOO",
                     "allocation": 70,
-                    "group": "satellite_space",
+                    "group": "satellite",
                     "dca_enabled": False,
                     "thesis_status": "watch",
                 },
@@ -367,7 +367,7 @@ def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp
             "ticker": "VOO",
             "allocation": 70.0,
             "return_total": None,
-            "group": "satellite_space",
+            "group": "satellite",
             "dca_enabled": False,
             "thesis_status": "watch",
             "weight": 0.7,
@@ -457,7 +457,9 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
             buy_list=pd.DataFrame(),
             fine_tune_list=pd.DataFrame(),
             rc_violations=pd.DataFrame(),
-            ips_config_snapshot={"groups": {"core": {"type": "core"}}},
+            ips_config_snapshot={
+                "target_allocation": {"core": {"target": 0.8}},
+            },
         )
 
     monkeypatch.setattr("api.v1.analysis.run_analysis", fake_run_analysis)
@@ -481,7 +483,7 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
     assert proposal_row["suggested_trade_pct"] == 0.0
     assert proposal_row["action_reason"] == "히스테리시스 범위 및 최소 거래 미만"
     assert "adjusted_gap_pct" not in proposal_row
-    assert payload["evaluation"]["ips_config_snapshot"]["groups"]["core"]["type"] == "core"
+    assert payload["evaluation"]["ips_config_snapshot"]["target_allocation"]["core"]["target"] == 0.8
 
     csv_response = load_client.get("/api/v1/evaluation/download-csv?type=proposal")
     assert csv_response.status_code == 200

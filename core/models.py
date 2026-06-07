@@ -37,7 +37,7 @@ class AssetMetrics(BaseModel):
     return_total: float | None = Field(
         None, description="YTD 수익률 (소수, 예: 0.1234 = 12.34%)"
     )
-    group: str = Field("ungrouped", description="IPS 관리 그룹")
+    group: str = Field("unclassified", description="IPS 고정 그룹 분류")
     dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
     thesis_status: str = Field("unknown", description="투자 논리 상태")
 
@@ -95,7 +95,7 @@ class ProposalRow(BaseModel):
     rc_over_pct: float = Field(..., description="RC_Over (%)")
     rc_target_pct: float = Field(..., description="RC_Target (%)")
     return_total: float | None = Field(None, description="누적 수익률")
-    group: str = Field("ungrouped", description="IPS 관리 그룹")
+    group: str = Field("unclassified", description="IPS 고정 그룹 분류")
     dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
     thesis_status: str = Field("unknown", description="투자 논리 상태")
     risk_over: bool = Field(..., description="위험기여도 초과 여부")
@@ -141,8 +141,7 @@ class IPSActionRow(BaseModel):
 class IPSGroupSummaryRow(BaseModel):
     """IPS 그룹 요약 행."""
 
-    group_type: str = Field(..., description="그룹 유형")
-    group: str = Field(..., description="그룹명")
+    group: str = Field(..., description="고정 그룹 분류")
     weight: float = Field(..., description="현재 비중")
     risk_contribution: float = Field(..., description="위험기여도")
     avg_efficiency: float | None = Field(None, description="평균 E")

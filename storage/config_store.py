@@ -8,15 +8,10 @@ from typing import Any
 from storage.database import connect, initialize_database
 
 
-GROUP_TYPES = {"core", "satellite", "defensive", "cash", "unknown"}
+TARGET_GROUPS = {"core", "satellite"}
 OPTION_TABLES = {
-    "groups": {
-        "default": "ungrouped",
-        "extra_columns": ("group_type",),
-    },
     "thesis_statuses": {
         "default": "unknown",
-        "extra_columns": (),
     },
 }
 
@@ -30,15 +25,12 @@ def normalize_code(value: Any) -> str:
 
 
 def _row_to_option(row) -> dict[str, Any]:
-    option = {
+    return {
         "value": row["code"],
         "label": row["label"],
         "is_active": bool(row["is_active"]),
         "sort_order": row["sort_order"],
     }
-    if "group_type" in row.keys():
-        option["group_type"] = row["group_type"]
-    return option
 
 
 def list_options(include_inactive: bool = True) -> dict[str, list[dict[str, Any]]]:
@@ -70,83 +62,12 @@ def active_codes(table: str) -> set[str]:
     return {row["code"] for row in rows}
 
 
-def upsert_option(
-    table: str,
-    code: str,
-    label: str,
-    sort_order: int = 999,
-    is_active: bool = True,
-    group_type: str | None = None,
-) -> dict[str, Any]:
-    if table not in OPTION_TABLES:
-        raise ConfigError("지원하지 않는 옵션 테이블입니다.")
-    code = normalize_code(code)
-    label = label.strip()
-    if not code:
-        raise ConfigError("code를 입력해주세요.")
-    if not label:
-        raise ConfigError("label을 입력해주세요.")
-
-    initialize_database()
-    with connect() as conn:
-        if table == "groups":
-            next_group_type = normalize_code(group_type) or "unknown"
-            if next_group_type not in GROUP_TYPES:
-                raise ConfigError("지원하지 않는 group_type입니다.")
-            conn.execute(
-                """
-                INSERT INTO groups (code, label, group_type, sort_order, is_active)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(code) DO UPDATE SET
-                    label = excluded.label,
-                    group_type = excluded.group_type,
-                    sort_order = excluded.sort_order,
-                    is_active = excluded.is_active
-                """,
-                (code, label, next_group_type, sort_order, 1 if is_active else 0),
-            )
-        else:
-            conn.execute(
-                f"""
-                INSERT INTO {table} (code, label, sort_order, is_active)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(code) DO UPDATE SET
-                    label = excluded.label,
-                    sort_order = excluded.sort_order,
-                    is_active = excluded.is_active
-                """,
-                (code, label, sort_order, 1 if is_active else 0),
-            )
-        row = conn.execute(
-            f"SELECT * FROM {table} WHERE code = ?",
-            (code,),
-        ).fetchone()
-    return _row_to_option(row)
-
-
-def set_option_active(table: str, code: str, is_active: bool) -> dict[str, Any]:
-    if table not in OPTION_TABLES:
-        raise ConfigError("지원하지 않는 옵션 테이블입니다.")
-    code = normalize_code(code)
-    initialize_database()
-    with connect() as conn:
-        conn.execute(
-            f"UPDATE {table} SET is_active = ? WHERE code = ?",
-            (1 if is_active else 0, code),
-        )
-        row = conn.execute(f"SELECT * FROM {table} WHERE code = ?", (code,)).fetchone()
-    if row is None:
-        raise ConfigError("옵션을 찾을 수 없습니다.")
-    return _row_to_option(row)
-
-
 def get_ips_config() -> dict[str, Any]:
     initialize_database()
     with connect() as conn:
         target_rows = conn.execute(
-            "SELECT * FROM ips_target_allocations ORDER BY group_type ASC"
+            'SELECT * FROM ips_target_allocations ORDER BY "group" ASC'
         ).fetchall()
-        group_rows = conn.execute("SELECT code, group_type FROM groups").fetchall()
         priority_rows = conn.execute(
             """
             SELECT action_code, priority
@@ -159,16 +80,12 @@ def get_ips_config() -> dict[str, Any]:
 
     return {
         "target_allocation": {
-            row["group_type"]: {
+            row["group"]: {
                 "min": row["min"],
                 "target": row["target"],
                 "max": row["max"],
             }
             for row in target_rows
-        },
-        "groups": {
-            row["code"]: {"type": row["group_type"]}
-            for row in group_rows
         },
         "action_priority": {
             row["action_code"]: row["priority"]
@@ -185,7 +102,7 @@ def get_ips_management_config() -> dict[str, Any]:
     initialize_database()
     with connect() as conn:
         targets = conn.execute(
-            "SELECT * FROM ips_target_allocations ORDER BY group_type ASC"
+            'SELECT * FROM ips_target_allocations ORDER BY "group" ASC'
         ).fetchall()
         priorities = conn.execute(
             """
@@ -198,7 +115,7 @@ def get_ips_management_config() -> dict[str, Any]:
     return {
         "target_allocations": [
             {
-                "group_type": row["group_type"],
+                "group": row["group"],
                 "min": row["min"],
                 "target": row["target"],
                 "max": row["max"],
@@ -230,9 +147,9 @@ def replace_target_allocations(rows: list[dict[str, Any]]) -> list[dict[str, Any
     with connect() as conn:
         conn.execute("DELETE FROM ips_target_allocations")
         for row in rows:
-            group_type = normalize_code(row.get("group_type"))
-            if group_type not in GROUP_TYPES:
-                raise ConfigError("지원하지 않는 group_type입니다.")
+            group = normalize_code(row.get("group"))
+            if group not in TARGET_GROUPS:
+                raise ConfigError("지원하지 않는 group입니다.")
             min_value = float(row.get("min"))
             target_value = float(row.get("target"))
             max_value = float(row.get("max"))
@@ -240,10 +157,10 @@ def replace_target_allocations(rows: list[dict[str, Any]]) -> list[dict[str, Any
                 raise ConfigError("목표 비중은 0~1 범위에서 min <= target <= max 여야 합니다.")
             conn.execute(
                 """
-                INSERT INTO ips_target_allocations (group_type, min, target, max)
+                INSERT INTO ips_target_allocations ("group", min, target, max)
                 VALUES (?, ?, ?, ?)
                 """,
-                (group_type, min_value, target_value, max_value),
+                (group, min_value, target_value, max_value),
             )
     return get_ips_management_config()["target_allocations"]
 

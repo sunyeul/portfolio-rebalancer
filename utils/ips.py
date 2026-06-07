@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from core.asset import DEFAULT_GROUP, VALID_GROUPS
+
 
 ACTION_LABELS = {
     "increase_dca": "정기매수 증액 후보",
@@ -24,9 +26,10 @@ NEXT_STEPS = {
 }
 
 
-def get_group_type(group: str, ips_config: dict) -> str:
-    """IPS 설정에서 그룹 타입을 조회합니다."""
-    return ips_config.get("groups", {}).get(group, {}).get("type", "unknown")
+def fixed_group(value: object) -> str:
+    """입력 그룹을 앱 고정 분류값으로 정규화합니다."""
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in VALID_GROUPS else DEFAULT_GROUP
 
 
 def classify_range(value: float, cfg: dict) -> str:
@@ -43,18 +46,23 @@ def classify_range(value: float, cfg: dict) -> str:
 def compute_group_summary(metrics_df: pd.DataFrame, ips_config: dict) -> pd.DataFrame:
     """자산별 metrics_df에서 IPS 그룹 요약을 계산합니다."""
     df = metrics_df.copy()
-    df["group"] = df.get("group", "ungrouped")
-    df["group"] = df["group"].fillna("ungrouped")
-    df["group_type"] = df["group"].map(lambda g: get_group_type(str(g), ips_config))
+    df["group"] = df.get("group", DEFAULT_GROUP)
+    df["group"] = df["group"].fillna(DEFAULT_GROUP).map(fixed_group)
+    if "missing_ratio" not in df.columns:
+        df["missing_ratio"] = 0.0
+    if "observation_count" not in df.columns:
+        df["observation_count"] = pd.NA
 
     return (
-        df.groupby(["group_type", "group"], as_index=False)
+        df.groupby("group", as_index=False)
         .agg(
             weight=("가중치", "sum"),
             risk_contribution=("위험기여도", "sum"),
             avg_efficiency=("E", "mean"),
+            avg_missing_ratio=("missing_ratio", "mean"),
+            min_observation_count=("observation_count", "min"),
         )
-        .sort_values(["group_type", "group"])
+        .sort_values("group")
     )
 
 
@@ -67,10 +75,10 @@ def compute_ips_allocation_status(
     sat_cfg = target_cfg.get("satellite", {"min": 0.10, "target": 0.20, "max": 0.30})
 
     core_weight = group_summary.loc[
-        group_summary["group_type"] == "core", "weight"
+        group_summary["group"] == "core", "weight"
     ].sum()
     satellite_weight = group_summary.loc[
-        group_summary["group_type"] == "satellite", "weight"
+        group_summary["group"] == "satellite", "weight"
     ].sum()
 
     return {
@@ -101,13 +109,13 @@ def _action_result(
 
 def _sell_gate_allows(row: pd.Series | dict, allocation_status: dict) -> bool:
     thesis_status = row.get("thesis_status", "unknown")
-    group_type = row.get("group_type", "unknown")
+    group = fixed_group(row.get("group", DEFAULT_GROUP))
     gap = float(row.get("갭%", 0) or 0)
 
     return (
         thesis_status == "broken"
         or (
-            group_type == "satellite"
+            group == "satellite"
             and allocation_status.get("satellite_status") == "over_max"
         )
         or (gap < 0 and abs(gap) >= 1.0 and thesis_status == "broken")
@@ -124,34 +132,40 @@ def classify_ips_action(
     gap = float(row.get("갭%", 0) or 0)
     risk_over = bool(row.get("risk_over", False))
     efficiency_good = bool(row.get("efficiency_good", False))
-    group_type = row.get("group_type", "unknown")
+    group = fixed_group(row.get("group", DEFAULT_GROUP))
     dca_enabled = bool(row.get("dca_enabled", True))
     thesis_status = row.get("thesis_status", "unknown")
     should_execute = bool(row.get("실행", False))
+    low_data_quality = bool(row.get("data_quality_low", False))
 
     if not should_execute:
+        reason_codes = ["within_hysteresis_or_below_min_trade"]
+        if low_data_quality:
+            reason_codes.append("data_quality_low")
         return _action_result(
             "hold_observe",
-            ["within_hysteresis_or_below_min_trade"],
+            reason_codes,
             ips_config,
         )
 
-    if group_type == "unknown":
+    if group == "unclassified":
         next_step = NEXT_STEPS["review_thesis"]
         if allocation_status.get("core_status") in {"under_min", "under_target"}:
             next_step += " 판단이 어려운 자산보다 코어 정기매수 증액을 우선합니다."
         return _action_result(
-            "review_thesis", ["unknown_group_type"], ips_config, next_step=next_step
+            "review_thesis", ["unclassified_group"], ips_config, next_step=next_step
         )
+
+    data_reasons = ["data_quality_low"] if low_data_quality else []
 
     if not risk_over and efficiency_good:
         if gap > 0 and dca_enabled:
             return _action_result(
                 "increase_dca",
-                ["risk_ok", "efficiency_good", "positive_gap"],
+                ["risk_ok", "efficiency_good", "positive_gap", *data_reasons],
                 ips_config,
             )
-        reason_codes = ["risk_ok", "efficiency_good"]
+        reason_codes = ["risk_ok", "efficiency_good", *data_reasons]
         if gap > 0:
             reason_codes.extend(["positive_gap", "dca_disabled"])
         return _action_result("hold_observe", reason_codes, ips_config)
@@ -160,10 +174,10 @@ def classify_ips_action(
         if gap < 0 and dca_enabled:
             return _action_result(
                 "decrease_dca",
-                ["risk_over", "efficiency_good", "negative_gap"],
+                ["risk_over", "efficiency_good", "negative_gap", *data_reasons],
                 ips_config,
             )
-        reason_codes = ["risk_over", "efficiency_good", "avoid_immediate_increase"]
+        reason_codes = ["risk_over", "efficiency_good", "avoid_immediate_increase", *data_reasons]
         if gap < 0:
             reason_codes.extend(["negative_gap", "dca_disabled"])
         return _action_result(
@@ -174,12 +188,12 @@ def classify_ips_action(
 
     if not risk_over and not efficiency_good:
         return _action_result(
-            "review_thesis", ["risk_ok", "efficiency_low"], ips_config
+            "review_thesis", ["risk_ok", "efficiency_low", *data_reasons], ips_config
         )
 
     if risk_over and not efficiency_good:
         if _sell_gate_allows(row, allocation_status):
-            reason_codes = ["risk_over", "efficiency_low", "sell_gate_passed"]
+            reason_codes = ["risk_over", "efficiency_low", "sell_gate_passed", *data_reasons]
             if thesis_status == "broken":
                 reason_codes.append("thesis_broken")
             else:
@@ -198,12 +212,13 @@ def classify_ips_action(
                     "negative_gap",
                     "thesis_not_broken",
                     "sell_gate_blocked",
+                    *data_reasons,
                 ],
                 ips_config,
             )
         return _action_result(
             "review_thesis",
-            ["risk_over", "efficiency_low", "thesis_not_broken", "sell_gate_blocked"],
+            ["risk_over", "efficiency_low", "thesis_not_broken", "sell_gate_blocked", *data_reasons],
             ips_config,
             blocked_reason="매도 게이트 조건을 충족하지 못했습니다.",
         )
@@ -219,19 +234,28 @@ def classify_ips_actions(
     ips_config: dict,
 ) -> pd.DataFrame:
     """proposal_df와 metrics_df를 합쳐 전체 IPS 액션 테이블을 생성합니다."""
-    metrics_cols = ["group", "dca_enabled", "thesis_status"]
+    metrics_cols = [
+        "group",
+        "dca_enabled",
+        "thesis_status",
+        "missing_ratio",
+        "observation_count",
+    ]
     meta = metrics_df[metrics_cols].copy()
-    meta["group_type"] = meta["group"].map(lambda g: get_group_type(str(g), ips_config))
 
     df = proposal_df.copy()
     meta_df = meta.reset_index().rename(columns={"index": "ticker"})
-    for col in ["ticker", *metrics_cols, "group_type"]:
+    for col in ["ticker", *metrics_cols]:
         if col not in df.columns and col in meta_df.columns:
             df = df.merge(meta_df[["ticker", col]], on="ticker", how="left")
-    df["group"] = df["group"].fillna("ungrouped")
+    df["group"] = df["group"].fillna(DEFAULT_GROUP).map(fixed_group)
     df["dca_enabled"] = df["dca_enabled"].fillna(True).astype(bool)
     df["thesis_status"] = df["thesis_status"].fillna("unknown")
-    df["group_type"] = df["group_type"].fillna("unknown")
+    df["data_quality_low"] = (
+        df.get("missing_ratio", pd.Series(0, index=df.index)).fillna(0).astype(float) > 0.2
+    ) | (
+        df.get("observation_count", pd.Series(9999, index=df.index)).fillna(9999).astype(float) < 60
+    )
 
     action_rows = [
         classify_ips_action(row, allocation_status, ips_config)

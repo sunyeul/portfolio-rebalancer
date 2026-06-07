@@ -13,10 +13,6 @@ def _ips_config():
             "core": {"min": 0.70, "target": 0.80, "max": 0.90},
             "satellite": {"min": 0.10, "target": 0.20, "max": 0.30},
         },
-        "groups": {
-            "core": {"type": "core"},
-            "satellite_space": {"type": "satellite"},
-        },
         "action_priority": {
             "increase_dca": 1,
             "decrease_dca": 2,
@@ -35,15 +31,15 @@ def test_compute_group_summary_and_allocation_status():
             "가중치": [0.8, 0.2],
             "위험기여도": [0.6, 0.4],
             "E": [0.7, 0.5],
-            "group": ["core", "satellite_space"],
+            "group": ["core", "satellite"],
         }
     ).set_index("ticker")
 
     summary = compute_group_summary(metrics_df, _ips_config())
     status = compute_ips_allocation_status(summary, _ips_config())
 
-    assert summary.loc[summary["group_type"] == "core", "weight"].sum() == 0.8
-    assert summary.loc[summary["group_type"] == "satellite", "weight"].sum() == 0.2
+    assert summary.loc[summary["group"] == "core", "weight"].sum() == 0.8
+    assert summary.loc[summary["group"] == "satellite", "weight"].sum() == 0.2
     assert status["core_status"] == "in_range"
     assert status["satellite_status"] == "in_range"
 
@@ -55,7 +51,7 @@ def test_risk_ok_efficiency_good_positive_gap_classifies_as_increase_dca():
             "efficiency_good": True,
             "갭%": 3.0,
             "실행": True,
-            "group_type": "core",
+            "group": "core",
             "dca_enabled": True,
             "thesis_status": "intact",
         },
@@ -73,7 +69,7 @@ def test_risk_over_efficiency_low_broken_thesis_can_consider_sell():
             "efficiency_good": False,
             "갭%": -3.0,
             "실행": True,
-            "group_type": "satellite",
+            "group": "satellite",
             "dca_enabled": False,
             "thesis_status": "broken",
         },
@@ -91,7 +87,7 @@ def test_risk_over_efficiency_low_intact_thesis_does_not_consider_sell():
             "efficiency_good": False,
             "갭%": -3.0,
             "실행": True,
-            "group_type": "satellite",
+            "group": "satellite",
             "dca_enabled": True,
             "thesis_status": "intact",
         },

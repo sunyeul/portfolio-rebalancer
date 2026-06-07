@@ -6,6 +6,7 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from core.asset import DEFAULT_GROUP
 from api.v1.serialization import (
     GROUP_SUMMARY_COLUMNS,
     METRICS_COLUMNS,
@@ -14,6 +15,7 @@ from api.v1.serialization import (
     dataframe_records,
     safe_mapping,
 )
+from utils.ips import fixed_group
 from middleware.session import session_manager
 from services.portfolio_service import (
     PortfolioInputError,
@@ -290,6 +292,8 @@ def _proposal_frame(rows: list[dict] | None) -> pd.DataFrame:
 def _state_response(state: dict) -> dict:
     session_state = state["session_state"]
     asset_df = pd.DataFrame(session_state.get("asset_df") or [])
+    if not asset_df.empty:
+        asset_df["group"] = asset_df.get("group", DEFAULT_GROUP).fillna(DEFAULT_GROUP).map(fixed_group)
     response = {
         "portfolio": {
             "assets": dataframe_records(asset_df),
@@ -351,6 +355,8 @@ def _state_response(state: dict) -> dict:
 def _snapshot_response(snapshot: dict) -> dict:
     session_state = snapshot["session_state"]
     asset_df = pd.DataFrame(session_state.get("asset_df") or [])
+    if not asset_df.empty:
+        asset_df["group"] = asset_df.get("group", DEFAULT_GROUP).fillna(DEFAULT_GROUP).map(fixed_group)
     response = {
         "snapshot": snapshot["summary"],
         "portfolio": {

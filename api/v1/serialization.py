@@ -62,11 +62,12 @@ RC_VIOLATION_COLUMNS = {
 }
 
 GROUP_SUMMARY_COLUMNS = {
-    "group_type": "group_type",
     "group": "group",
     "weight": "weight",
     "risk_contribution": "risk_contribution",
     "avg_efficiency": "avg_efficiency",
+    "avg_missing_ratio": "avg_missing_ratio",
+    "min_observation_count": "min_observation_count",
 }
 
 

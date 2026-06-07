@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -13,29 +13,12 @@ from storage.config_store import (
     list_options,
     replace_rules,
     replace_target_allocations,
-    set_option_active,
-    upsert_option,
 )
 
 router = APIRouter()
 
-OptionTable = Literal["groups", "thesis_statuses"]
-
-
-class OptionRequest(BaseModel):
-    code: str
-    label: str
-    sort_order: int = 999
-    is_active: bool = True
-    group_type: str | None = None
-
-
-class ActiveRequest(BaseModel):
-    is_active: bool
-
-
 class TargetAllocationRequest(BaseModel):
-    group_type: str
+    group: str
     min: float = Field(ge=0, le=1)
     target: float = Field(ge=0, le=1)
     max: float = Field(ge=0, le=1)
@@ -63,37 +46,6 @@ async def get_options(include_inactive: bool = True):
 async def get_ips_config():
     """Return editable IPS configuration and runtime config shape."""
     return get_ips_management_config()
-
-
-@router.post("/{table}")
-async def save_option(table: OptionTable, payload: OptionRequest):
-    """Create or update a config option."""
-    if table != "groups":
-        raise HTTPException(status_code=403, detail="그룹 옵션만 수정할 수 있습니다.")
-    try:
-        return {
-            "option": upsert_option(
-                table,
-                payload.code,
-                payload.label,
-                payload.sort_order,
-                payload.is_active,
-                payload.group_type,
-            )
-        }
-    except ConfigError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.patch("/{table}/{code}/active")
-async def update_option_active(table: OptionTable, code: str, payload: ActiveRequest):
-    """Soft-delete or reactivate an option."""
-    if table != "groups":
-        raise HTTPException(status_code=403, detail="그룹 옵션만 수정할 수 있습니다.")
-    try:
-        return {"option": set_option_active(table, code, payload.is_active)}
-    except ConfigError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.put("/ips/target-allocations")

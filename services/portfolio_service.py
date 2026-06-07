@@ -7,7 +7,7 @@ from typing import List
 import pandas as pd
 from pydantic import ValidationError
 
-from core.asset import Asset, parse_text_to_assets
+from core.asset import DEFAULT_GROUP, VALID_GROUPS, Asset, parse_text_to_assets
 from storage.config_store import active_codes
 from utils.metrics import normalize_weights
 
@@ -18,17 +18,21 @@ class PortfolioInputError(Exception):
     pass
 
 
-METADATA_DEFAULTS = {
-    "group": ("groups", "ungrouped"),
-    "thesis_status": ("thesis_statuses", "unknown"),
-}
-
-
 def _get_attr(row, name: str, default=None):
     value = getattr(row, name, default)
     if pd.isna(value) if not isinstance(value, (list, tuple, dict)) else False:
         return default
     return value
+
+
+def _normalize_group_input(value, ticker: str, warnings: list[str]) -> str:
+    raw = DEFAULT_GROUP if value is None or str(value).strip() == "" else str(value).strip().lower()
+    if raw in VALID_GROUPS:
+        return raw
+    warnings.append(
+        f"{ticker}: 지원하지 않는 group '{raw}' 값은 {DEFAULT_GROUP}(으)로 처리합니다."
+    )
+    return DEFAULT_GROUP
 
 
 def parse_text_to_assets_service(text: str) -> tuple[List[Asset], List[str]]:
@@ -93,11 +97,13 @@ def parse_csv_to_assets(df: pd.DataFrame) -> tuple[List[Asset], List[str]]:
                     total = None
 
             try:
+                ticker = str(r.ticker).upper()
+                group = _normalize_group_input(_get_attr(r, "group", DEFAULT_GROUP), ticker, warnings)
                 asset = Asset(
-                    ticker=str(r.ticker).upper(),
+                    ticker=ticker,
                     allocation=float(r.allocation),
                     return_total=total,
-                    group=_get_attr(r, "group", "ungrouped"),
+                    group=group,
                     dca_enabled=_get_attr(r, "dca_enabled", True),
                     thesis_status=_get_attr(r, "thesis_status", "unknown"),
                 )
@@ -136,11 +142,12 @@ def parse_manual_edit_to_assets(
             if row.get("return_total"):
                 return_total = float(row["return_total"]) / 100.0
 
+            group = _normalize_group_input(row.get("group", DEFAULT_GROUP), ticker.upper(), warnings)
             asset = Asset(
                 ticker=ticker.upper(),
                 allocation=float(allocation),
                 return_total=return_total,
-                group=row.get("group", "ungrouped"),
+                group=group,
                 dca_enabled=row.get("dca_enabled", True),
                 thesis_status=row.get("thesis_status", "unknown"),
             )
@@ -172,16 +179,15 @@ def normalize_and_validate_assets(
 
     # AIDEV-NOTE: pydantic-integration; Asset 객체는 .model_dump()로 dict로 변환하여 DataFrame 생성
     asset_df = pd.DataFrame([a.model_dump() for a in assets])
-    for column, (table, default) in METADATA_DEFAULTS.items():
-        valid_codes = active_codes(table)
-        invalid_mask = ~asset_df[column].isin(valid_codes)
-        for ticker, value in asset_df.loc[invalid_mask, ["ticker", column]].itertuples(
-            index=False
-        ):
-            warnings.append(
-                f"{ticker}: 등록되지 않은 {column} '{value}' 값은 {default}(으)로 처리합니다."
-            )
-        asset_df.loc[invalid_mask, column] = default
+    valid_thesis = active_codes("thesis_statuses")
+    invalid_thesis_mask = ~asset_df["thesis_status"].isin(valid_thesis)
+    for ticker, value in asset_df.loc[
+        invalid_thesis_mask, ["ticker", "thesis_status"]
+    ].itertuples(index=False):
+        warnings.append(
+            f"{ticker}: 등록되지 않은 thesis_status '{value}' 값은 unknown(으)로 처리합니다."
+        )
+    asset_df.loc[invalid_thesis_mask, "thesis_status"] = "unknown"
 
     raw_df = asset_df.copy()
 

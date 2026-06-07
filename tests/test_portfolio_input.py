@@ -15,7 +15,7 @@ def test_parse_csv_keeps_existing_shape_defaults():
 
     assert warnings == []
     assert assets[0].ticker == "VOO"
-    assert assets[0].group == "ungrouped"
+    assert assets[0].group == "unclassified"
     assert assets[0].dca_enabled is True
     assert assets[0].thesis_status == "unknown"
 
@@ -45,7 +45,7 @@ def test_parse_csv_reads_ips_metadata_and_percent_return_total():
                 "ticker": "IONQ",
                 "allocation": 2,
                 "return_total": -12,
-                "group": "satellite_quantum",
+                "group": "satellite",
                 "dca_enabled": False,
                 "thesis_status": "watch",
             }
@@ -56,7 +56,7 @@ def test_parse_csv_reads_ips_metadata_and_percent_return_total():
 
     assert warnings == []
     assert assets[0].return_total == -0.12
-    assert assets[0].group == "satellite_quantum"
+    assert assets[0].group == "satellite"
     assert assets[0].dca_enabled is False
     assert assets[0].thesis_status == "watch"
 
@@ -89,7 +89,7 @@ def test_normalize_warns_on_duplicate_metadata_conflicts():
             {
                 "ticker": "VOO",
                 "allocation": 20,
-                "group": "satellite_space",
+                "group": "satellite",
             },
         ]
     )
@@ -137,7 +137,7 @@ def test_parse_manual_edit_preserves_metadata_and_percent_return_total():
                 "ticker": "ufo",
                 "allocation": "3",
                 "return_total": "-12",
-                "group": "satellite_space",
+                "group": "satellite",
                 "thesis_status": "watch",
             }
         ]
@@ -146,5 +146,5 @@ def test_parse_manual_edit_preserves_metadata_and_percent_return_total():
     assert warnings == []
     assert assets[0].ticker == "UFO"
     assert assets[0].return_total == -0.12
-    assert assets[0].group == "satellite_space"
+    assert assets[0].group == "satellite"
     assert assets[0].thesis_status == "watch"
