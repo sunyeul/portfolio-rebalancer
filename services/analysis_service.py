@@ -144,20 +144,15 @@ def run_analysis(
     returns_smooth = winsorize_returns(returns)
     returns_smooth = moving_average(returns_smooth).dropna(how="all")
 
-    # 현재 가중치를 사용한 포트폴리오 NAV (벤치마크 가중치 무시)
+    # 현재 가중치를 사용한 포트폴리오 NAV
     weights = asset_df.set_index("ticker")["weight"].reindex(prices.columns).fillna(0)
-    if bench in weights.index:
-        weights_no_bench = weights.copy()
-        weights_no_bench.loc[bench] = 0
-        weights_no_bench = normalize_weights(weights_no_bench)
-    else:
-        weights_no_bench = weights
+    weights_no_bench = weights
 
-    # AIDEV-NOTE: benchmark-only-guard; 벤치마크만 남아 있으면 포트폴리오 계산 불가능하므로 조기 종료
+    # AIDEV-NOTE: priced-asset-guard; 가격 데이터가 확보된 실제 보유 자산이 없으면 포트폴리오 계산 불가능
     if weights_no_bench.sum() == 0:
         raise AnalysisError(
             f"포트폴리오에 실제 자산이 없습니다. "
-            f"벤치마크('{bench}')만 입력되었으므로 포트폴리오 지표를 계산할 수 없습니다. "
+            f"입력 자산의 가격 데이터가 없거나 벤치마크('{bench}')만 조회되었습니다. "
             "최소 1개 이상의 자산을 포트폴리오에 추가해주세요."
         )
 

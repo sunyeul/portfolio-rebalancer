@@ -179,6 +179,40 @@ def test_analysis_ignores_all_null_tickers_and_keeps_mixed_exchange_dates(
     assert samsung["missing_ratio"] == 0.25
 
 
+def test_analysis_keeps_spy_weight_when_spy_is_portfolio_asset(monkeypatch):
+    client = TestClient(app)
+    client.post(
+        "/api/v1/portfolio/manual",
+        json={
+            "rows": [
+                {"ticker": "SPY", "allocation": 40},
+                {"ticker": "QQQ", "allocation": 60},
+            ]
+        },
+    )
+
+    def prices_with_spy_asset(*args, **kwargs):
+        return pd.DataFrame(
+            {
+                "SPY": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0],
+                "QQQ": [200.0, 202.0, 204.0, 206.0, 208.0, 210.0],
+            },
+            index=pd.date_range("2026-06-01", periods=6),
+        )
+
+    monkeypatch.setattr("services.analysis_service.fetch_prices", prices_with_spy_asset)
+
+    response = client.post(
+        "/api/v1/analysis/run",
+        json={"period": 1, "bench": "SPY"},
+    )
+
+    assert response.status_code == 200
+    metrics_by_ticker = {row["ticker"]: row for row in response.json()["metrics"]}
+    assert metrics_by_ticker["SPY"]["weight"] == 0.4
+    assert metrics_by_ticker["QQQ"]["weight"] == 0.6
+
+
 def test_evaluation_requires_analysis_first():
     client = TestClient(app)
 
