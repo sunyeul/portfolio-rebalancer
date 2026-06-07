@@ -1,5 +1,5 @@
 import type { ColumnDef } from '@tanstack/react-table';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertCircle,
   BarChart3,
@@ -8,15 +8,17 @@ import {
   Download,
   Edit3,
   FileUp,
+  FolderOpen,
   LineChart,
   Loader2,
   Play,
   Plus,
   RefreshCcw,
+  Save,
   ShieldCheck,
   Trash2
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import {
   Bar,
@@ -37,9 +39,14 @@ import {
   type EvaluationResponse,
   type MetricRow,
   type ProposalRow,
+  createPortfolio,
   csvDownloadUrl,
+  listPortfolios,
+  listSnapshots,
+  loadSnapshot,
   runAnalysis,
   runEvaluation,
+  saveSnapshot,
   submitPortfolio,
   uploadPortfolioCsv
 } from './lib/api';
@@ -92,12 +99,59 @@ function num(value: number | null | undefined) {
   return value.toFixed(2);
 }
 
+function shortDate(value: string | null | undefined) {
+  if (!value) return '없음';
+  return new Date(value).toLocaleString('ko-KR', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+function rowsFromAssets(assets: AssetRow[]): PortfolioRowInput[] {
+  return assets.map((asset) => ({
+    ticker: asset.ticker,
+    allocation: asset.allocation,
+    return_total: asset.return_total === null ? '' : Number((asset.return_total * 100).toFixed(4)),
+    group: asset.group,
+    role: asset.role,
+    dca_enabled: asset.dca_enabled,
+    thesis_status: asset.thesis_status
+  }));
+}
+
 export function App() {
+  const queryClient = useQueryClient();
   const [text, setText] = useState(sampleText);
   const [rows, setRows] = useState<PortfolioRowInput[]>(() => parsePortfolioText(sampleText));
   const [portfolio, setPortfolio] = useState<AssetRow[]>([]);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [evaluation, setEvaluation] = useState<EvaluationResponse | null>(null);
+  const [selectedPortfolioId, setSelectedPortfolioId] = useState<number | null>(null);
+  const [newPortfolioName, setNewPortfolioName] = useState('');
+  const [snapshotName, setSnapshotName] = useState('');
+
+  const portfoliosQuery = useQuery({
+    queryKey: ['portfolios'],
+    queryFn: listPortfolios
+  });
+
+  const savedPortfolios = portfoliosQuery.data?.portfolios ?? [];
+  const activePortfolio = savedPortfolios.find((item) => item.id === selectedPortfolioId) ?? null;
+
+  const snapshotsQuery = useQuery({
+    queryKey: ['portfolio-snapshots', selectedPortfolioId],
+    queryFn: () => listSnapshots(selectedPortfolioId as number),
+    enabled: selectedPortfolioId !== null
+  });
+  const savedSnapshots = snapshotsQuery.data?.snapshots ?? [];
+
+  useEffect(() => {
+    if (selectedPortfolioId === null && savedPortfolios.length > 0) {
+      setSelectedPortfolioId(savedPortfolios[0].id);
+    }
+  }, [savedPortfolios, selectedPortfolioId]);
 
   const { register, control, watch } = useForm<SettingsValues>({
     defaultValues: {
@@ -141,6 +195,44 @@ export function App() {
   const evaluationMutation = useMutation({
     mutationFn: runEvaluation,
     onSuccess: setEvaluation
+  });
+
+  const createPortfolioMutation = useMutation({
+    mutationFn: createPortfolio,
+    onSuccess: async (data) => {
+      setNewPortfolioName('');
+      setSelectedPortfolioId(data.portfolio.id);
+      await queryClient.invalidateQueries({ queryKey: ['portfolios'] });
+    }
+  });
+
+  const saveSnapshotMutation = useMutation({
+    mutationFn: () => {
+      if (selectedPortfolioId === null) throw new Error('저장할 포트폴리오를 선택해주세요.');
+      return saveSnapshot(selectedPortfolioId, {
+        name: snapshotName || undefined
+      });
+    },
+    onSuccess: async () => {
+      setSnapshotName('');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['portfolios'] }),
+        queryClient.invalidateQueries({ queryKey: ['portfolio-snapshots', selectedPortfolioId] })
+      ]);
+    }
+  });
+
+  const loadSnapshotMutation = useMutation({
+    mutationFn: loadSnapshot,
+    onSuccess: (data) => {
+      const nextRows = rowsFromAssets(data.portfolio.assets);
+      setRows(nextRows);
+      setText(nextRows.map((row) => `${row.ticker} ${row.allocation}`).join('\n'));
+      setPortfolio(data.portfolio.assets);
+      setAnalysis(data.analysis);
+      setEvaluation(data.evaluation);
+      setSelectedPortfolioId(data.snapshot.portfolio_id);
+    }
   });
 
   const validRows = rows.filter((row) => row.ticker && row.allocation !== '');
@@ -234,6 +326,16 @@ export function App() {
     });
   }
 
+  function createNamedPortfolio() {
+    const name = newPortfolioName.trim();
+    if (!name) return;
+    createPortfolioMutation.mutate({ name });
+  }
+
+  function saveCurrentSnapshot() {
+    saveSnapshotMutation.mutate();
+  }
+
   const chartData = analysis?.metrics.map((row) => ({
     ticker: row.ticker,
     weight: Number(((row.weight ?? 0) * 100).toFixed(2)),
@@ -303,6 +405,99 @@ export function App() {
             <span className={evaluation ? 'done' : ''}>3 평가</span>
           </div>
         </header>
+
+        <section className="mx-auto w-full max-w-6xl rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="grid gap-4 xl:grid-cols-[1fr_1.3fr]">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <FolderOpen className="h-5 w-5 text-blue-700" />
+                <h3 className="text-lg font-semibold text-slate-950">저장된 포트폴리오</h3>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                <input
+                  className="table-input"
+                  value={newPortfolioName}
+                  placeholder="새 포트폴리오 이름"
+                  onChange={(event) => setNewPortfolioName(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  disabled={!newPortfolioName.trim() || createPortfolioMutation.isPending}
+                  onClick={createNamedPortfolio}
+                >
+                  {createPortfolioMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                  만들기
+                </button>
+              </div>
+              <select
+                className="table-input"
+                value={selectedPortfolioId ?? ''}
+                onChange={(event) => setSelectedPortfolioId(event.target.value ? Number(event.target.value) : null)}
+              >
+                <option value="">포트폴리오 선택</option>
+                {savedPortfolios.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+              <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                {activePortfolio?.latest_snapshot
+                  ? `최근 저장: ${activePortfolio.latest_snapshot.name} · ${shortDate(activePortfolio.latest_snapshot.created_at)}`
+                  : '아직 저장된 스냅샷이 없습니다.'}
+              </div>
+              <ErrorLine error={createPortfolioMutation.error} />
+            </div>
+
+            <div className="space-y-3">
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                <input
+                  className="table-input"
+                  value={snapshotName}
+                  placeholder="스냅샷 이름"
+                  onChange={(event) => setSnapshotName(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-800 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                  disabled={selectedPortfolioId === null || !portfolio.length || saveSnapshotMutation.isPending}
+                  onClick={saveCurrentSnapshot}
+                >
+                  {saveSnapshotMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Save className="h-4 w-4" />}
+                  현재 상태 저장
+                </button>
+              </div>
+              <div className="max-h-36 space-y-2 overflow-y-auto pr-1">
+                {savedSnapshots.map((snapshot) => (
+                  <button
+                    key={snapshot.id}
+                    type="button"
+                    className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-blue-300 hover:bg-blue-50"
+                    onClick={() => loadSnapshotMutation.mutate(snapshot.id)}
+                    disabled={loadSnapshotMutation.isPending}
+                  >
+                    <span>
+                      <strong className="block text-slate-900">{snapshot.name}</strong>
+                      <span className="text-xs text-slate-500">
+                        {shortDate(snapshot.created_at)} · {snapshot.position_count}종목
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-xs font-bold text-blue-800">
+                      {snapshot.has_evaluation ? '평가' : snapshot.has_analysis ? '분석' : '입력'}
+                    </span>
+                  </button>
+                ))}
+                {!savedSnapshots.length && (
+                  <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500">
+                    저장 이력이 없습니다.
+                  </div>
+                )}
+              </div>
+              <ErrorLine error={saveSnapshotMutation.error ?? loadSnapshotMutation.error} />
+            </div>
+          </div>
+        </section>
 
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
           <WorkflowStepper

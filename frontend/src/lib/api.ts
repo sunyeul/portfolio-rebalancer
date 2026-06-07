@@ -85,6 +85,38 @@ export type AnalysisResponse = {
   missing_tickers: string[];
 };
 
+export type SnapshotSummary = {
+  id: number;
+  portfolio_id: number;
+  name: string;
+  note: string;
+  created_at: string;
+  position_count: number;
+  has_analysis: boolean;
+  has_evaluation: boolean;
+};
+
+export type SavedPortfolio = {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+  latest_snapshot: {
+    id: number;
+    name: string;
+    created_at: string;
+    position_count: number;
+  } | null;
+};
+
+export type SnapshotLoadResponse = {
+  snapshot: SnapshotSummary;
+  portfolio: PortfolioResponse;
+  analysis: AnalysisResponse | null;
+  evaluation: EvaluationResponse | null;
+};
+
 async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
   const response = await fetch(path, {
     credentials: 'include',
@@ -141,3 +173,37 @@ export function csvDownloadUrl(type: 'metrics' | 'proposal' | 'ips_actions' | 'g
   return `/api/v1/evaluation/download-csv?type=${type}`;
 }
 
+export function listPortfolios() {
+  return requestJson<{ portfolios: SavedPortfolio[] }>('/api/v1/portfolios', {
+    method: 'GET'
+  });
+}
+
+export function createPortfolio(payload: { name: string; description?: string }) {
+  return requestJson<{ portfolio: SavedPortfolio }>('/api/v1/portfolios', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function listSnapshots(portfolioId: number) {
+  return requestJson<{ snapshots: SnapshotSummary[] }>(`/api/v1/portfolios/${portfolioId}/snapshots`, {
+    method: 'GET'
+  });
+}
+
+export function saveSnapshot(
+  portfolioId: number,
+  payload: { name?: string; note?: string }
+) {
+  return requestJson<{ snapshot: SnapshotSummary }>(`/api/v1/portfolios/${portfolioId}/snapshots`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function loadSnapshot(snapshotId: number) {
+  return requestJson<SnapshotLoadResponse>(`/api/v1/portfolios/snapshots/${snapshotId}/load`, {
+    method: 'POST'
+  });
+}
