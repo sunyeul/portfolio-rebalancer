@@ -162,6 +162,120 @@ def test_snapshot_metadata_update_and_delete(monkeypatch, tmp_path):
     assert missing_delete.json()["detail"] == "스냅샷을 찾을 수 없습니다."
 
 
+def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp_path):
+    client = _client_with_db(monkeypatch, tmp_path)
+    portfolio_id = client.post(
+        "/api/v1/portfolios",
+        json={"name": "장기 투자"},
+    ).json()["portfolio"]["id"]
+    client.post(
+        "/api/v1/portfolio/manual",
+        json={"rows": [{"ticker": "VOO", "allocation": 100, "group": "core"}]},
+    )
+
+    def fake_run_analysis(*args, **kwargs):
+        returns = pd.DataFrame({"VOO": [0.1]})
+        metrics_df = pd.DataFrame(
+            {
+                "ticker": ["VOO"],
+                "CAGR": [0.1],
+                "변동성": [0.2],
+                "샤프": [1.0],
+                "최대낙폭": [-0.1],
+                "IR": [0.5],
+                "베타": [1.0],
+                "알파": [0.0],
+                "위험기여도": [1.0],
+                "수익기여도": [0.1],
+                "가중치": [1.0],
+                "E": [0.7],
+                "E′": [0.75],
+                "DCA강도점수": [0.75],
+                "return_total": [0.2],
+                "group": ["core"],
+                "role": ["broad_etf"],
+                "dca_enabled": [True],
+                "thesis_status": ["intact"],
+            }
+        ).set_index("ticker")
+        return AnalysisResult(
+            prices=pd.DataFrame({"VOO": [1.0, 1.1]}),
+            returns=returns,
+            returns_smooth=returns,
+            weights_no_bench=pd.Series({"VOO": 1.0}),
+            metrics_df=metrics_df,
+            port_nav=pd.Series([1.0, 1.1]),
+            bench_nav=None,
+            portfolio_metrics={"cagr": 0.1, "volatility": 0.2, "sharpe": 1.0},
+            benchmark_metrics=None,
+            missing_tickers=[],
+        )
+
+    monkeypatch.setattr("api.v1.analysis.run_analysis", fake_run_analysis)
+    assert client.post("/api/v1/analysis/run", json={"bench": "SPY"}).status_code == 200
+    snapshot_id = client.post(
+        f"/api/v1/portfolios/{portfolio_id}/snapshots",
+        json={"name": "수정 전"},
+    ).json()["snapshot"]["id"]
+
+    update_response = client.patch(
+        f"/api/v1/portfolios/snapshots/{snapshot_id}",
+        json={
+            "name": "수정 후",
+            "note": "상태 변경",
+            "rows": [
+                {
+                    "ticker": "VOO",
+                    "allocation": 70,
+                    "group": "satellite_space",
+                    "role": "theme_etf",
+                    "dca_enabled": False,
+                    "thesis_status": "watch",
+                },
+                {
+                    "ticker": "QQQ",
+                    "allocation": 30,
+                    "group": "core",
+                    "role": "broad_etf",
+                    "dca_enabled": True,
+                    "thesis_status": "intact",
+                },
+            ],
+        },
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["snapshot"]["name"] == "수정 후"
+    assert update_response.json()["snapshot"]["has_analysis"] is False
+
+    load_response = client.post(f"/api/v1/portfolios/snapshots/{snapshot_id}/load")
+    assert load_response.status_code == 200
+    payload = load_response.json()
+    assert payload["analysis"] is None
+    assert payload["snapshot"]["position_count"] == 2
+    assert payload["portfolio"]["assets"] == [
+        {
+            "ticker": "QQQ",
+            "allocation": 30.0,
+            "return_total": None,
+            "group": "core",
+            "role": "broad_etf",
+            "dca_enabled": True,
+            "thesis_status": "intact",
+            "weight": 0.3,
+        },
+        {
+            "ticker": "VOO",
+            "allocation": 70.0,
+            "return_total": None,
+            "group": "satellite_space",
+            "role": "theme_etf",
+            "dca_enabled": False,
+            "thesis_status": "watch",
+            "weight": 0.7,
+        },
+    ]
+
+
 def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
     client = _client_with_db(monkeypatch, tmp_path)
     portfolio_id = client.post(

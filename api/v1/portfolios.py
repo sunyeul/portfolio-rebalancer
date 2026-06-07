@@ -64,6 +64,7 @@ class SnapshotCreateRequest(BaseModel):
 class SnapshotUpdateRequest(BaseModel):
     name: str | None = None
     note: str | None = None
+    rows: list[SnapshotPortfolioRowIn] | None = None
 
 
 @router.get("")
@@ -161,12 +162,23 @@ async def update_saved_snapshot(
     payload: SnapshotUpdateRequest,
 ):
     """Update a saved snapshot's editable metadata."""
+    asset_rows = None
+    if payload.rows is not None:
+        try:
+            assets, _warnings = parse_manual_edit_to_assets(
+                [row.model_dump() for row in payload.rows]
+            )
+            asset_df, _validation_warnings = normalize_and_validate_assets(assets)
+            asset_rows = asset_df.to_dict(orient="records")
+        except PortfolioInputError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         return {
             "snapshot": update_snapshot(
                 snapshot_id,
                 name=payload.name,
                 note=payload.note,
+                asset_rows=asset_rows,
             )
         }
     except StorageError as exc:

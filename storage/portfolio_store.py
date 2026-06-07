@@ -286,6 +286,7 @@ def update_snapshot(
     snapshot_id: int,
     name: str | None = None,
     note: str | None = None,
+    asset_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     initialize_database()
     current = get_snapshot(snapshot_id)
@@ -303,6 +304,20 @@ def update_snapshot(
             """,
             (next_name, next_note, snapshot_id),
         )
+        if asset_rows is not None:
+            conn.execute(
+                "DELETE FROM analysis_runs WHERE snapshot_id = ?",
+                (snapshot_id,),
+            )
+            conn.execute(
+                "DELETE FROM evaluation_runs WHERE snapshot_id = ?",
+                (snapshot_id,),
+            )
+            conn.execute(
+                "DELETE FROM snapshot_positions WHERE snapshot_id = ?",
+                (snapshot_id,),
+            )
+            _insert_positions(conn, snapshot_id, asset_rows)
         conn.execute(
             "UPDATE portfolios SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (current_summary["portfolio_id"],),

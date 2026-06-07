@@ -245,11 +245,17 @@ export function saveSnapshot(
 
 export function updateSnapshot(
   snapshotId: number,
-  payload: { name?: string; note?: string }
+  payload: { name?: string; note?: string; rows?: PortfolioRowInput[] }
 ) {
   return requestJson<{ snapshot: SnapshotSummary }>(`/api/v1/portfolios/snapshots/${snapshotId}`, {
     method: 'PATCH',
     body: JSON.stringify(payload)
+  });
+}
+
+export function getSnapshot(snapshotId: number) {
+  return requestJson<SnapshotLoadResponse>(`/api/v1/portfolios/snapshots/${snapshotId}`, {
+    method: 'GET'
   });
 }
 
