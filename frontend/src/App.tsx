@@ -69,7 +69,12 @@ import { type PortfolioRowInput, type SettingsValues, settingsSchema } from './l
 
 const sampleText = 'VOO 40\nQQQ 25\nSOXX 15\nUFO 3\nIONQ 2';
 const groupTypes = ['core', 'satellite', 'defensive', 'cash', 'unknown'];
+type AppView = 'workbench' | 'settings';
 type OptionTable = 'groups' | 'roles' | 'thesis_statuses';
+type EditableOption = {
+  table: OptionTable;
+  option: ConfigOption;
+};
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
@@ -134,6 +139,7 @@ function rowsSignature(rows: PortfolioRowInput[]) {
 
 export function App() {
   const queryClient = useQueryClient();
+  const [activeView, setActiveView] = useState<AppView>('workbench');
   const [text, setText] = useState(sampleText);
   const [rows, setRows] = useState<PortfolioRowInput[]>(() => parsePortfolioText(sampleText));
   const [portfolio, setPortfolio] = useState<AssetRow[]>([]);
@@ -151,6 +157,7 @@ export function App() {
   const [newOptionCode, setNewOptionCode] = useState('');
   const [newOptionLabel, setNewOptionLabel] = useState('');
   const [newOptionGroupType, setNewOptionGroupType] = useState('satellite');
+  const [editingOption, setEditingOption] = useState<EditableOption | null>(null);
   const [targetAllocationRows, setTargetAllocationRows] = useState<TargetAllocation[]>([]);
   const [actionPriorityRows, setActionPriorityRows] = useState<Array<{ action_code: string; label: string; priority: number; is_active: boolean }>>([]);
   const [rulesJson, setRulesJson] = useState('[]');
@@ -335,11 +342,13 @@ export function App() {
       saveConfigOption(newOptionTable, {
         code: newOptionCode,
         label: newOptionLabel,
+        is_active: editingOption?.option.is_active ?? true,
         group_type: newOptionTable === 'groups' ? newOptionGroupType : undefined
       }),
     onSuccess: async () => {
       setNewOptionCode('');
       setNewOptionLabel('');
+      setEditingOption(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['config-options'] }),
         queryClient.invalidateQueries({ queryKey: ['ips-config'] })
@@ -347,9 +356,9 @@ export function App() {
     }
   });
 
-  const optionActiveMutation = useMutation({
-    mutationFn: ({ table, code, isActive }: { table: OptionTable; code: string; isActive: boolean }) =>
-      setConfigOptionActive(table, code, isActive),
+  const deleteOptionMutation = useMutation({
+    mutationFn: ({ table, code }: { table: OptionTable; code: string }) =>
+      setConfigOptionActive(table, code, false),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['config-options'] }),
@@ -526,6 +535,29 @@ export function App() {
     saveOptionMutation.mutate();
   }
 
+  function startOptionEdit(table: OptionTable, option: ConfigOption) {
+    setEditingOption({ table, option });
+    setNewOptionTable(table);
+    setNewOptionCode(option.value);
+    setNewOptionLabel(option.label);
+    setNewOptionGroupType(option.group_type ?? 'unknown');
+  }
+
+  function cancelOptionEdit() {
+    setEditingOption(null);
+    setNewOptionCode('');
+    setNewOptionLabel('');
+    setNewOptionGroupType('satellite');
+  }
+
+  function deleteOption(table: OptionTable, option: ConfigOption) {
+    if (!window.confirm(`${option.label} 항목을 삭제할까요? 기존 데이터 참조를 위해 삭제 이력은 보존됩니다.`)) return;
+    if (editingOption?.table === table && editingOption.option.value === option.value) {
+      cancelOptionEdit();
+    }
+    deleteOptionMutation.mutate({ table, code: option.value });
+  }
+
   function updateTargetAllocation(index: number, field: keyof TargetAllocation, value: string) {
     setTargetAllocationRows((current) =>
       current.map((row, rowIndex) =>
@@ -616,17 +648,42 @@ export function App() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <h2>입력 → 분석 → 평가</h2>
-            <p>Python 계산 코어를 JSON API로 호출하고, React에서 결과를 검토합니다.</p>
+            <h2>{activeView === 'workbench' ? '입력 → 분석 → 평가' : '설정 관리'}</h2>
+            <p>
+              {activeView === 'workbench'
+                ? 'Python 계산 코어를 JSON API로 호출하고, React에서 결과를 검토합니다.'
+                : '옵션과 IPS 정책을 관리하고 다음 평가에 적용합니다.'}
+            </p>
+            <nav className="view-tabs" aria-label="주요 화면">
+              <button
+                type="button"
+                className={cx(activeView === 'workbench' && 'active')}
+                onClick={() => setActiveView('workbench')}
+              >
+                워크벤치
+              </button>
+              <button
+                type="button"
+                className={cx(activeView === 'settings' && 'active')}
+                onClick={() => setActiveView('settings')}
+              >
+                설정
+              </button>
+            </nav>
           </div>
-          <div className="status-strip">
-            <span className={portfolio.length ? 'done' : ''}>1 입력</span>
-            <span className={analysis ? 'done' : ''}>2 분석</span>
-            <span className={evaluation ? 'done' : ''}>3 평가</span>
-          </div>
+          {activeView === 'workbench' && (
+            <div className="status-strip">
+              <span className={portfolio.length ? 'done' : ''}>1 입력</span>
+              <span className={analysis ? 'done' : ''}>2 분석</span>
+              <span className={evaluation ? 'done' : ''}>3 평가</span>
+            </div>
+          )}
         </header>
 
-        <section className="mx-auto w-full max-w-6xl rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section
+          className="mx-auto w-full max-w-6xl rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+          hidden={activeView !== 'workbench'}
+        >
           <div className="grid gap-4 xl:grid-cols-[1fr_1.3fr]">
             <div className="space-y-3">
               <div className="flex items-center gap-2">
@@ -787,7 +844,7 @@ export function App() {
         </section>
 
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm" hidden={activeView !== 'settings'}>
             <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
               <div>
                 <h3 className="flex items-center gap-2 text-xl font-semibold text-slate-950">
@@ -801,12 +858,12 @@ export function App() {
             <div className="grid gap-6 xl:grid-cols-2">
               <div className="space-y-4">
                 <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
-                  <select className="table-input" value={newOptionTable} onChange={(event) => setNewOptionTable(event.target.value as OptionTable)}>
+                  <select className="table-input" value={newOptionTable} disabled={editingOption !== null} onChange={(event) => setNewOptionTable(event.target.value as OptionTable)}>
                     <option value="groups">그룹</option>
                     <option value="roles">역할</option>
                     <option value="thesis_statuses">투자 논리 상태</option>
                   </select>
-                  <input className="table-input" value={newOptionCode} placeholder="code" onChange={(event) => setNewOptionCode(event.target.value)} />
+                  <input className="table-input" value={newOptionCode} placeholder="code" disabled={editingOption !== null} onChange={(event) => setNewOptionCode(event.target.value)} />
                   <input className="table-input" value={newOptionLabel} placeholder="표시명" onChange={(event) => setNewOptionLabel(event.target.value)} />
                   <button
                     type="button"
@@ -814,10 +871,21 @@ export function App() {
                     disabled={!newOptionCode.trim() || !newOptionLabel.trim() || saveOptionMutation.isPending}
                     onClick={saveNewOption}
                   >
-                    {saveOptionMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                    저장
+                    {saveOptionMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : editingOption ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                    {editingOption ? '수정' : '저장'}
                   </button>
                 </div>
+                {editingOption && (
+                  <div className="flex items-center justify-between gap-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                    <span className="min-w-0 truncate">
+                      <strong>{editingOption.option.label}</strong> 편집 중
+                    </span>
+                    <button type="button" className="inline-flex items-center gap-1 text-xs font-bold text-blue-800 hover:text-blue-950" onClick={cancelOptionEdit}>
+                      <X className="h-3.5 w-3.5" />
+                      취소
+                    </button>
+                  </div>
+                )}
                 {newOptionTable === 'groups' && (
                   <select className="table-input max-w-xs" value={newOptionGroupType} onChange={(event) => setNewOptionGroupType(event.target.value)}>
                     {groupTypes.map((type) => (
@@ -841,24 +909,28 @@ export function App() {
                             <span className="min-w-0 truncate text-sm text-slate-700">
                               <strong>{option.label}</strong> · {option.value}
                               {option.group_type ? ` · ${option.group_type}` : ''}
+                              {!option.is_active && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">삭제됨</span>}
                             </span>
-                            <button
-                              type="button"
-                              className={cx(
-                                'rounded-lg px-3 py-1.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50',
-                                option.is_active ? 'bg-blue-50 text-blue-800 hover:bg-blue-100' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                              )}
-                              disabled={optionActiveMutation.isPending}
-                              onClick={() =>
-                                optionActiveMutation.mutate({
-                                  table: table as OptionTable,
-                                  code: option.value,
-                                  isActive: !option.is_active
-                                })
-                              }
-                            >
-                              {option.is_active ? '활성' : '비활성'}
-                            </button>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-blue-50 hover:text-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                title="편집"
+                                disabled={saveOptionMutation.isPending || deleteOptionMutation.isPending}
+                                onClick={() => startOptionEdit(table as OptionTable, option)}
+                              >
+                                <Edit3 className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                title="삭제"
+                                disabled={!option.is_active || deleteOptionMutation.isPending}
+                                onClick={() => deleteOption(table as OptionTable, option)}
+                              >
+                                {deleteOptionMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -923,18 +995,20 @@ export function App() {
                   </div>
                   <textarea className="table-input min-h-32 w-full font-mono text-xs" value={rulesJson} onChange={(event) => setRulesJson(event.target.value)} />
                 </div>
-                <ErrorLine error={saveOptionMutation.error ?? optionActiveMutation.error ?? saveTargetsMutation.error ?? savePrioritiesMutation.error ?? saveRulesMutation.error ?? configOptionsQuery.error ?? ipsConfigQuery.error} />
+                <ErrorLine error={saveOptionMutation.error ?? deleteOptionMutation.error ?? saveTargetsMutation.error ?? savePrioritiesMutation.error ?? saveRulesMutation.error ?? configOptionsQuery.error ?? ipsConfigQuery.error} />
               </div>
             </div>
           </section>
 
-          <WorkflowStepper
-            steps={[
-              { label: '포트폴리오 입력', complete: portfolio.length > 0, active: !portfolio.length },
-              { label: '데이터 분석', complete: Boolean(analysis), active: portfolio.length > 0 && !analysis },
-              { label: '평가 및 제안', complete: Boolean(evaluation), active: Boolean(analysis) && !evaluation }
-            ]}
-          />
+          {activeView === 'workbench' && (
+            <>
+              <WorkflowStepper
+                steps={[
+                  { label: '포트폴리오 입력', complete: portfolio.length > 0, active: !portfolio.length },
+                  { label: '데이터 분석', complete: Boolean(analysis), active: portfolio.length > 0 && !analysis },
+                  { label: '평가 및 제안', complete: Boolean(evaluation), active: Boolean(analysis) && !evaluation }
+                ]}
+              />
 
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
             <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-5">
@@ -1207,40 +1281,42 @@ export function App() {
             </section>
           )}
 
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-              <div>
-                <div className="flex items-center gap-3">
-                  <div className="grid h-8 w-8 place-items-center rounded-lg bg-cyan-100 text-sm font-bold text-cyan-900">3</div>
-                  <h3 className="text-xl font-semibold text-slate-950">평가 & 실행 계획 제안</h3>
+              <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <div className="grid h-8 w-8 place-items-center rounded-lg bg-cyan-100 text-sm font-bold text-cyan-900">3</div>
+                      <h3 className="text-xl font-semibold text-slate-950">평가 & 실행 계획 제안</h3>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-500">IPS 기준으로 실행 후보, 위험 초과, DCA 조정 신호를 확인합니다.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                    disabled={!analysis || rowsDirty || evaluationMutation.isPending}
+                    onClick={runCurrentEvaluation}
+                  >
+                    {evaluationMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Play className="h-4 w-4" />}
+                    평가 실행
+                  </button>
                 </div>
-                <p className="mt-2 text-sm text-slate-500">IPS 기준으로 실행 후보, 위험 초과, DCA 조정 신호를 확인합니다.</p>
-              </div>
-              <button
-                type="button"
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
-                disabled={!analysis || rowsDirty || evaluationMutation.isPending}
-                onClick={runCurrentEvaluation}
-              >
-                {evaluationMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Play className="h-4 w-4" />}
-                평가 실행
-              </button>
-            </div>
-            <ErrorLine error={evaluationMutation.error} />
-            {analysis && rowsDirty && (
-              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-                세부 판단값 변경사항을 먼저 분석 결과에 반영해야 평가를 실행할 수 있습니다.
-              </div>
-            )}
-            <DataTable data={evaluation?.proposal ?? []} columns={proposalColumns} emptyLabel="평가 결과가 아직 없습니다." />
-            {evaluation && (
-              <div className="mt-4 flex flex-wrap gap-3">
-                <a className="download-link" href={csvDownloadUrl('proposal')}><Download className="h-4 w-4" /> 제안 CSV</a>
-                <a className="download-link" href={csvDownloadUrl('ips_actions')}><Download className="h-4 w-4" /> IPS CSV</a>
-                <a className="download-link" href={csvDownloadUrl('group_summary')}><Download className="h-4 w-4" /> 그룹 CSV</a>
-              </div>
-            )}
-          </section>
+                <ErrorLine error={evaluationMutation.error} />
+                {analysis && rowsDirty && (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                    세부 판단값 변경사항을 먼저 분석 결과에 반영해야 평가를 실행할 수 있습니다.
+                  </div>
+                )}
+                <DataTable data={evaluation?.proposal ?? []} columns={proposalColumns} emptyLabel="평가 결과가 아직 없습니다." />
+                {evaluation && (
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <a className="download-link" href={csvDownloadUrl('proposal')}><Download className="h-4 w-4" /> 제안 CSV</a>
+                    <a className="download-link" href={csvDownloadUrl('ips_actions')}><Download className="h-4 w-4" /> IPS CSV</a>
+                    <a className="download-link" href={csvDownloadUrl('group_summary')}><Download className="h-4 w-4" /> 그룹 CSV</a>
+                  </div>
+                )}
+              </section>
+            </>
+          )}
         </div>
       </section>
     </main>
