@@ -69,6 +69,41 @@ def test_portfolio_crud_and_input_only_snapshot(monkeypatch, tmp_path):
     assert load_response.status_code == 200
     payload = load_response.json()
     assert [row["ticker"] for row in payload["portfolio"]["assets"]] == ["UFO", "VOO"]
+    assert [row["group"] for row in payload["portfolio"]["assets"]] == [
+        "satellite_space",
+        "core",
+    ]
+    assert payload["analysis"] is None
+
+
+def test_snapshot_can_save_latest_rows_with_groups(monkeypatch, tmp_path):
+    client = _client_with_db(monkeypatch, tmp_path)
+    portfolio_id = client.post(
+        "/api/v1/portfolios",
+        json={"name": "장기 투자"},
+    ).json()["portfolio"]["id"]
+
+    snapshot_response = client.post(
+        f"/api/v1/portfolios/{portfolio_id}/snapshots",
+        json={
+            "name": "입력 즉시 저장",
+            "rows": [
+                {"ticker": "VOO", "allocation": 70, "group": "core"},
+                {"ticker": "UFO", "allocation": 30, "group": "satellite_space"},
+            ],
+        },
+    )
+    assert snapshot_response.status_code == 200
+    snapshot_id = snapshot_response.json()["snapshot"]["id"]
+
+    load_response = client.post(f"/api/v1/portfolios/snapshots/{snapshot_id}/load")
+    assert load_response.status_code == 200
+    payload = load_response.json()
+    assert [row["ticker"] for row in payload["portfolio"]["assets"]] == ["UFO", "VOO"]
+    assert [row["group"] for row in payload["portfolio"]["assets"]] == [
+        "satellite_space",
+        "core",
+    ]
     assert payload["analysis"] is None
 
 

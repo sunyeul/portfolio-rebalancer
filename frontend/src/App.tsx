@@ -260,8 +260,14 @@ export function App() {
   });
 
   const saveSnapshotMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (selectedPortfolioId === null) throw new Error('저장할 포트폴리오를 선택해주세요.');
+      if ((rowsDirty || !portfolio.length) && !validRows.length) {
+        throw new Error('저장할 포트폴리오 입력이 없습니다.');
+      }
+      if (rowsDirty || !portfolio.length) {
+        await portfolioMutation.mutateAsync(validRows);
+      }
       return saveSnapshot(selectedPortfolioId, {
         name: snapshotName || undefined
       });
@@ -675,7 +681,7 @@ export function App() {
                 <button
                   type="button"
                   className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-800 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
-                  disabled={selectedPortfolioId === null || !portfolio.length || saveSnapshotMutation.isPending}
+                  disabled={selectedPortfolioId === null || !validRows.length || portfolioMutation.isPending || saveSnapshotMutation.isPending}
                   onClick={saveCurrentSnapshot}
                 >
                   {saveSnapshotMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Save className="h-4 w-4" />}

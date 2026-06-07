@@ -15,6 +15,11 @@ from api.v1.serialization import (
     safe_mapping,
 )
 from middleware.session import session_manager
+from services.portfolio_service import (
+    PortfolioInputError,
+    normalize_and_validate_assets,
+    parse_manual_edit_to_assets,
+)
 from storage.portfolio_store import (
     StorageError,
     create_portfolio,
@@ -40,9 +45,20 @@ class PortfolioUpdateRequest(BaseModel):
     description: str | None = None
 
 
+class SnapshotPortfolioRowIn(BaseModel):
+    ticker: str = ""
+    allocation: float | str | None = None
+    return_total: float | str | None = None
+    group: str | None = None
+    role: str | None = None
+    dca_enabled: bool | str | None = True
+    thesis_status: str | None = None
+
+
 class SnapshotCreateRequest(BaseModel):
     name: str = ""
     note: str = ""
+    rows: list[SnapshotPortfolioRowIn] | None = None
 
 
 class SnapshotUpdateRequest(BaseModel):
@@ -97,24 +113,36 @@ async def create_saved_snapshot(
 ):
     """Persist the current session state as a named portfolio snapshot."""
     session_id = request.state.session_id
-    session_data = {
-        key: session_manager.get(session_id, key)
-        for key in [
-            "asset_df",
-            "metrics_df",
-            "portfolio_metrics",
-            "benchmark_metrics",
-            "missing_tickers",
-            "returns_smooth",
-            "analysis_settings",
-            "proposal_df",
-            "ips_action_df",
-            "group_summary_df",
-            "rc_violations",
-            "evaluation_settings",
-            "ips_config_snapshot",
-        ]
-    }
+    session_keys = [
+        "asset_df",
+        "metrics_df",
+        "portfolio_metrics",
+        "benchmark_metrics",
+        "missing_tickers",
+        "returns_smooth",
+        "analysis_settings",
+        "proposal_df",
+        "ips_action_df",
+        "group_summary_df",
+        "rc_violations",
+        "evaluation_settings",
+        "ips_config_snapshot",
+    ]
+    session_data = {key: session_manager.get(session_id, key) for key in session_keys}
+    if payload.rows is not None:
+        try:
+            assets, _warnings = parse_manual_edit_to_assets(
+                [row.model_dump() for row in payload.rows]
+            )
+            asset_df, _validation_warnings = normalize_and_validate_assets(assets)
+        except PortfolioInputError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        session_data = {key: None for key in session_keys}
+        session_data["asset_df"] = asset_df.to_dict(orient="records")
+        session_manager.set(session_id, "asset_df", session_data["asset_df"])
+        for key in session_keys:
+            if key != "asset_df":
+                session_manager.delete(session_id, key)
     try:
         snapshot = create_snapshot(
             portfolio_id,
