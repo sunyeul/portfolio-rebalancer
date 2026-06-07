@@ -112,6 +112,7 @@ async def create_saved_snapshot(
             "group_summary_df",
             "rc_violations",
             "evaluation_settings",
+            "ips_config_snapshot",
         ]
     }
     try:
@@ -232,6 +233,7 @@ def _snapshot_response(snapshot: dict) -> dict:
                 rc_violations_df,
                 RC_VIOLATION_COLUMNS,
             ),
+            "ips_config_snapshot": snapshot["evaluation"].get("ips_config_snapshot"),
         }
 
     return response

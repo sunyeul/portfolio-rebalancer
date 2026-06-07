@@ -208,6 +208,7 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
             buy_list=pd.DataFrame(),
             fine_tune_list=pd.DataFrame(),
             rc_violations=pd.DataFrame(),
+            ips_config_snapshot={"groups": {"core": {"type": "core"}}},
         )
 
     monkeypatch.setattr("api.v1.analysis.run_analysis", fake_run_analysis)
@@ -226,6 +227,7 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
     payload = load_response.json()
     assert payload["analysis"]["metrics"][0]["ticker"] == "VOO"
     assert payload["evaluation"]["proposal"][0]["ticker"] == "VOO"
+    assert payload["evaluation"]["ips_config_snapshot"]["groups"]["core"]["type"] == "core"
 
     csv_response = load_client.get("/api/v1/evaluation/download-csv?type=proposal")
     assert csv_response.status_code == 200

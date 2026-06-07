@@ -27,6 +27,7 @@ class EvaluationResult(NamedTuple):
     buy_list: pd.DataFrame
     fine_tune_list: pd.DataFrame
     rc_violations: pd.DataFrame
+    ips_config_snapshot: dict | None = None
 
 
 class EvaluationError(Exception):
@@ -253,15 +254,15 @@ def run_evaluation(
 
     rc_violations_df = pd.DataFrame(violations) if violations else pd.DataFrame()
 
-    ips_config = load_ips_config()
-    group_summary_df = compute_group_summary(mdf, ips_config)
-    allocation_status = compute_ips_allocation_status(group_summary_df, ips_config)
+    ips_config_snapshot = load_ips_config()
+    group_summary_df = compute_group_summary(mdf, ips_config_snapshot)
+    allocation_status = compute_ips_allocation_status(group_summary_df, ips_config_snapshot)
     ips_action_df = classify_ips_actions(
         proposal_df=proposal,
         metrics_df=mdf,
         group_summary_df=group_summary_df,
         allocation_status=allocation_status,
-        ips_config=ips_config,
+        ips_config=ips_config_snapshot,
     )
 
     return EvaluationResult(
@@ -272,4 +273,5 @@ def run_evaluation(
         buy_list=buy_list,
         fine_tune_list=fine_tune,
         rc_violations=rc_violations_df,
+        ips_config_snapshot=ips_config_snapshot,
     )

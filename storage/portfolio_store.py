@@ -474,15 +474,17 @@ def _insert_evaluation(
             snapshot_id,
             rc_over_thresh_pct,
             e_thresh,
-            target_weights_json
+            target_weights_json,
+            ips_config_snapshot_json
         )
-        VALUES (?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?)
         """,
         (
             snapshot_id,
             settings.get("rc_over_thresh_pct"),
             settings.get("e_thresh"),
             _json_dump(settings.get("target_weights")),
+            _json_dump(session_data.get("ips_config_snapshot")),
         ),
     )
     evaluation_run_id = int(cursor.lastrowid)
@@ -755,6 +757,9 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
                         evaluation_run["target_weights_json"], None
                     ),
                 },
+                "ips_config_snapshot": _json_load(
+                    evaluation_run["ips_config_snapshot_json"], None
+                ),
             }
         )
         evaluation_payload = {
@@ -762,6 +767,7 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
             "ips_action_df": session_state["ips_action_df"],
             "group_summary_df": session_state["group_summary_df"],
             "rc_violations": session_state["rc_violations"],
+            "ips_config_snapshot": session_state["ips_config_snapshot"],
         }
 
     return {

@@ -8,6 +8,7 @@ import pandas as pd
 from pydantic import ValidationError
 
 from core.asset import Asset, parse_text_to_assets
+from storage.config_store import active_codes
 from utils.metrics import normalize_weights
 
 
@@ -15,6 +16,13 @@ class PortfolioInputError(Exception):
     """포트폴리오 입력 처리 중 발생하는 오류."""
 
     pass
+
+
+METADATA_DEFAULTS = {
+    "group": ("groups", "ungrouped"),
+    "role": ("roles", "unknown"),
+    "thesis_status": ("thesis_statuses", "unknown"),
+}
 
 
 def _get_attr(row, name: str, default=None):
@@ -169,6 +177,17 @@ def normalize_and_validate_assets(
 
     # AIDEV-NOTE: pydantic-integration; Asset 객체는 .model_dump()로 dict로 변환하여 DataFrame 생성
     asset_df = pd.DataFrame([a.model_dump() for a in assets])
+    for column, (table, default) in METADATA_DEFAULTS.items():
+        valid_codes = active_codes(table)
+        invalid_mask = ~asset_df[column].isin(valid_codes)
+        for ticker, value in asset_df.loc[invalid_mask, ["ticker", column]].itertuples(
+            index=False
+        ):
+            warnings.append(
+                f"{ticker}: 등록되지 않은 {column} '{value}' 값은 {default}(으)로 처리합니다."
+            )
+        asset_df.loc[invalid_mask, column] = default
+
     raw_df = asset_df.copy()
 
     for ticker, group in raw_df.groupby("ticker"):

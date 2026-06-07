@@ -73,6 +73,7 @@ async def run_evaluation_endpoint(payload: EvaluationRunRequest, request: Reques
     session_manager.set(
         session_id, "rc_violations", result.rc_violations.to_dict(orient="records")
     )
+    session_manager.set(session_id, "ips_config_snapshot", result.ips_config_snapshot)
     session_manager.set(
         session_id,
         "evaluation_settings",
@@ -93,6 +94,7 @@ async def run_evaluation_endpoint(payload: EvaluationRunRequest, request: Reques
         "rc_violations": dataframe_records(
             result.rc_violations, RC_VIOLATION_COLUMNS
         ),
+        "ips_config_snapshot": result.ips_config_snapshot,
     }
 
 
