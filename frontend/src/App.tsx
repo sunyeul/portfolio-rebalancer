@@ -16,7 +16,8 @@ import {
   RefreshCcw,
   Save,
   ShieldCheck,
-  Trash2
+  Trash2,
+  X
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
@@ -39,8 +40,10 @@ import {
   type EvaluationResponse,
   type MetricRow,
   type ProposalRow,
+  type SnapshotSummary,
   createPortfolio,
   csvDownloadUrl,
+  deleteSnapshot,
   listPortfolios,
   listSnapshots,
   loadSnapshot,
@@ -48,6 +51,7 @@ import {
   runEvaluation,
   saveSnapshot,
   submitPortfolio,
+  updateSnapshot,
   uploadPortfolioCsv
 } from './lib/api';
 import { blankRow, parsePortfolioText } from './lib/parser';
@@ -131,6 +135,10 @@ export function App() {
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<number | null>(null);
   const [newPortfolioName, setNewPortfolioName] = useState('');
   const [snapshotName, setSnapshotName] = useState('');
+  const [editingSnapshotId, setEditingSnapshotId] = useState<number | null>(null);
+  const [editingSnapshotName, setEditingSnapshotName] = useState('');
+  const [editingSnapshotNote, setEditingSnapshotNote] = useState('');
+  const [deletingSnapshotId, setDeletingSnapshotId] = useState<number | null>(null);
 
   const portfoliosQuery = useQuery({
     queryKey: ['portfolios'],
@@ -222,6 +230,41 @@ export function App() {
     }
   });
 
+  const updateSnapshotMutation = useMutation({
+    mutationFn: ({
+      snapshotId,
+      payload
+    }: {
+      snapshotId: number;
+      payload: { name?: string; note?: string };
+    }) => updateSnapshot(snapshotId, payload),
+    onSuccess: async () => {
+      setEditingSnapshotId(null);
+      setEditingSnapshotName('');
+      setEditingSnapshotNote('');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['portfolios'] }),
+        queryClient.invalidateQueries({ queryKey: ['portfolio-snapshots', selectedPortfolioId] })
+      ]);
+    }
+  });
+
+  const deleteSnapshotMutation = useMutation({
+    mutationFn: deleteSnapshot,
+    onSuccess: async () => {
+      setEditingSnapshotId(null);
+      setEditingSnapshotName('');
+      setEditingSnapshotNote('');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['portfolios'] }),
+        queryClient.invalidateQueries({ queryKey: ['portfolio-snapshots', selectedPortfolioId] })
+      ]);
+    },
+    onSettled: () => {
+      setDeletingSnapshotId(null);
+    }
+  });
+
   const loadSnapshotMutation = useMutation({
     mutationFn: loadSnapshot,
     onSuccess: (data) => {
@@ -244,6 +287,10 @@ export function App() {
     .map((row) => row.ticker)
     .filter((ticker, index, tickers) => tickers.indexOf(ticker) !== index);
   const duplicateCount = new Set(duplicateTickers).size;
+  const snapshotActionPending =
+    loadSnapshotMutation.isPending ||
+    updateSnapshotMutation.isPending ||
+    deleteSnapshotMutation.isPending;
 
   const assetColumns = useMemo<ColumnDef<AssetRow>[]>(
     () => [
@@ -331,6 +378,35 @@ export function App() {
 
   function saveCurrentSnapshot() {
     saveSnapshotMutation.mutate();
+  }
+
+  function startEditingSnapshot(snapshot: SnapshotSummary) {
+    setEditingSnapshotId(snapshot.id);
+    setEditingSnapshotName(snapshot.name);
+    setEditingSnapshotNote(snapshot.note);
+  }
+
+  function cancelEditingSnapshot() {
+    setEditingSnapshotId(null);
+    setEditingSnapshotName('');
+    setEditingSnapshotNote('');
+  }
+
+  function saveEditedSnapshot() {
+    if (editingSnapshotId === null) return;
+    updateSnapshotMutation.mutate({
+      snapshotId: editingSnapshotId,
+      payload: {
+        name: editingSnapshotName,
+        note: editingSnapshotNote
+      }
+    });
+  }
+
+  function removeSnapshot(snapshot: SnapshotSummary) {
+    if (!window.confirm('이 스냅샷을 삭제할까요?')) return;
+    setDeletingSnapshotId(snapshot.id);
+    deleteSnapshotMutation.mutate(snapshot.id);
   }
 
   const chartData = analysis?.metrics.map((row) => ({
@@ -465,33 +541,100 @@ export function App() {
                   현재 상태 저장
                 </button>
               </div>
-              <div className="max-h-36 space-y-2 overflow-y-auto pr-1">
-                {savedSnapshots.map((snapshot) => (
-                  <button
-                    key={snapshot.id}
-                    type="button"
-                    className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-left text-sm transition hover:border-blue-300 hover:bg-blue-50"
-                    onClick={() => loadSnapshotMutation.mutate(snapshot.id)}
-                    disabled={loadSnapshotMutation.isPending}
-                  >
-                    <span>
-                      <strong className="block text-slate-900">{snapshot.name}</strong>
-                      <span className="text-xs text-slate-500">
-                        {shortDate(snapshot.created_at)} · {snapshot.position_count}종목
+              <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                {savedSnapshots.map((snapshot) =>
+                  editingSnapshotId === snapshot.id ? (
+                    <div key={snapshot.id} className="space-y-2 rounded-lg border border-blue-200 bg-blue-50/70 p-3">
+                      <input
+                        className="table-input w-full"
+                        value={editingSnapshotName}
+                        placeholder="스냅샷 이름"
+                        onChange={(event) => setEditingSnapshotName(event.target.value)}
+                      />
+                      <textarea
+                        className="table-input min-h-16 w-full resize-none"
+                        value={editingSnapshotNote}
+                        placeholder="메모"
+                        onChange={(event) => setEditingSnapshotNote(event.target.value)}
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 transition hover:bg-white hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-300"
+                          title="취소"
+                          disabled={updateSnapshotMutation.isPending}
+                          onClick={cancelEditingSnapshot}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          className="grid h-9 w-9 place-items-center rounded-lg bg-blue-800 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                          title="저장"
+                          disabled={updateSnapshotMutation.isPending}
+                          onClick={saveEditedSnapshot}
+                        >
+                          {updateSnapshotMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Save className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      key={snapshot.id}
+                      className="flex items-center gap-2 rounded-lg border border-slate-200 px-2 py-2 text-sm transition hover:border-blue-300 hover:bg-blue-50"
+                    >
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 px-1 text-left"
+                        onClick={() => loadSnapshotMutation.mutate(snapshot.id)}
+                        disabled={snapshotActionPending}
+                      >
+                        <span>
+                          <strong className="block truncate text-slate-900">{snapshot.name}</strong>
+                          <span className="block truncate text-xs text-slate-500">
+                            {shortDate(snapshot.created_at)} · {snapshot.position_count}종목
+                            {snapshot.note ? ` · ${snapshot.note}` : ''}
+                          </span>
+                        </span>
+                      </button>
+                      <span className="shrink-0 text-xs font-bold text-blue-800">
+                        {snapshot.has_evaluation ? '평가' : snapshot.has_analysis ? '분석' : '입력'}
                       </span>
-                    </span>
-                    <span className="shrink-0 text-xs font-bold text-blue-800">
-                      {snapshot.has_evaluation ? '평가' : snapshot.has_analysis ? '분석' : '입력'}
-                    </span>
-                  </button>
-                ))}
+                      <button
+                        type="button"
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-blue-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                        title="스냅샷 편집"
+                        disabled={snapshotActionPending}
+                        onClick={() => startEditingSnapshot(snapshot)}
+                      >
+                        <Edit3 className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-red-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                        title="스냅샷 삭제"
+                        disabled={snapshotActionPending}
+                        onClick={() => removeSnapshot(snapshot)}
+                      >
+                        {deletingSnapshotId === snapshot.id ? <Loader2 className="spin h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  )
+                )}
                 {!savedSnapshots.length && (
                   <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500">
                     저장 이력이 없습니다.
                   </div>
                 )}
               </div>
-              <ErrorLine error={saveSnapshotMutation.error ?? loadSnapshotMutation.error} />
+              <ErrorLine
+                error={
+                  saveSnapshotMutation.error ??
+                  loadSnapshotMutation.error ??
+                  updateSnapshotMutation.error ??
+                  deleteSnapshotMutation.error
+                }
+              />
             </div>
           </div>
         </section>

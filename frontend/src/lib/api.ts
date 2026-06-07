@@ -202,6 +202,22 @@ export function saveSnapshot(
   });
 }
 
+export function updateSnapshot(
+  snapshotId: number,
+  payload: { name?: string; note?: string }
+) {
+  return requestJson<{ snapshot: SnapshotSummary }>(`/api/v1/portfolios/snapshots/${snapshotId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteSnapshot(snapshotId: number) {
+  return requestJson<{ ok: true }>(`/api/v1/portfolios/snapshots/${snapshotId}`, {
+    method: 'DELETE'
+  });
+}
+
 export function loadSnapshot(snapshotId: number) {
   return requestJson<SnapshotLoadResponse>(`/api/v1/portfolios/snapshots/${snapshotId}/load`, {
     method: 'POST'
