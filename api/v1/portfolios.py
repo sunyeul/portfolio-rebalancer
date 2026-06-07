@@ -258,6 +258,35 @@ def _session_data(session_id: str) -> dict:
     return {key: session_manager.get(session_id, key) for key in SESSION_KEYS}
 
 
+def _proposal_frame(rows: list[dict] | None) -> pd.DataFrame:
+    proposal_df = pd.DataFrame(rows or [])
+    if proposal_df.empty:
+        return proposal_df
+
+    defaults = {
+        "RC_Gap%": proposal_df["갭%"] if "갭%" in proposal_df else 0.0,
+        "제안조정%": 0.0,
+        "판단사유": "",
+        "히스테리시스제외": False,
+        "최소거래미만": False,
+        "실행": False,
+    }
+    for column, default in defaults.items():
+        if column not in proposal_df.columns:
+            proposal_df[column] = default
+
+    if "갭%" in proposal_df.columns:
+        proposal_df["RC_Gap%"] = proposal_df["RC_Gap%"].fillna(proposal_df["갭%"])
+    else:
+        proposal_df["RC_Gap%"] = proposal_df["RC_Gap%"].fillna(0.0)
+    proposal_df["제안조정%"] = proposal_df["제안조정%"].fillna(0.0)
+    proposal_df["판단사유"] = proposal_df["판단사유"].fillna("")
+    for column in ["히스테리시스제외", "최소거래미만", "실행"]:
+        proposal_df[column] = proposal_df[column].where(proposal_df[column].notna(), False).astype(bool)
+
+    return proposal_df
+
+
 def _state_response(state: dict) -> dict:
     session_state = state["session_state"]
     asset_df = pd.DataFrame(session_state.get("asset_df") or [])
@@ -287,7 +316,7 @@ def _state_response(state: dict) -> dict:
         }
 
     if state["evaluation"]:
-        proposal_df = pd.DataFrame(state["evaluation"]["proposal_df"])
+        proposal_df = _proposal_frame(state["evaluation"]["proposal_df"])
         ips_action_df = pd.DataFrame(state["evaluation"]["ips_action_df"])
         group_summary_df = pd.DataFrame(state["evaluation"]["group_summary_df"])
         rc_violations_df = pd.DataFrame(state["evaluation"]["rc_violations"])
@@ -348,7 +377,7 @@ def _snapshot_response(snapshot: dict) -> dict:
         }
 
     if snapshot["evaluation"]:
-        proposal_df = pd.DataFrame(snapshot["evaluation"]["proposal_df"])
+        proposal_df = _proposal_frame(snapshot["evaluation"]["proposal_df"])
         ips_action_df = pd.DataFrame(snapshot["evaluation"]["ips_action_df"])
         group_summary_df = pd.DataFrame(snapshot["evaluation"]["group_summary_df"])
         rc_violations_df = pd.DataFrame(snapshot["evaluation"]["rc_violations"])

@@ -5,6 +5,7 @@ from main import app
 from services.analysis_service import AnalysisResult
 from services.evaluation_service import EvaluationResult
 from storage.database import initialize_database
+from storage.portfolio_store import save_current_state as persist_current_state
 
 
 def _client_with_db(monkeypatch, tmp_path):
@@ -149,6 +150,63 @@ def test_current_state_auto_save_does_not_create_snapshot(monkeypatch, tmp_path)
     )
     assert snapshot_response.status_code == 200
     assert snapshot_response.json()["snapshot"]["position_count"] == 2
+
+
+def test_current_state_serializes_legacy_evaluation_defaults(monkeypatch, tmp_path):
+    client = _client_with_db(monkeypatch, tmp_path)
+    portfolio_id = client.post(
+        "/api/v1/portfolios",
+        json={"name": "레거시 평가 계좌"},
+    ).json()["portfolio"]["id"]
+    persist_current_state(
+        portfolio_id,
+        {
+            "asset_df": [
+                {
+                    "ticker": "VOO",
+                    "allocation": 100.0,
+                    "return_total": None,
+                    "group": "core",
+                    "dca_enabled": True,
+                    "thesis_status": "intact",
+                    "weight": 1.0,
+                }
+            ],
+            "proposal_df": [
+                {
+                    "ticker": "VOO",
+                    "현재%": 100.0,
+                    "목표%": 100.0,
+                    "갭%": 0.0,
+                    "E": 0.7,
+                    "RC_Over%": 0.0,
+                    "RC_Target%": 100.0,
+                    "return_total%": 20.0,
+                    "group": "core",
+                    "dca_enabled": True,
+                    "thesis_status": "intact",
+                    "risk_over": False,
+                    "efficiency_good": True,
+                    "히스테리시스제외": None,
+                    "최소거래미만": None,
+                    "실행": None,
+                }
+            ],
+            "ips_action_df": [],
+            "group_summary_df": [],
+            "rc_violations": [],
+        },
+    )
+
+    response = client.get(f"/api/v1/portfolios/{portfolio_id}/current-state")
+    assert response.status_code == 200
+    proposal_row = response.json()["evaluation"]["proposal"][0]
+    assert proposal_row["rc_gap_pct"] == 0.0
+    assert proposal_row["suggested_trade_pct"] == 0.0
+    assert proposal_row["action_reason"] == ""
+    assert proposal_row["within_hysteresis"] is False
+    assert proposal_row["below_min_trade"] is False
+    assert proposal_row["should_execute"] is False
 
 
 def test_snapshot_metadata_update_and_delete(monkeypatch, tmp_path):
