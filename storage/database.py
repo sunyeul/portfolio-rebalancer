@@ -10,15 +10,15 @@ from pathlib import Path
 DEFAULT_DB_PATH = Path("data") / "portfolio_rebalancer.sqlite3"
 
 GROUP_SEEDS = [
-    ("ungrouped", "미분류", 0),
-    ("core", "핵심 자산", 10),
-    ("satellite_ai_infra", "위성: AI 인프라", 20),
-    ("satellite_ai_software", "위성: AI 소프트웨어", 30),
-    ("satellite_space", "위성: 우주/항공", 40),
-    ("satellite_quantum", "위성: 양자", 50),
-    ("korea_equity", "한국 주식", 60),
-    ("bond_mixed", "채권/혼합", 70),
-    ("cash", "현금", 80),
+    ("ungrouped", "미분류", "unknown", 0),
+    ("core", "핵심 자산", "core", 10),
+    ("satellite_ai_infra", "위성: AI 인프라", "satellite", 20),
+    ("satellite_ai_software", "위성: AI 소프트웨어", "satellite", 30),
+    ("satellite_space", "위성: 우주/항공", "satellite", 40),
+    ("satellite_quantum", "위성: 양자", "satellite", 50),
+    ("korea_equity", "한국 주식", "satellite", 60),
+    ("bond_mixed", "채권/혼합", "defensive", 70),
+    ("cash", "현금", "cash", 80),
 ]
 
 ROLE_SEEDS = [
@@ -35,6 +35,28 @@ THESIS_STATUS_SEEDS = [
     ("intact", "유효", 10),
     ("watch", "관찰", 20),
     ("broken", "훼손", 30),
+]
+
+TARGET_ALLOCATION_SEEDS = [
+    ("core", 0.70, 0.80, 0.90),
+    ("satellite", 0.10, 0.20, 0.30),
+]
+
+ACTION_PRIORITY_SEEDS = [
+    ("increase_dca", "정기매수 증액 후보", 1),
+    ("decrease_dca", "정기매수 감액/중단 후보", 2),
+    ("review_thesis", "투자 논리 점검", 3),
+    ("consider_rebalance_sell", "예외적 리밸런싱 매도 검토", 4),
+    ("hold_observe", "유지·관찰", 5),
+    ("block_action", "행동 보류", 6),
+]
+
+IPS_RULE_SEEDS = [
+    ("default_when_uncertain", '"core"'),
+    ("immediate_buy_is_exception", "true"),
+    ("prefer_dca_over_sell", "true"),
+    ("use_momentum_as_dca_intensity_only", "true"),
+    ("min_trade_pct", "0.01"),
 ]
 
 
@@ -80,6 +102,7 @@ def initialize_database() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 code TEXT NOT NULL UNIQUE,
                 label TEXT NOT NULL,
+                group_type TEXT NOT NULL DEFAULT 'unknown',
                 sort_order INTEGER NOT NULL DEFAULT 999,
                 is_active INTEGER NOT NULL DEFAULT 1
             );
@@ -165,7 +188,27 @@ def initialize_database() -> None:
                 rc_over_thresh_pct REAL,
                 e_thresh REAL,
                 target_weights_json TEXT,
+                ips_config_snapshot_json TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS ips_target_allocations (
+                group_type TEXT PRIMARY KEY,
+                min REAL NOT NULL,
+                target REAL NOT NULL,
+                max REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ips_action_priorities (
+                action_code TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                priority INTEGER NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1
+            );
+
+            CREATE TABLE IF NOT EXISTS ips_rules (
+                key TEXT PRIMARY KEY,
+                value_json TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS evaluation_rows (
@@ -206,9 +249,46 @@ def initialize_database() -> None:
             );
             """
         )
-        _seed_lookup(conn, "groups", GROUP_SEEDS)
+        group_type_added = _ensure_column(
+            conn, "groups", "group_type", "TEXT NOT NULL DEFAULT 'unknown'"
+        )
+        _ensure_column(conn, "evaluation_runs", "ips_config_snapshot_json", "TEXT")
+        _seed_groups(conn, update_group_type=group_type_added)
         _seed_lookup(conn, "roles", ROLE_SEEDS)
         _seed_lookup(conn, "thesis_statuses", THESIS_STATUS_SEEDS)
+        _seed_target_allocations(conn)
+        _seed_action_priorities(conn)
+        _seed_ips_rules(conn)
+
+
+def _ensure_column(
+    conn: sqlite3.Connection,
+    table: str,
+    column: str,
+    definition: str,
+) -> bool:
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        return True
+    return False
+
+
+def _seed_groups(conn: sqlite3.Connection, update_group_type: bool = False) -> None:
+    for code, label, group_type, sort_order in GROUP_SEEDS:
+        conn.execute(
+            """
+            INSERT INTO groups (code, label, group_type, sort_order, is_active)
+            VALUES (?, ?, ?, ?, 1)
+            ON CONFLICT(code) DO NOTHING
+            """,
+            (code, label, group_type, sort_order),
+        )
+        if update_group_type:
+            conn.execute(
+                "UPDATE groups SET group_type = ? WHERE code = ?",
+                (group_type, code),
+            )
 
 
 def _seed_lookup(
@@ -221,10 +301,43 @@ def _seed_lookup(
             f"""
             INSERT INTO {table} (code, label, sort_order, is_active)
             VALUES (?, ?, ?, 1)
-            ON CONFLICT(code) DO UPDATE SET
-                label = excluded.label,
-                sort_order = excluded.sort_order,
-                is_active = 1
+            ON CONFLICT(code) DO NOTHING
             """,
             (code, label, sort_order),
+        )
+
+
+def _seed_target_allocations(conn: sqlite3.Connection) -> None:
+    for group_type, min_value, target_value, max_value in TARGET_ALLOCATION_SEEDS:
+        conn.execute(
+            """
+            INSERT INTO ips_target_allocations (group_type, min, target, max)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(group_type) DO NOTHING
+            """,
+            (group_type, min_value, target_value, max_value),
+        )
+
+
+def _seed_action_priorities(conn: sqlite3.Connection) -> None:
+    for action_code, label, priority in ACTION_PRIORITY_SEEDS:
+        conn.execute(
+            """
+            INSERT INTO ips_action_priorities (action_code, label, priority, is_active)
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT(action_code) DO NOTHING
+            """,
+            (action_code, label, priority),
+        )
+
+
+def _seed_ips_rules(conn: sqlite3.Connection) -> None:
+    for key, value_json in IPS_RULE_SEEDS:
+        conn.execute(
+            """
+            INSERT INTO ips_rules (key, value_json)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO NOTHING
+            """,
+            (key, value_json),
         )
