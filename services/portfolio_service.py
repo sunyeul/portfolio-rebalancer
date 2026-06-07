@@ -122,14 +122,19 @@ def parse_manual_edit_to_assets(
     asset_list: List[Asset] = []
 
     for row in edited_data:
+        ticker = str(row.get("ticker", "")).strip()
+        allocation = row.get("allocation", "")
+        if ticker == "" or allocation is None or str(allocation).strip() == "":
+            continue
+
         try:
             return_total = None
             if row.get("return_total"):
                 return_total = float(row["return_total"]) / 100.0
 
             asset = Asset(
-                ticker=str(row["ticker"]).upper(),
-                allocation=float(row["allocation"]),
+                ticker=ticker.upper(),
+                allocation=float(allocation),
                 return_total=return_total,
                 group=row.get("group", "ungrouped"),
                 role=row.get("role", "unknown"),

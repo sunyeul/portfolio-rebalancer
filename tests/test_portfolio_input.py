@@ -3,6 +3,7 @@ import pandas as pd
 from services.portfolio_service import (
     normalize_and_validate_assets,
     parse_csv_to_assets,
+    parse_manual_edit_to_assets,
 )
 
 
@@ -87,3 +88,53 @@ def test_normalize_warns_on_duplicate_metadata_conflicts():
     assert asset_df.loc[0, "group"] == "core"
     assert any("group 값이 여러 개" in warning for warning in warnings)
     assert any("role 값이 여러 개" in warning for warning in warnings)
+
+
+def test_parse_manual_edit_ignores_empty_rows():
+    assets, warnings = parse_manual_edit_to_assets(
+        [
+            {"ticker": "", "allocation": ""},
+            {"ticker": "   ", "allocation": "20"},
+            {"ticker": "VOO", "allocation": "40"},
+            {"ticker": "QQQ", "allocation": ""},
+        ]
+    )
+
+    assert warnings == []
+    assert [asset.ticker for asset in assets] == ["VOO"]
+    assert assets[0].allocation == 40
+
+
+def test_parse_manual_edit_reads_checkbox_and_string_dca_values():
+    assets, warnings = parse_manual_edit_to_assets(
+        [
+            {"ticker": "VOO", "allocation": "40", "dca_enabled": True},
+            {"ticker": "IONQ", "allocation": "2", "dca_enabled": "false"},
+        ]
+    )
+
+    assert warnings == []
+    assert assets[0].dca_enabled is True
+    assert assets[1].dca_enabled is False
+
+
+def test_parse_manual_edit_preserves_metadata_and_percent_return_total():
+    assets, warnings = parse_manual_edit_to_assets(
+        [
+            {
+                "ticker": "ufo",
+                "allocation": "3",
+                "return_total": "-12",
+                "group": "satellite_space",
+                "role": "theme_etf",
+                "thesis_status": "watch",
+            }
+        ]
+    )
+
+    assert warnings == []
+    assert assets[0].ticker == "UFO"
+    assert assets[0].return_total == -0.12
+    assert assets[0].group == "satellite_space"
+    assert assets[0].role == "theme_etf"
+    assert assets[0].thesis_status == "watch"
