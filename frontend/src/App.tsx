@@ -36,6 +36,7 @@ import { DataTable } from './components/DataTable';
 import { MetricCard } from './components/MetricCard';
 import {
   type AnalysisResponse,
+  type ActionPriority,
   type AssetRow,
   type ConfigOption,
   type EvaluationResponse,
@@ -56,7 +57,6 @@ import {
   loadSnapshot,
   runAnalysis,
   runEvaluation,
-  saveActionPriorities,
   saveConfigOption,
   saveCurrentState,
   saveIpsRules,
@@ -178,7 +178,7 @@ export function App() {
   const [newOptionGroupType, setNewOptionGroupType] = useState('satellite');
   const [editingOption, setEditingOption] = useState<EditableOption | null>(null);
   const [targetAllocationRows, setTargetAllocationRows] = useState<TargetAllocation[]>([]);
-  const [actionPriorityRows, setActionPriorityRows] = useState<Array<{ action_code: string; label: string; priority: number; is_active: boolean }>>([]);
+  const [actionPriorityRows, setActionPriorityRows] = useState<ActionPriority[]>([]);
   const [rulesJson, setRulesJson] = useState('[]');
 
   const configOptionsQuery = useQuery({
@@ -407,11 +407,11 @@ export function App() {
 
   const saveOptionMutation = useMutation({
     mutationFn: () =>
-      saveConfigOption(newOptionTable, {
+      saveConfigOption('groups', {
         code: newOptionCode,
         label: newOptionLabel,
         is_active: editingOption?.option.is_active ?? true,
-        group_type: newOptionTable === 'groups' ? newOptionGroupType : undefined
+        group_type: newOptionGroupType
       }),
     onSuccess: async () => {
       setNewOptionCode('');
@@ -437,11 +437,6 @@ export function App() {
 
   const saveTargetsMutation = useMutation({
     mutationFn: () => saveTargetAllocations(targetAllocationRows),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ips-config'] })
-  });
-
-  const savePrioritiesMutation = useMutation({
-    mutationFn: () => saveActionPriorities(actionPriorityRows),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ips-config'] })
   });
 
@@ -612,6 +607,7 @@ export function App() {
   }
 
   function startOptionEdit(table: OptionTable, option: ConfigOption) {
+    if (table !== 'groups') return;
     setEditingOption({ table, option });
     setNewOptionTable(table);
     setNewOptionCode(option.value);
@@ -627,6 +623,7 @@ export function App() {
   }
 
   function deleteOption(table: OptionTable, option: ConfigOption) {
+    if (table !== 'groups') return;
     if (!window.confirm(`${option.label} 항목을 삭제할까요? 기존 데이터 참조를 위해 삭제 이력은 보존됩니다.`)) return;
     if (editingOption?.table === table && editingOption.option.value === option.value) {
       cancelOptionEdit();
@@ -641,23 +638,6 @@ export function App() {
           ? {
               ...row,
               [field]: field === 'group_type' ? value : Number(value)
-            }
-          : row
-      )
-    );
-  }
-
-  function updateActionPriority(
-    index: number,
-    field: 'action_code' | 'label' | 'priority' | 'is_active',
-    value: string | boolean
-  ) {
-    setActionPriorityRows((current) =>
-      current.map((row, rowIndex) =>
-        rowIndex === index
-          ? {
-              ...row,
-              [field]: field === 'priority' ? Number(value) : value
             }
           : row
       )
