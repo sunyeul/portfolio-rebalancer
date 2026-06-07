@@ -11,7 +11,6 @@ from storage.config_store import (
     ConfigError,
     get_ips_management_config,
     list_options,
-    replace_action_priorities,
     replace_rules,
     replace_target_allocations,
     set_option_active,
@@ -69,6 +68,8 @@ async def get_ips_config():
 @router.post("/{table}")
 async def save_option(table: OptionTable, payload: OptionRequest):
     """Create or update a config option."""
+    if table != "groups":
+        raise HTTPException(status_code=403, detail="그룹 옵션만 수정할 수 있습니다.")
     try:
         return {
             "option": upsert_option(
@@ -87,6 +88,8 @@ async def save_option(table: OptionTable, payload: OptionRequest):
 @router.patch("/{table}/{code}/active")
 async def update_option_active(table: OptionTable, code: str, payload: ActiveRequest):
     """Soft-delete or reactivate an option."""
+    if table != "groups":
+        raise HTTPException(status_code=403, detail="그룹 옵션만 수정할 수 있습니다.")
     try:
         return {"option": set_option_active(table, code, payload.is_active)}
     except ConfigError as exc:
@@ -108,15 +111,8 @@ async def save_target_allocations(payload: list[TargetAllocationRequest]):
 
 @router.put("/ips/action-priorities")
 async def save_action_priorities(payload: list[ActionPriorityRequest]):
-    """Replace IPS action priorities."""
-    try:
-        return {
-            "action_priorities": replace_action_priorities(
-                [row.model_dump() for row in payload]
-            )
-        }
-    except ConfigError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    """Reject edits to app-defined IPS action priorities."""
+    raise HTTPException(status_code=403, detail="액션 우선순위는 읽기 전용입니다.")
 
 
 @router.put("/ips/rules")
