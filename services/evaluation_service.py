@@ -11,9 +11,11 @@ from utils.metrics import compute_rc_target
 from utils.optimization import calculate_orders_with_constraints
 from utils.ips_config import load_ips_config
 from utils.ips import (
+    DEFAULT_GROUP,
     classify_ips_actions,
     compute_group_summary,
     compute_ips_allocation_status,
+    fixed_group,
 )
 
 
@@ -36,6 +38,48 @@ class EvaluationError(Exception):
     pass
 
 
+def build_ips_target_weights(metrics_df: pd.DataFrame, ips_config: dict) -> pd.Series:
+    """고정 그룹 분류와 IPS 목표로 자산별 목표 비중을 자동 생성합니다."""
+    current = metrics_df["가중치"].fillna(0).astype(float)
+    group_series = metrics_df.get("group", pd.Series(DEFAULT_GROUP, index=metrics_df.index))
+    group_series = group_series.fillna(DEFAULT_GROUP).map(fixed_group)
+    target = current.copy()
+
+    locked_mask = group_series.isin(["cash", "unclassified"])
+    locked_weight = float(current[locked_mask].sum())
+    remaining_weight = max(0.0, 1.0 - locked_weight)
+    adjustable_group_values = [
+        group for group in ("core", "satellite") if (group_series == group).any()
+    ]
+
+    if not adjustable_group_values:
+        return target / target.sum() if target.sum() > 0 else target
+
+    target_cfg = ips_config.get("target_allocation", {})
+    desired = {
+        group: float(target_cfg.get(group, {}).get("target", 0.0))
+        for group in adjustable_group_values
+    }
+    desired_total = sum(desired.values())
+    if desired_total <= 0:
+        desired = {group: 1.0 for group in adjustable_group_values}
+        desired_total = float(len(adjustable_group_values))
+
+    for group in adjustable_group_values:
+        group_mask = group_series == group
+        group_target = remaining_weight * desired[group] / desired_total
+        current_in_group = current[group_mask]
+        current_group_total = float(current_in_group.sum())
+        if current_group_total > 0:
+            target[group_mask] = current_in_group / current_group_total * group_target
+        else:
+            target[group_mask] = group_target / int(group_mask.sum())
+
+    if target.sum() > 0:
+        target = target / target.sum()
+    return target
+
+
 def _action_reason(row: pd.Series | dict) -> str:
     """제안 행의 실행/보류 이유를 사람이 읽는 짧은 문구로 변환합니다."""
     within_hysteresis = bool(row.get("히스테리시스제외", False))
@@ -43,6 +87,8 @@ def _action_reason(row: pd.Series | dict) -> str:
     should_execute = bool(row.get("실행", False))
 
     if not should_execute:
+        if bool(row.get("data_quality_low", False)):
+            return "데이터 신뢰도 낮음"
         if within_hysteresis and below_min_trade:
             return "히스테리시스 범위 및 최소 거래 미만"
         if within_hysteresis:
@@ -56,16 +102,20 @@ def _action_reason(row: pd.Series | dict) -> str:
     gap_pct = float(row.get("갭%", 0) or 0)
 
     if risk_over and not efficiency_good:
-        return "위험 초과 및 효율 미달"
-    if risk_over:
-        return "위험 초과"
-    if not efficiency_good:
-        return "효율 미달"
-    if gap_pct > 0:
-        return "목표 대비 부족"
-    if gap_pct < 0:
-        return "목표 대비 초과"
-    return "실행 후보"
+        reason = "위험 초과 및 효율 미달"
+    elif risk_over:
+        reason = "위험 초과"
+    elif not efficiency_good:
+        reason = "효율 미달"
+    elif gap_pct > 0:
+        reason = "목표 대비 부족"
+    elif gap_pct < 0:
+        reason = "목표 대비 초과"
+    else:
+        reason = "실행 후보"
+    if bool(row.get("data_quality_low", False)):
+        reason += " · 데이터 신뢰도 낮음"
+    return reason
 
 
 def run_evaluation(
@@ -91,7 +141,12 @@ def run_evaluation(
         EvaluationError: 평가 실패 시
     """
     mdf = metrics_df.copy()
-    mdf["group"] = mdf.get("group", pd.Series(index=mdf.index)).fillna("ungrouped")
+    ips_config_snapshot = load_ips_config()
+    mdf["group"] = (
+        mdf.get("group", pd.Series(DEFAULT_GROUP, index=mdf.index))
+        .fillna(DEFAULT_GROUP)
+        .map(fixed_group)
+    )
     mdf["dca_enabled"] = (
         mdf.get("dca_enabled", pd.Series(True, index=mdf.index))
         .fillna(True)
@@ -101,10 +156,18 @@ def run_evaluation(
         "unknown"
     )
     mdf["return_total"] = mdf.get("return_total", pd.Series(index=mdf.index))
+    mdf["missing_ratio"] = mdf.get("missing_ratio", pd.Series(0, index=mdf.index)).fillna(0)
+    mdf["observation_count"] = (
+        mdf.get("observation_count", pd.Series(9999, index=mdf.index))
+        .fillna(9999)
+    )
+    mdf["data_quality_low"] = (
+        mdf["missing_ratio"].astype(float) > 0.2
+    ) | (mdf["observation_count"].astype(float) < 60)
 
     # 목표 가중치 시리즈 구축
     if target_weights is None:
-        tgt = mdf["가중치"]
+        tgt = build_ips_target_weights(mdf, ips_config_snapshot)
     elif isinstance(target_weights, dict):
         tgt = pd.Series(target_weights, index=mdf.index).fillna(0)
     else:
@@ -152,6 +215,9 @@ def run_evaluation(
             "group": mdf["group"].values,
             "dca_enabled": mdf["dca_enabled"].values,
             "thesis_status": mdf["thesis_status"].values,
+            "missing_ratio": mdf["missing_ratio"].values,
+            "observation_count": mdf["observation_count"].values,
+            "data_quality_low": mdf["data_quality_low"].values,
             "risk_over": mdf["risk_over"].values,
             "efficiency_good": mdf["efficiency_good"].values,
         }
@@ -175,9 +241,9 @@ def run_evaluation(
     # 거래 대상 필터링
     should_trade = above_min_trade & (~within_band)
 
-    proposal["히스테리시스제외"] = within_band
-    proposal["최소거래미만"] = ~above_min_trade
-    proposal["실행"] = should_trade
+    proposal["히스테리시스제외"] = within_band.values
+    proposal["최소거래미만"] = (~above_min_trade).values
+    proposal["실행"] = should_trade.values
     proposal["제안조정%"] = 0.0
     proposal["판단사유"] = proposal.apply(_action_reason, axis=1)
 
@@ -287,7 +353,6 @@ def run_evaluation(
 
     rc_violations_df = pd.DataFrame(violations) if violations else pd.DataFrame()
 
-    ips_config_snapshot = load_ips_config()
     group_summary_df = compute_group_summary(mdf, ips_config_snapshot)
     allocation_status = compute_ips_allocation_status(group_summary_df, ips_config_snapshot)
     ips_action_df = classify_ips_actions(
