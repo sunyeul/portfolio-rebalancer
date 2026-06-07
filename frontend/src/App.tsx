@@ -26,7 +26,10 @@ import {
   BarChart,
   CartesianGrid,
   Legend,
+  ReferenceLine,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis
@@ -98,6 +101,18 @@ function pct(value: number | null | undefined, fromUnit = true) {
 function num(value: number | null | undefined) {
   if (value === null || value === undefined) return 'N/A';
   return value.toFixed(2);
+}
+
+function valueFromRecord(row: Record<string, unknown>, key: string) {
+  const value = row[key];
+  if (typeof value === 'number') return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function textFromRecord(row: Record<string, unknown>, key: string) {
+  const value = row[key];
+  return typeof value === 'string' ? value : 'unknown';
 }
 
 function nullableNumberColumn<T>(
@@ -476,8 +491,8 @@ export function App() {
       nullableNumberColumn('volatility', '변동성', (row) => row.volatility, pct),
       nullableNumberColumn('sharpe', '샤프', (row) => row.sharpe, num),
       nullableNumberColumn('risk_contribution', '위험기여도', (row) => row.risk_contribution, pct),
-      nullableNumberColumn('return_total', '기간 수익률', (row) => row.return_total, pct),
-      nullableNumberColumn('efficiency_score', 'E', (row) => row.efficiency_score, num)
+      nullableNumberColumn('efficiency_score', 'E', (row) => row.efficiency_score, num),
+      nullableNumberColumn('observation_count', '관측수', (row) => row.observation_count, (value) => (value === null || value === undefined ? 'N/A' : String(value)))
     ],
     []
   );
@@ -487,11 +502,11 @@ export function App() {
       { accessorKey: 'ticker', header: '티커' },
       { accessorKey: 'current_weight_pct', header: '현재', cell: ({ row }) => pct(row.original.current_weight_pct, false) },
       { accessorKey: 'target_weight_pct', header: '목표', cell: ({ row }) => pct(row.original.target_weight_pct, false) },
-      { accessorKey: 'gap_pct', header: '갭', cell: ({ row }) => pct(row.original.gap_pct, false) },
       { accessorKey: 'suggested_trade_pct', header: '제안조정', cell: ({ row }) => pct(row.original.suggested_trade_pct, false) },
-      { accessorKey: 'rc_over_pct', header: 'RC Over', cell: ({ row }) => pct(row.original.rc_over_pct, false) },
       nullableNumberColumn('efficiency_score', 'E', (row) => row.efficiency_score, num),
-      { accessorKey: 'should_execute', header: '실행', cell: ({ row }) => (row.original.should_execute ? '실행' : '보류') }
+      { accessorKey: 'rc_gap_pct', header: 'RC Gap', cell: ({ row }) => pct(row.original.rc_gap_pct, false) },
+      { accessorKey: 'should_execute', header: '실행', cell: ({ row }) => (row.original.should_execute ? '실행' : '보류') },
+      { accessorKey: 'action_reason', header: '사유' }
     ],
     []
   );
@@ -645,6 +660,32 @@ export function App() {
     weight: Number(((row.weight ?? 0) * 100).toFixed(2)),
     risk: Number(((row.risk_contribution ?? 0) * 100).toFixed(2))
   })) ?? [];
+  const riskBudgetData = evaluation?.proposal.map((row) => ({
+    ticker: row.ticker,
+    risk: Number((row.rc_target_pct + row.rc_gap_pct).toFixed(2)),
+    target: Number(row.rc_target_pct.toFixed(2))
+  })) ?? [];
+  const actionChartData = evaluation?.proposal.map((row) => ({
+    ticker: row.ticker,
+    suggestedTrade: Number(row.suggested_trade_pct.toFixed(2))
+  })) ?? [];
+  const efficiencyRiskData = evaluation?.proposal.map((row) => ({
+    ticker: row.ticker,
+    efficiency: Number((row.efficiency_score ?? 0).toFixed(2)),
+    rcGap: Number(row.rc_gap_pct.toFixed(2))
+  })) ?? [];
+  const groupAllocationData = evaluation?.group_summary.length
+    ? [
+        evaluation.group_summary.reduce<Record<string, string | number>>(
+          (acc, row) => {
+            const groupType = textFromRecord(row, 'group_type');
+            acc[groupType] = Number((valueFromRecord(row, 'weight') * 100).toFixed(2));
+            return acc;
+          },
+          { label: '비중' }
+        )
+      ]
+    : [];
 
   return (
     <main className="app-shell">
@@ -1298,6 +1339,14 @@ export function App() {
                     세부 판단값 변경사항을 먼저 분석 결과에 반영해야 평가를 실행할 수 있습니다.
                   </div>
                 )}
+                {evaluation && (
+                  <EvaluationCharts
+                    actionData={actionChartData}
+                    efficiencyRiskData={efficiencyRiskData}
+                    groupAllocationData={groupAllocationData}
+                    riskBudgetData={riskBudgetData}
+                  />
+                )}
                 <DataTable data={evaluation?.proposal ?? []} columns={proposalColumns} emptyLabel="평가 결과가 아직 없습니다." />
                 {evaluation && (
                   <div className="mt-4 flex flex-wrap gap-3">
@@ -1536,6 +1585,111 @@ function ChartBlock({ data }: { data: Array<{ ticker: string; weight: number; ri
           <Bar dataKey="risk" fill="#0f766e" name="위험기여도 %" />
         </BarChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+function EvaluationCharts({
+  actionData,
+  efficiencyRiskData,
+  groupAllocationData,
+  riskBudgetData
+}: {
+  actionData: Array<{ ticker: string; suggestedTrade: number }>;
+  efficiencyRiskData: Array<{ ticker: string; efficiency: number; rcGap: number }>;
+  groupAllocationData: Array<Record<string, string | number>>;
+  riskBudgetData: Array<{ ticker: string; risk: number; target: number }>;
+}) {
+  const groupKeys = groupAllocationData.length
+    ? Object.keys(groupAllocationData[0]).filter((key) => key !== 'label')
+    : [];
+
+  return (
+    <div className="mt-5 grid gap-4 xl:grid-cols-2">
+      {riskBudgetData.length ? (
+        <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-600">
+            <BarChart3 className="h-4 w-4 text-blue-700" />
+            위험 예산
+          </div>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={riskBudgetData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="ticker" />
+              <YAxis />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="risk" fill="#1d4ed8" name="위험기여도 %" />
+              <Bar dataKey="target" fill="#0f766e" name="RC Target %" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      ) : null}
+
+      {actionData.length ? (
+        <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-600">
+            <RefreshCcw className="h-4 w-4 text-blue-700" />
+            리밸런싱 액션
+          </div>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={actionData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="ticker" />
+              <YAxis />
+              <Tooltip />
+              <ReferenceLine y={0} stroke="#64748b" />
+              <Bar dataKey="suggestedTrade" fill="#7c3aed" name="제안조정 %p" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      ) : null}
+
+      {efficiencyRiskData.length ? (
+        <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-600">
+            <LineChart className="h-4 w-4 text-blue-700" />
+            E vs RC Gap
+          </div>
+          <ResponsiveContainer width="100%" height={240}>
+            <ScatterChart>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="efficiency" name="E" type="number" domain={[0, 1]} />
+              <YAxis dataKey="rcGap" name="RC Gap" type="number" />
+              <Tooltip cursor={{ strokeDasharray: '3 3' }} />
+              <ReferenceLine y={0} stroke="#64748b" />
+              <Scatter data={efficiencyRiskData} fill="#0f766e" name="자산" />
+            </ScatterChart>
+          </ResponsiveContainer>
+        </div>
+      ) : null}
+
+      {groupAllocationData.length && groupKeys.length ? (
+        <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-600">
+            <ShieldCheck className="h-4 w-4 text-blue-700" />
+            그룹 비중
+          </div>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={groupAllocationData} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis type="number" />
+              <YAxis dataKey="label" type="category" />
+              <Tooltip />
+              <Legend />
+              {groupKeys.map((key, index) => (
+                <Bar
+                  dataKey={key}
+                  fill={['#1d4ed8', '#0f766e', '#7c3aed', '#ca8a04', '#64748b'][index % 5]}
+                  key={key}
+                  name={`${key} %`}
+                  stackId="group"
+                />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      ) : null}
     </div>
   );
 }
