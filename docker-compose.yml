@@ -7,6 +7,9 @@ services:
       - "8000:8000"
     environment:
       - SESSION_SECRET_KEY=${SESSION_SECRET_KEY:-dev-secret-key-change-in-production}
+      - PORTFOLIO_DB_PATH=/app/data/portfolio_rebalancer.sqlite3
+    volumes:
+      - portfolio-data:/app/data
     restart: unless-stopped
 
   # Redis (optional, for production session storage)
@@ -15,3 +18,6 @@ services:
   #   ports:
   #     - "6379:6379"
   #   restart: unless-stopped
+
+volumes:
+  portfolio-data:
