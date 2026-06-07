@@ -9,7 +9,7 @@ class Asset(BaseModel):
     # AIDEV-NOTE: pydantic-validation; 티커 형식(A-Z 숫자 하이픈) + allocation >= 0 자동 검증
     """
 
-    ticker: str = Field(..., description="자산 티커 (대문자, 1-8자)")
+    ticker: str = Field(..., description="자산 티커 (대문자, 1-15자)")
     allocation: float = Field(..., ge=0, description="배분 비율 (0 이상, 단위 %)")
     return_total: float | None = Field(
         None, description="누적 수익률 (0.1234 = 12.34%, 선택)"
@@ -22,12 +22,14 @@ class Asset(BaseModel):
     @field_validator("ticker", mode="before")
     @classmethod
     def validate_ticker(cls, v: str) -> str:
-        """티커 형식 검증: 대문자, 1-8자, 알파벳+숫자+하이픈만 허용."""
+        """티커 형식 검증: 대문자, 1-15자, 알파벳+숫자+하이픈+점만 허용."""
         if not isinstance(v, str):
             raise ValueError(f"ticker는 문자열이어야 함: {v}")
         v = v.strip().upper()
-        if not re.match(r"^[A-Z0-9\-]{1,8}$", v):
-            raise ValueError(f"ticker는 1-8자 알파벳/숫자/하이픈만 허용: '{v}'")
+        if not re.match(r"^[A-Z0-9.\-]{1,15}$", v):
+            raise ValueError(
+                f"ticker는 1-15자 알파벳/숫자/하이픈/점만 허용: '{v}'"
+            )
         return v
 
     @field_validator("allocation", mode="before")

@@ -75,7 +75,7 @@ function booleanValue(value: unknown) {
 
 function looksLikeTicker(value: unknown) {
   const text = String(value ?? '').trim();
-  return /^[A-Za-z0-9-]{1,12}$/.test(text) && /[A-Za-z]/.test(text);
+  return /^[A-Za-z0-9.-]{1,15}$/.test(text) && /[A-Za-z]/.test(text);
 }
 
 function parseFreeLine(line: string): PortfolioRowInput | null {
@@ -161,4 +161,3 @@ export function parsePortfolioText(text: string): PortfolioRowInput[] {
     .map(parseFreeLine)
     .filter((row): row is PortfolioRowInput => Boolean(row));
 }
-

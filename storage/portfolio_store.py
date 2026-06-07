@@ -10,7 +10,7 @@ from api.v1.serialization import json_safe
 from storage.database import connect, initialize_database
 
 
-TICKER_RE = re.compile(r"^[A-Z0-9\-]{1,8}$")
+TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,15}$")
 
 
 class StorageError(Exception):

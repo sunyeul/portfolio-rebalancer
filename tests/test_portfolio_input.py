@@ -5,6 +5,7 @@ from services.portfolio_service import (
     parse_csv_to_assets,
     parse_manual_edit_to_assets,
 )
+from core.asset import parse_text_to_assets
 
 
 def test_parse_csv_keeps_existing_shape_defaults():
@@ -18,6 +19,24 @@ def test_parse_csv_keeps_existing_shape_defaults():
     assert assets[0].role == "unknown"
     assert assets[0].dca_enabled is True
     assert assets[0].thesis_status == "unknown"
+
+
+def test_korean_yfinance_tickers_are_accepted_across_input_paths():
+    tickers = ["000660.KS", "005930.KS", "069500.KS"]
+
+    text_assets = parse_text_to_assets("\n".join(f"{ticker} 10" for ticker in tickers))
+    manual_assets, manual_warnings = parse_manual_edit_to_assets(
+        [{"ticker": ticker, "allocation": "10"} for ticker in tickers]
+    )
+    csv_assets, csv_warnings = parse_csv_to_assets(
+        pd.DataFrame({"ticker": tickers, "allocation": [10, 10, 10]})
+    )
+
+    assert [asset.ticker for asset in text_assets] == tickers
+    assert manual_warnings == []
+    assert [asset.ticker for asset in manual_assets] == tickers
+    assert csv_warnings == []
+    assert [asset.ticker for asset in csv_assets] == tickers
 
 
 def test_parse_csv_reads_ips_metadata_and_percent_return_total():
