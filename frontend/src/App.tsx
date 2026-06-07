@@ -870,12 +870,7 @@ export function App() {
             </div>
             <div className="grid gap-6 xl:grid-cols-2">
               <div className="space-y-4">
-                <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
-                  <select className="table-input" value={newOptionTable} disabled={editingOption !== null} onChange={(event) => setNewOptionTable(event.target.value as OptionTable)}>
-                    <option value="groups">그룹</option>
-                    <option value="roles">역할</option>
-                    <option value="thesis_statuses">투자 논리 상태</option>
-                  </select>
+                <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
                   <input className="table-input" value={newOptionCode} placeholder="code" disabled={editingOption !== null} onChange={(event) => setNewOptionCode(event.target.value)} />
                   <input className="table-input" value={newOptionLabel} placeholder="표시명" onChange={(event) => setNewOptionLabel(event.target.value)} />
                   <button
@@ -917,37 +912,42 @@ export function App() {
                     <div key={String(table)}>
                       <div className="mb-2 text-sm font-bold text-slate-700">{String(label)}</div>
                       <div className="grid gap-2">
-                        {(options as ConfigOption[]).map((option) => (
-                          <div key={`${table}-${option.value}`} className="grid grid-cols-[1fr_auto] items-center gap-2 rounded-lg border border-slate-200 px-3 py-2">
-                            <span className="min-w-0 truncate text-sm text-slate-700">
-                              <strong>{option.label}</strong> · {option.value}
-                              {option.group_type ? ` · ${option.group_type}` : ''}
-                              {!option.is_active && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">삭제됨</span>}
-                            </span>
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-bold text-blue-800 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                title="편집"
-                                disabled={saveOptionMutation.isPending || deleteOptionMutation.isPending}
-                                onClick={() => startOptionEdit(table as OptionTable, option)}
-                              >
-                                <Edit3 className="h-4 w-4" />
-                                편집
-                              </button>
-                              <button
-                                type="button"
-                                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                title="삭제"
-                                disabled={!option.is_active || deleteOptionMutation.isPending}
-                                onClick={() => deleteOption(table as OptionTable, option)}
-                              >
-                                {deleteOptionMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
-                                삭제
-                              </button>
+                        {(options as ConfigOption[]).map((option) => {
+                          const canManageOption = table === 'groups';
+                          return (
+                            <div key={`${table}-${option.value}`} className="grid grid-cols-[1fr_auto] items-center gap-2 rounded-lg border border-slate-200 px-3 py-2">
+                              <span className="min-w-0 truncate text-sm text-slate-700">
+                                <strong>{option.label}</strong> · {option.value}
+                                {option.group_type ? ` · ${option.group_type}` : ''}
+                                {!option.is_active && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">삭제됨</span>}
+                              </span>
+                              {canManageOption && (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-bold text-blue-800 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    title="편집"
+                                    disabled={saveOptionMutation.isPending || deleteOptionMutation.isPending}
+                                    onClick={() => startOptionEdit(table as OptionTable, option)}
+                                  >
+                                    <Edit3 className="h-4 w-4" />
+                                    편집
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    title="삭제"
+                                    disabled={!option.is_active || deleteOptionMutation.isPending}
+                                    onClick={() => deleteOption(table as OptionTable, option)}
+                                  >
+                                    {deleteOptionMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+                                    삭제
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   ))}
@@ -981,22 +981,16 @@ export function App() {
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <h4 className="font-semibold text-slate-950">액션 우선순위</h4>
-                    <div className="flex gap-2">
-                      <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold text-slate-700" onClick={() => setActionPriorityRows((current) => [...current, { action_code: '', label: '', priority: 99, is_active: true }])}>
-                        행 추가
-                      </button>
-                      <button type="button" className="rounded-lg bg-blue-800 px-3 py-2 text-xs font-bold text-white disabled:bg-slate-300" disabled={savePrioritiesMutation.isPending} onClick={() => savePrioritiesMutation.mutate()}>
-                        저장
-                      </button>
-                    </div>
                   </div>
                   <div className="space-y-2">
-                    {actionPriorityRows.map((row, index) => (
+                    {actionPriorityRows.map((row) => (
                       <div key={row.action_code} className="grid grid-cols-[1fr_1fr_72px_56px] items-center gap-2">
-                        <input className="table-input" value={row.action_code} onChange={(event) => updateActionPriority(index, 'action_code', event.target.value)} />
-                        <input className="table-input" value={row.label} onChange={(event) => updateActionPriority(index, 'label', event.target.value)} />
-                        <input className="table-input" type="number" value={row.priority} onChange={(event) => updateActionPriority(index, 'priority', event.target.value)} />
-                        <input className="h-4 w-4 justify-self-center" type="checkbox" checked={row.is_active} onChange={(event) => updateActionPriority(index, 'is_active', event.target.checked)} />
+                        <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{row.action_code}</span>
+                        <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{row.label}</span>
+                        <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-center text-sm text-slate-700">{row.priority}</span>
+                        <span className={cx('justify-self-center rounded-full px-2 py-0.5 text-xs font-bold', row.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500')}>
+                          {row.is_active ? '활성' : '비활성'}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -1010,7 +1004,7 @@ export function App() {
                   </div>
                   <textarea className="table-input min-h-32 w-full font-mono text-xs" value={rulesJson} onChange={(event) => setRulesJson(event.target.value)} />
                 </div>
-                <ErrorLine error={saveOptionMutation.error ?? deleteOptionMutation.error ?? saveTargetsMutation.error ?? savePrioritiesMutation.error ?? saveRulesMutation.error ?? configOptionsQuery.error ?? ipsConfigQuery.error} />
+                <ErrorLine error={saveOptionMutation.error ?? deleteOptionMutation.error ?? saveTargetsMutation.error ?? saveRulesMutation.error ?? configOptionsQuery.error ?? ipsConfigQuery.error} />
               </div>
             </div>
           </section>
