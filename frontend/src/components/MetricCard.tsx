@@ -13,10 +13,9 @@ export function MetricCard({ label, value, format = 'pct' }: MetricCardProps) {
         : value.toFixed(2);
 
   return (
-    <div className="metric-card">
-      <span>{label}</span>
-      <strong>{display}</strong>
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <span className="block text-sm font-semibold text-slate-500">{label}</span>
+      <strong className="mt-2 block text-2xl font-bold text-slate-950">{display}</strong>
     </div>
   );
 }
-
