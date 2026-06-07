@@ -13,3 +13,7 @@ wheels/
 frontend/node_modules/
 frontend/dist/
 frontend/tsconfig.tsbuildinfo
+
+# Local SQLite data
+data/*.sqlite3
+data/*.sqlite3-*

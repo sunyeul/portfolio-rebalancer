@@ -70,6 +70,18 @@ async def run_evaluation_endpoint(payload: EvaluationRunRequest, request: Reques
     session_manager.set(session_id, "proposal_df", proposal_records)
     session_manager.set(session_id, "ips_action_df", ips_action_records)
     session_manager.set(session_id, "group_summary_df", group_summary_records)
+    session_manager.set(
+        session_id, "rc_violations", result.rc_violations.to_dict(orient="records")
+    )
+    session_manager.set(
+        session_id,
+        "evaluation_settings",
+        {
+            "rc_over_thresh_pct": payload.rc_over_thresh_pct,
+            "e_thresh": payload.e_thresh,
+            "target_weights": payload.target_weights,
+        },
+    )
 
     return {
         "proposal": dataframe_records(result.proposal_df, PROPOSAL_COLUMNS),
@@ -107,4 +119,3 @@ async def download_csv(request: Request, type: str = "metrics"):
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
-

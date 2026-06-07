@@ -70,6 +70,17 @@ async def run_analysis_endpoint(payload: AnalysisRunRequest, request: Request):
     )
     session_manager.set(session_id, "portfolio_metrics", result.portfolio_metrics)
     session_manager.set(session_id, "benchmark_metrics", result.benchmark_metrics)
+    session_manager.set(session_id, "missing_tickers", result.missing_tickers)
+    session_manager.set(
+        session_id,
+        "analysis_settings",
+        {
+            "period": _parse_period(payload.period),
+            "rf": payload.rf,
+            "bench": payload.bench.upper(),
+            "momentum_weight": payload.momentum_weight,
+        },
+    )
 
     return {
         "metrics": dataframe_records(
@@ -79,4 +90,3 @@ async def run_analysis_endpoint(payload: AnalysisRunRequest, request: Request):
         "benchmark_metrics": safe_mapping(result.benchmark_metrics),
         "missing_tickers": result.missing_tickers,
     }
-
