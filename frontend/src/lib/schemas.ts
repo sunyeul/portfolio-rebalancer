@@ -15,11 +15,9 @@ export const settingsSchema = z.object({
   months: z.coerce.number().int().min(1).max(120),
   rfPct: z.coerce.number(),
   bench: z.string().trim().min(1),
-  momentumWeight: z.coerce.number().min(0).max(0.5),
   rcOverThreshPct: z.coerce.number().min(0),
   eThresh: z.coerce.number().min(0).max(1)
 });
 
 export type PortfolioRowInput = z.infer<typeof portfolioRowSchema>;
 export type SettingsValues = z.infer<typeof settingsSchema>;
-

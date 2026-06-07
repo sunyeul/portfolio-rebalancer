@@ -17,7 +17,6 @@ class AnalysisRunRequest(BaseModel):
     period: int | str = Field(12, description="Month count, YTD, or Max")
     rf: float = 0.0
     bench: str = "SPY"
-    momentum_weight: float = 0.2
 
 
 def _parse_period(period: int | str) -> int | str:
@@ -48,7 +47,6 @@ async def run_analysis_endpoint(payload: AnalysisRunRequest, request: Request):
             _parse_period(payload.period),
             payload.rf,
             payload.bench.upper(),
-            payload.momentum_weight,
         )
     except AnalysisError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -78,7 +76,6 @@ async def run_analysis_endpoint(payload: AnalysisRunRequest, request: Request):
             "period": _parse_period(payload.period),
             "rf": payload.rf,
             "bench": payload.bench.upper(),
-            "momentum_weight": payload.momentum_weight,
         },
     )
 

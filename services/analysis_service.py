@@ -32,8 +32,6 @@ from utils.metrics import (
     winsorize_returns,
     alpha,
     beta,
-    apply_momentum_adjustment,
-    preprocess_return_total,
 )
 
 
@@ -63,7 +61,6 @@ def run_analysis(
     period: int | str,
     rf: float,
     bench: str,
-    momentum_weight: float = 0.2,
 ) -> AnalysisResult:
     """데이터 조회 & 보강을 실행합니다.
 
@@ -72,7 +69,6 @@ def run_analysis(
         period: 평가 기간 (정수: 개월 수 또는 문자열: 'YTD', 'Max')
         rf: 무위험 수익률 (연간, 소수)
         bench: 벤치마크 티커
-        momentum_weight: 모멘텀 가중치 (E′ 계산용, 기본값: 0.2)
 
     Returns:
         AnalysisResult: 분석 결과
@@ -246,21 +242,6 @@ def run_analysis(
         else computed_returns.get(t, np.nan)
     )
 
-    # return_total 전처리: winsorize + 선택적 log1p
-    # AIDEV-NOTE: return-total-preprocess; 극단값 완화 (winsorize 2.5/97.5 + log1p 선택)
-    return_total_preprocessed = preprocess_return_total(
-        metrics_df["return_total"], lower=0.025, upper=0.975, use_log=False
-    )
-
-    # E′ 보정: 모멘텀 조정 적용 (전처리된 return_total 사용)
-    e_prime, return_quantile = apply_momentum_adjustment(
-        metrics_df["E"],
-        return_total_preprocessed,
-        momentum_weight=momentum_weight,
-    )
-    metrics_df["E′"] = e_prime
-    metrics_df["수익률분위"] = return_quantile
-
     # IPS 메타데이터 병합
     meta_cols = ["group", "role", "dca_enabled", "thesis_status"]
     asset_meta = asset_df.set_index("ticker")
@@ -282,9 +263,7 @@ def run_analysis(
     metrics_df["thesis_status"] = metrics_df.get(
         "thesis_status", pd.Series(index=metrics_df.index)
     ).fillna("unknown")
-    metrics_df["DCA강도점수"] = (
-        metrics_df["E′"] if "E′" in metrics_df.columns else metrics_df["E"]
-    )
+    metrics_df["DCA강도점수"] = metrics_df["E"]
 
     return AnalysisResult(
         prices=prices,

@@ -33,9 +33,6 @@ class AssetMetrics(BaseModel):
     return_total: float | None = Field(
         None, description="YTD 수익률 (소수, 예: 0.1234 = 12.34%)"
     )
-    efficiency_score_prime: float | None = Field(
-        None, ge=0, le=1, description="보정된 효율 점수 E′"
-    )
     dca_intensity_score: float | None = Field(
         None, ge=0, le=1, description="정기매수 강도 참고 점수"
     )
@@ -97,9 +94,6 @@ class ProposalRow(BaseModel):
     rc_over_pct: float = Field(..., description="RC_Over (%)")
     rc_target_pct: float = Field(..., description="RC_Target (%)")
     return_total: float | None = Field(None, description="누적 수익률")
-    efficiency_score_prime: float | None = Field(
-        None, description="보정된 효율 점수 E′"
-    )
     dca_intensity_score: float | None = Field(
         None, description="정기매수 강도 참고 점수"
     )

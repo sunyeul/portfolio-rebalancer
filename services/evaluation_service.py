@@ -95,9 +95,9 @@ def run_evaluation(
     mdf["RC_Target"] = rc_target
     mdf["RC_Over"] = (mdf["위험기여도"] - mdf["RC_Target"]).clip(lower=0)
 
-    # E는 기본 효율 판단, E′는 정기매수 강도 참고값으로 분리
+    # E를 효율 판단과 정기매수 우선순위에 모두 사용
     mdf["효율E"] = mdf["E"]
-    mdf["DCA강도점수"] = mdf["E′"] if "E′" in mdf.columns else mdf["E"]
+    mdf["DCA강도점수"] = mdf["E"]
 
     rc_over_pct = mdf["RC_Over"] * 100  # 백분율로 표시
     mdf["risk_over"] = rc_over_pct > rc_over_thresh_pct
@@ -114,7 +114,6 @@ def run_evaluation(
             "목표%": (tgt * 100).round(2).values,
             "갭%": (gap * 100).round(2).values,
             "E": mdf["E"].round(2).values,
-            "E′": mdf["DCA강도점수"].round(2).values,
             "DCA강도점수": mdf["DCA강도점수"].round(2).values,
             "RC_Over%": rc_over_pct.round(2).values,
             "RC_Target%": (rc_target * 100).round(2).values,
@@ -155,7 +154,7 @@ def run_evaluation(
     sell_list = sell_list.sort_values(["현재%", "RC_Over%"], ascending=[False, False])
 
     buy_list = proposal[(proposal["갭%"] > 0) & proposal["실행"]].copy()
-    buy_list = buy_list.sort_values(["갭%", "E′"], ascending=[False, False])
+    buy_list = buy_list.sort_values(["갭%", "E"], ascending=[False, False])
 
     fine_tune = proposal[
         (proposal["실행"]) & (proposal["갭%"].abs() <= 1.0)

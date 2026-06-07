@@ -6,7 +6,7 @@
 import numpy as np
 import pandas as pd
 
-from utils.metrics import compute_rc_target, apply_momentum_adjustment, zscore_to_cdf
+from utils.metrics import compute_rc_target, zscore_to_cdf
 from utils.optimization import calculate_orders_with_constraints
 
 
@@ -162,44 +162,28 @@ class TestHysteresisBand:
 class TestEfficiencyScoreNormalization:
     """효율 점수 정규화 테스트."""
 
-    def test_momentum_normalization_consistent(self):
-        """모멘텀 정규화가 z-score→CDF를 사용하는지 확인."""
+    def test_zscore_to_cdf_bounds(self):
+        """z-score→CDF 정규화가 [0, 1] 범위 값을 반환하는지 확인."""
         np.random.seed(42)
 
-        # 효율 점수와 YTD 수익률 생성
-        efficiency_scores = pd.Series([0.5, 0.6, 0.7, 0.8], index=["A", "B", "C", "D"])
-        return_ytd = pd.Series([0.1, 0.2, 0.3, 0.4], index=["A", "B", "C", "D"])
-
-        e_prime, ytd_normalized = apply_momentum_adjustment(
-            efficiency_scores, return_ytd, momentum_weight=0.2
-        )
+        values = pd.Series([0.1, 0.2, 0.3, 0.4], index=["A", "B", "C", "D"])
+        normalized = zscore_to_cdf(values)
 
         # 정규화된 값이 [0, 1] 범위에 있는지 확인
-        assert (ytd_normalized >= 0).all()
-        assert (ytd_normalized <= 1).all()
+        assert (normalized >= 0).all()
+        assert (normalized <= 1).all()
 
-        # E'가 [0, 1] 범위에 있는지 확인
-        assert (e_prime >= 0).all()
-        assert (e_prime <= 1).all()
-
-    def test_momentum_preserves_distribution_shape(self):
-        """모멘텀 정규화가 분포 형태를 보존하는지 확인."""
+    def test_zscore_to_cdf_preserves_distribution_shape(self):
+        """z-score→CDF 정규화가 분포 순서를 보존하는지 확인."""
         np.random.seed(42)
 
         # 정규분포와 유사한 수익률 생성
-        return_ytd = pd.Series(
+        values = pd.Series(
             np.random.normal(0.1, 0.05, 10),
             index=[f"ASSET{i}" for i in range(10)],
         )
 
-        efficiency_scores = pd.Series(0.5, index=return_ytd.index)
+        normalized = zscore_to_cdf(values)
 
-        _, ytd_normalized = apply_momentum_adjustment(
-            efficiency_scores, return_ytd, momentum_weight=0.2
-        )
-
-        # z-score→CDF 변환 결과와 비교
-        expected = zscore_to_cdf(return_ytd)
-
-        # 값들이 유사한지 확인 (순서 보존)
-        assert np.allclose(ytd_normalized.sort_values(), expected.sort_values(), atol=1e-6)
+        # 순서 보존
+        assert normalized.sort_values().index.tolist() == values.sort_values().index.tolist()

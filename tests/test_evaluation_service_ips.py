@@ -10,7 +10,6 @@ def test_run_evaluation_returns_ips_outputs_and_uses_ips_signals():
             "가중치": [0.4, 0.6],
             "위험기여도": [0.3, 0.8],
             "E": [0.8, 0.2],
-            "E′": [0.6, 0.9],
             "return_total": [0.1, -0.1],
             "group": ["core", "satellite_space"],
             "role": ["broad_etf", "theme_etf"],
@@ -30,7 +29,7 @@ def test_run_evaluation_returns_ips_outputs_and_uses_ips_signals():
     assert not result.group_summary_df.empty
     assert "DCA강도점수" in result.proposal_df.columns
     assert "E" in result.proposal_df.columns
-    assert "E′" in result.proposal_df.columns
+    assert "E′" not in result.proposal_df.columns
     legacy_column = "\uc0ac\ubd84\uba74"
     assert legacy_column not in result.proposal_df.columns
     ufo = result.proposal_df.loc[result.proposal_df["ticker"] == "UFO"].iloc[0]

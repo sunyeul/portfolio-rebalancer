@@ -484,20 +484,18 @@ def _insert_analysis(
             period,
             rf,
             bench,
-            momentum_weight,
             portfolio_metrics_json,
             benchmark_metrics_json,
             missing_tickers_json,
             returns_smooth_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             snapshot_id,
             str(settings.get("period")) if settings.get("period") is not None else None,
             settings.get("rf"),
             settings.get("bench"),
-            settings.get("momentum_weight"),
             _json_dump(session_data.get("portfolio_metrics")),
             _json_dump(session_data.get("benchmark_metrics")),
             _json_dump(session_data.get("missing_tickers", [])),
@@ -525,12 +523,11 @@ def _insert_analysis(
                 return_contribution,
                 weight,
                 efficiency_score,
-                efficiency_score_prime,
                 dca_intensity_score,
                 return_total,
                 record_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 analysis_run_id,
@@ -547,7 +544,6 @@ def _insert_analysis(
                 row.get("수익기여도"),
                 row.get("가중치"),
                 row.get("E"),
-                row.get("E′"),
                 row.get("DCA강도점수"),
                 row.get("return_total"),
                 _json_dump(row),
@@ -823,7 +819,6 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
                     "period": analysis_run["period"],
                     "rf": analysis_run["rf"],
                     "bench": analysis_run["bench"],
-                    "momentum_weight": analysis_run["momentum_weight"],
                 },
             }
         )

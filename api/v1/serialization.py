@@ -22,9 +22,7 @@ METRICS_COLUMNS = {
     "수익기여도": "return_contribution",
     "가중치": "weight",
     "E": "efficiency_score",
-    "E′": "efficiency_score_prime",
     "DCA강도점수": "dca_intensity_score",
-    "수익률분위": "return_quantile",
     "return_total": "return_total",
     "group": "group",
     "role": "role",
@@ -38,7 +36,6 @@ PROPOSAL_COLUMNS = {
     "목표%": "target_weight_pct",
     "갭%": "gap_pct",
     "E": "efficiency_score",
-    "E′": "efficiency_score_prime",
     "DCA강도점수": "dca_intensity_score",
     "RC_Over%": "rc_over_pct",
     "RC_Target%": "rc_target_pct",
@@ -113,4 +110,3 @@ def safe_mapping(mapping: dict[str, Any] | None) -> dict[str, Any] | None:
     if mapping is None:
         return None
     return {key: json_safe(value) for key, value in mapping.items()}
-

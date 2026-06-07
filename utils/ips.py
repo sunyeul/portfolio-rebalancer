@@ -47,7 +47,7 @@ def compute_group_summary(metrics_df: pd.DataFrame, ips_config: dict) -> pd.Data
     df["group"] = df["group"].fillna("ungrouped")
     df["group_type"] = df["group"].map(lambda g: get_group_type(str(g), ips_config))
     if "DCA강도점수" not in df.columns:
-        df["DCA강도점수"] = df["E′"] if "E′" in df.columns else df["E"]
+        df["DCA강도점수"] = df["E"]
 
     return (
         df.groupby(["group_type", "group"], as_index=False)

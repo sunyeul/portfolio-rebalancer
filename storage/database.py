@@ -158,7 +158,6 @@ def initialize_database() -> None:
                 period TEXT,
                 rf REAL,
                 bench TEXT,
-                momentum_weight REAL,
                 portfolio_metrics_json TEXT,
                 benchmark_metrics_json TEXT,
                 missing_tickers_json TEXT,
@@ -182,7 +181,6 @@ def initialize_database() -> None:
                 return_contribution REAL,
                 weight REAL,
                 efficiency_score REAL,
-                efficiency_score_prime REAL,
                 dca_intensity_score REAL,
                 return_total REAL,
                 record_json TEXT NOT NULL
