@@ -104,6 +104,74 @@ def test_analysis_api_stores_json_safe_metrics(monkeypatch):
     assert payload["portfolio_metrics"]["cagr"] is None
 
 
+def test_analysis_error_identifies_tickers_and_date_range(monkeypatch):
+    client = TestClient(app)
+    client.post(
+        "/api/v1/portfolio/manual",
+        json={"rows": [{"ticker": "BADTICKER.KS", "allocation": 100}]},
+    )
+
+    def empty_prices(*args, **kwargs):
+        return pd.DataFrame()
+
+    monkeypatch.setattr("services.analysis_service.fetch_prices", empty_prices)
+
+    response = client.post(
+        "/api/v1/analysis/run",
+        json={"period": 1, "bench": "SPY"},
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "BADTICKER.KS" in detail
+    assert "SPY" in detail
+    assert "문제 티커: BADTICKER.KS, SPY" in detail
+    assert "조회 기간:" in detail
+    assert "티커 오타" in detail
+    assert "000660.KS" in detail
+
+
+def test_analysis_ignores_all_null_tickers_and_keeps_mixed_exchange_dates(
+    monkeypatch,
+):
+    client = TestClient(app)
+    client.post(
+        "/api/v1/portfolio/manual",
+        json={
+            "rows": [
+                {"ticker": "000600.KS", "allocation": 10},
+                {"ticker": "005930.KS", "allocation": 45},
+                {"ticker": "VOO", "allocation": 45},
+            ]
+        },
+    )
+
+    def mixed_exchange_prices(*args, **kwargs):
+        return pd.DataFrame(
+            {
+                "000600.KS": [None, None, None, None],
+                "005930.KS": [100.0, None, 102.0, 103.0],
+                "VOO": [200.0, 201.0, None, 203.0],
+                "SPY": [300.0, 301.0, None, 303.0],
+            },
+            index=pd.to_datetime(
+                ["2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04"]
+            ),
+        )
+
+    monkeypatch.setattr("services.analysis_service.fetch_prices", mixed_exchange_prices)
+
+    response = client.post(
+        "/api/v1/analysis/run",
+        json={"period": 1, "bench": "SPY"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["missing_tickers"] == ["000600.KS"]
+    assert [row["ticker"] for row in payload["metrics"]] == ["005930.KS", "VOO", "SPY"]
+
+
 def test_evaluation_requires_analysis_first():
     client = TestClient(app)
 

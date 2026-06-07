@@ -6,6 +6,7 @@ import streamlit as st
 
 from utils.data_fetcher import (
     ensure_tickers_exist,
+    format_no_price_data_message,
     fetch_prices,
     compute_ytd_returns,
 )
@@ -68,25 +69,27 @@ def show_data_analysis(
 
     # 가격 데이터 조회
     with st.spinner("가격 데이터 조회 중..."):
-        prices = fetch_prices(
-            all_tickers, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
-        )
+        start_text = start.strftime("%Y-%m-%d")
+        end_text = end.strftime("%Y-%m-%d")
+        prices = fetch_prices(tuple(all_tickers), start_text, end_text)
 
-    present = ensure_tickers_exist(prices, all_tickers)
-    prices = prices[present].dropna()
+    present, missing = ensure_tickers_exist(prices, all_tickers)
+    prices = prices[present].ffill().dropna(how="all")
 
     if prices.empty or len(prices.columns) == 0:
-        st.error("선택한 티커/시간 범위에 대한 가격 데이터가 없습니다.")
+        st.error(
+            format_no_price_data_message(all_tickers, start_text, end_text, missing)
+        )
         return False
 
     st.write(f"가격 데이터 형태: {prices.shape}")
 
     # 일일 수익률 계산
-    returns = prices.pct_change().dropna()
+    returns = prices.pct_change(fill_method=None).dropna(how="all")
 
     # AIDEV-NOTE: return-smoothing; 수익률을 윈저라이즈 + 3-window MA로 스무딩하여 이상치 완화 및 공분산 안정화
     returns_smooth = winsorize_returns(returns)
-    returns_smooth = moving_average(returns_smooth).dropna()
+    returns_smooth = moving_average(returns_smooth).dropna(how="all")
 
     # 현재 가중치를 사용한 포트폴리오 NAV (벤치마크 가중치 무시)
     weights = asset_df.set_index("ticker")["weight"].reindex(prices.columns).fillna(0)
