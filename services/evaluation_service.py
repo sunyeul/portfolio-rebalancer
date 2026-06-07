@@ -97,7 +97,6 @@ def run_evaluation(
 
     # E를 효율 판단과 정기매수 우선순위에 모두 사용
     mdf["효율E"] = mdf["E"]
-    mdf["DCA강도점수"] = mdf["E"]
 
     rc_over_pct = mdf["RC_Over"] * 100  # 백분율로 표시
     mdf["risk_over"] = rc_over_pct > rc_over_thresh_pct
@@ -114,7 +113,6 @@ def run_evaluation(
             "목표%": (tgt * 100).round(2).values,
             "갭%": (gap * 100).round(2).values,
             "E": mdf["E"].round(2).values,
-            "DCA강도점수": mdf["DCA강도점수"].round(2).values,
             "RC_Over%": rc_over_pct.round(2).values,
             "RC_Target%": (rc_target * 100).round(2).values,
             "return_total%": (mdf["return_total"] * 100).round(2).values,

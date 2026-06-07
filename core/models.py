@@ -33,9 +33,6 @@ class AssetMetrics(BaseModel):
     return_total: float | None = Field(
         None, description="YTD 수익률 (소수, 예: 0.1234 = 12.34%)"
     )
-    dca_intensity_score: float | None = Field(
-        None, ge=0, le=1, description="정기매수 강도 참고 점수"
-    )
     group: str = Field("ungrouped", description="IPS 관리 그룹")
     role: str = Field("unknown", description="자산 역할")
     dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
@@ -94,9 +91,6 @@ class ProposalRow(BaseModel):
     rc_over_pct: float = Field(..., description="RC_Over (%)")
     rc_target_pct: float = Field(..., description="RC_Target (%)")
     return_total: float | None = Field(None, description="누적 수익률")
-    dca_intensity_score: float | None = Field(
-        None, description="정기매수 강도 참고 점수"
-    )
     group: str = Field("ungrouped", description="IPS 관리 그룹")
     role: str = Field("unknown", description="자산 역할")
     dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
@@ -148,7 +142,6 @@ class IPSGroupSummaryRow(BaseModel):
     weight: float = Field(..., description="현재 비중")
     risk_contribution: float = Field(..., description="위험기여도")
     avg_efficiency: float | None = Field(None, description="평균 E")
-    avg_dca_score: float | None = Field(None, description="평균 DCA강도점수")
 
 
 class RebalancingResult(BaseModel):

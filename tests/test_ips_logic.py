@@ -35,7 +35,6 @@ def test_compute_group_summary_and_allocation_status():
             "가중치": [0.8, 0.2],
             "위험기여도": [0.6, 0.4],
             "E": [0.7, 0.5],
-            "DCA강도점수": [0.8, 0.6],
             "group": ["core", "satellite_space"],
         }
     ).set_index("ticker")

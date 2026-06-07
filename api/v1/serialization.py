@@ -22,7 +22,6 @@ METRICS_COLUMNS = {
     "수익기여도": "return_contribution",
     "가중치": "weight",
     "E": "efficiency_score",
-    "DCA강도점수": "dca_intensity_score",
     "return_total": "return_total",
     "group": "group",
     "role": "role",
@@ -36,7 +35,6 @@ PROPOSAL_COLUMNS = {
     "목표%": "target_weight_pct",
     "갭%": "gap_pct",
     "E": "efficiency_score",
-    "DCA강도점수": "dca_intensity_score",
     "RC_Over%": "rc_over_pct",
     "RC_Target%": "rc_target_pct",
     "return_total%": "return_total_pct",
@@ -65,7 +63,6 @@ GROUP_SUMMARY_COLUMNS = {
     "weight": "weight",
     "risk_contribution": "risk_contribution",
     "avg_efficiency": "avg_efficiency",
-    "avg_dca_score": "avg_dca_score",
 }
 
 

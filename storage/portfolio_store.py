@@ -523,11 +523,10 @@ def _insert_analysis(
                 return_contribution,
                 weight,
                 efficiency_score,
-                dca_intensity_score,
                 return_total,
                 record_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 analysis_run_id,
@@ -544,7 +543,6 @@ def _insert_analysis(
                 row.get("수익기여도"),
                 row.get("가중치"),
                 row.get("E"),
-                row.get("DCA강도점수"),
                 row.get("return_total"),
                 _json_dump(row),
             ),

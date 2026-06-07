@@ -46,8 +46,6 @@ def compute_group_summary(metrics_df: pd.DataFrame, ips_config: dict) -> pd.Data
     df["group"] = df.get("group", "ungrouped")
     df["group"] = df["group"].fillna("ungrouped")
     df["group_type"] = df["group"].map(lambda g: get_group_type(str(g), ips_config))
-    if "DCA강도점수" not in df.columns:
-        df["DCA강도점수"] = df["E"]
 
     return (
         df.groupby(["group_type", "group"], as_index=False)
@@ -55,7 +53,6 @@ def compute_group_summary(metrics_df: pd.DataFrame, ips_config: dict) -> pd.Data
             weight=("가중치", "sum"),
             risk_contribution=("위험기여도", "sum"),
             avg_efficiency=("E", "mean"),
-            avg_dca_score=("DCA강도점수", "mean"),
         )
         .sort_values(["group_type", "group"])
     )

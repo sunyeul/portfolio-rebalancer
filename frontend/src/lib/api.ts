@@ -24,7 +24,6 @@ export type MetricRow = {
   return_contribution: number | null;
   weight: number;
   efficiency_score: number | null;
-  dca_intensity_score: number | null;
   return_total: number | null;
   group: string;
   role: string;
@@ -45,7 +44,6 @@ export type ProposalRow = {
   target_weight_pct: number;
   gap_pct: number;
   efficiency_score: number | null;
-  dca_intensity_score: number | null;
   rc_over_pct: number;
   rc_target_pct: number;
   return_total_pct: number | null;

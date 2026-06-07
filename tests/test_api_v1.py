@@ -224,7 +224,6 @@ def test_evaluation_api_and_download(monkeypatch):
                 "목표%": [100.0],
                 "갭%": [0.0],
                 "E": [0.7],
-                "DCA강도점수": [0.7],
                 "RC_Over%": [0.0],
                 "RC_Target%": [100.0],
                 "return_total%": [20.0],

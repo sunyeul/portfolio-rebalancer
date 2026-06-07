@@ -27,7 +27,7 @@ def test_run_evaluation_returns_ips_outputs_and_uses_ips_signals():
 
     assert not result.ips_action_df.empty
     assert not result.group_summary_df.empty
-    assert "DCA강도점수" in result.proposal_df.columns
+    assert "DCA강도점수" not in result.proposal_df.columns
     assert "E" in result.proposal_df.columns
     assert "E′" not in result.proposal_df.columns
     legacy_column = "\uc0ac\ubd84\uba74"

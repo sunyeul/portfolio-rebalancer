@@ -263,7 +263,6 @@ def run_analysis(
     metrics_df["thesis_status"] = metrics_df.get(
         "thesis_status", pd.Series(index=metrics_df.index)
     ).fillna("unknown")
-    metrics_df["DCA강도점수"] = metrics_df["E"]
 
     return AnalysisResult(
         prices=prices,
