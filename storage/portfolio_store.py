@@ -282,6 +282,54 @@ def create_snapshot(
     return snapshot["summary"]
 
 
+def update_snapshot(
+    snapshot_id: int,
+    name: str | None = None,
+    note: str | None = None,
+) -> dict[str, Any]:
+    initialize_database()
+    current = get_snapshot(snapshot_id)
+    if current is None:
+        raise StorageError("스냅샷을 찾을 수 없습니다.")
+    current_summary = current["summary"]
+    next_name = current_summary["name"] if name is None else name.strip() or "저장된 스냅샷"
+    next_note = current_summary["note"] if note is None else note.strip()
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE portfolio_snapshots
+            SET name = ?, note = ?
+            WHERE id = ?
+            """,
+            (next_name, next_note, snapshot_id),
+        )
+        conn.execute(
+            "UPDATE portfolios SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (current_summary["portfolio_id"],),
+        )
+    updated = get_snapshot(snapshot_id)
+    if updated is None:
+        raise StorageError("스냅샷 수정 결과를 찾을 수 없습니다.")
+    return updated["summary"]
+
+
+def delete_snapshot(snapshot_id: int) -> None:
+    initialize_database()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT portfolio_id FROM portfolio_snapshots WHERE id = ?",
+            (snapshot_id,),
+        ).fetchone()
+        if row is None:
+            raise StorageError("스냅샷을 찾을 수 없습니다.")
+        portfolio_id = int(row["portfolio_id"])
+        conn.execute("DELETE FROM portfolio_snapshots WHERE id = ?", (snapshot_id,))
+        conn.execute(
+            "UPDATE portfolios SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (portfolio_id,),
+        )
+
+
 def _insert_positions(conn, snapshot_id: int, asset_rows: list[dict[str, Any]]) -> None:
     for position_order, row in enumerate(asset_rows):
         asset_id = _ensure_asset(conn, row["ticker"])

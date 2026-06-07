@@ -19,10 +19,12 @@ from storage.portfolio_store import (
     StorageError,
     create_portfolio,
     create_snapshot,
+    delete_snapshot,
     get_snapshot,
     list_portfolios,
     list_snapshots,
     update_portfolio,
+    update_snapshot,
 )
 
 router = APIRouter()
@@ -41,6 +43,11 @@ class PortfolioUpdateRequest(BaseModel):
 class SnapshotCreateRequest(BaseModel):
     name: str = ""
     note: str = ""
+
+
+class SnapshotUpdateRequest(BaseModel):
+    name: str | None = None
+    note: str | None = None
 
 
 @router.get("")
@@ -117,6 +124,34 @@ async def create_saved_snapshot(
         return {"snapshot": snapshot}
     except StorageError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.patch("/snapshots/{snapshot_id}")
+async def update_saved_snapshot(
+    snapshot_id: int,
+    payload: SnapshotUpdateRequest,
+):
+    """Update a saved snapshot's editable metadata."""
+    try:
+        return {
+            "snapshot": update_snapshot(
+                snapshot_id,
+                name=payload.name,
+                note=payload.note,
+            )
+        }
+    except StorageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/snapshots/{snapshot_id}")
+async def delete_saved_snapshot(snapshot_id: int):
+    """Delete a saved snapshot and its persisted analysis/evaluation data."""
+    try:
+        delete_snapshot(snapshot_id)
+        return {"ok": True}
+    except StorageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/snapshots/{snapshot_id}")

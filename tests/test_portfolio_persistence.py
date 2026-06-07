@@ -72,6 +72,61 @@ def test_portfolio_crud_and_input_only_snapshot(monkeypatch, tmp_path):
     assert payload["analysis"] is None
 
 
+def test_snapshot_metadata_update_and_delete(monkeypatch, tmp_path):
+    client = _client_with_db(monkeypatch, tmp_path)
+    portfolio_id = client.post(
+        "/api/v1/portfolios",
+        json={"name": "장기 투자"},
+    ).json()["portfolio"]["id"]
+    client.post(
+        "/api/v1/portfolio/manual",
+        json={"rows": [{"ticker": "VOO", "allocation": 100, "group": "core"}]},
+    )
+    snapshot_id = client.post(
+        f"/api/v1/portfolios/{portfolio_id}/snapshots",
+        json={"name": "초안", "note": "처음 저장"},
+    ).json()["snapshot"]["id"]
+
+    update_response = client.patch(
+        f"/api/v1/portfolios/snapshots/{snapshot_id}",
+        json={"name": "월간 점검", "note": "리밸런싱 전"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["snapshot"]["name"] == "월간 점검"
+    assert update_response.json()["snapshot"]["note"] == "리밸런싱 전"
+
+    empty_name_response = client.patch(
+        f"/api/v1/portfolios/snapshots/{snapshot_id}",
+        json={"name": "   "},
+    )
+    assert empty_name_response.status_code == 200
+    assert empty_name_response.json()["snapshot"]["name"] == "저장된 스냅샷"
+
+    list_response = client.get(f"/api/v1/portfolios/{portfolio_id}/snapshots")
+    assert list_response.status_code == 200
+    assert list_response.json()["snapshots"][0]["name"] == "저장된 스냅샷"
+    assert list_response.json()["snapshots"][0]["note"] == "리밸런싱 전"
+
+    missing_update = client.patch(
+        "/api/v1/portfolios/snapshots/999999",
+        json={"name": "없음"},
+    )
+    assert missing_update.status_code == 404
+    assert missing_update.json()["detail"] == "스냅샷을 찾을 수 없습니다."
+
+    delete_response = client.delete(f"/api/v1/portfolios/snapshots/{snapshot_id}")
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"ok": True}
+    assert client.get(f"/api/v1/portfolios/{portfolio_id}/snapshots").json()["snapshots"] == []
+
+    load_response = client.post(f"/api/v1/portfolios/snapshots/{snapshot_id}/load")
+    assert load_response.status_code == 404
+
+    missing_delete = client.delete("/api/v1/portfolios/snapshots/999999")
+    assert missing_delete.status_code == 404
+    assert missing_delete.json()["detail"] == "스냅샷을 찾을 수 없습니다."
+
+
 def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
     client = _client_with_db(monkeypatch, tmp_path)
     portfolio_id = client.post(
