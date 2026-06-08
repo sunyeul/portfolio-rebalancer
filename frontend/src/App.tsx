@@ -584,6 +584,9 @@ export function App() {
           </div>
         )
       },
+      { accessorKey: '현재%', header: '현재', cell: ({ row }) => pct(valueFromRecord(row.original, '현재%'), false) },
+      { accessorKey: '목표%', header: '목표', cell: ({ row }) => pct(valueFromRecord(row.original, '목표%'), false) },
+      { accessorKey: '갭%', header: '갭', cell: ({ row }) => pct(valueFromRecord(row.original, '갭%'), false) },
       { accessorKey: '실행', header: '최종실행', cell: ({ row }) => (row.original['실행'] ? '실행' : '보류') },
       { accessorKey: '제안조정%', header: '최종조정', cell: ({ row }) => pct(valueFromRecord(row.original, '제안조정%'), false) }
     ],
