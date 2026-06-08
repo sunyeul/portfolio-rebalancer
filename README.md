@@ -51,6 +51,21 @@ make build-frontend  # React 앱 빌드
 uv run pytest        # 백엔드 테스트
 ```
 
+## Codex용 CLI
+
+CLI는 사람이 보는 리포트보다 Codex 같은 에이전트가 안정적으로 파싱하는 JSON 출력을 기본으로 합니다. stdout에는 단일 JSON 객체만 출력하고, 웹앱과 같은 `PORTFOLIO_DB_PATH`/SQLite DB와 IPS 설정을 공유합니다.
+
+```bash
+uv run portfolio-rebalancer evaluate --text "VOO 40
+QQQ 60"
+uv run portfolio-rebalancer evaluate --file portfolio.csv --output-dir out
+uv run portfolio-rebalancer portfolios list
+uv run portfolio-rebalancer snapshots list --portfolio-id 1
+uv run portfolio-rebalancer evaluate --portfolio-id 1 --save
+```
+
+`--portfolio-id`는 웹앱의 current-state를 읽고, `--snapshot-id`는 저장된 스냅샷을 읽습니다. DB 저장은 `--save` 또는 `--save-to-portfolio-id`를 명시한 경우에만 수행합니다.
+
 프론트 검증:
 
 ```bash
