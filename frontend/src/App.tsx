@@ -691,7 +691,7 @@ export function App() {
         <section className="workspace">
         <header className="topbar">
           <div>
-            <h2>{activeView === 'workbench' ? '입력 → 분석 → 평가' : '설정 관리'}</h2>
+            <h2>{activeView === 'workbench' ? '워크벤치' : '설정 관리'}</h2>
             <p>
               {activeView === 'workbench'
                 ? 'Python 계산 코어를 JSON API로 호출하고, React에서 결과를 검토합니다.'
@@ -929,15 +929,7 @@ export function App() {
 
           {activeView === 'workbench' && (
             <>
-              <WorkflowStepper
-                steps={[
-                  { label: '포트폴리오 입력', complete: portfolio.length > 0, active: !portfolio.length },
-                  { label: '데이터 분석', complete: Boolean(analysis), active: portfolio.length > 0 && !analysis },
-                  { label: '평가 및 제안', complete: Boolean(evaluation), active: Boolean(analysis) && !evaluation }
-                ]}
-              />
-
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
             <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-5">
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div>
@@ -1413,54 +1405,6 @@ export function App() {
         </div>
       )}
     </main>
-  );
-}
-
-function WorkflowStepper({
-  steps
-}: {
-  steps: Array<{ label: string; complete: boolean; active: boolean }>;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-5 shadow-sm">
-      <div className="mx-auto grid max-w-3xl grid-cols-[auto_1fr_auto_1fr_auto] items-start gap-3">
-        {steps.map((step, index) => (
-          <StepItem key={step.label} index={index} step={step} isLast={index === steps.length - 1} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function StepItem({
-  index,
-  step,
-  isLast
-}: {
-  index: number;
-  step: { label: string; complete: boolean; active: boolean };
-  isLast: boolean;
-}) {
-  const stateClass = step.complete
-    ? 'border-blue-800 bg-blue-800 text-white'
-    : step.active
-      ? 'border-blue-800 bg-white text-blue-800'
-      : 'border-slate-300 bg-white text-slate-400';
-
-  return (
-    <>
-      <div className="flex min-w-0 flex-col items-center gap-2 text-center">
-        <div className={cx('grid h-10 w-10 place-items-center rounded-full border-2 text-sm font-bold', stateClass)}>
-          {step.complete ? <CheckCircle2 className="h-5 w-5" /> : index + 1}
-        </div>
-        <span className={cx('text-sm font-bold', step.complete || step.active ? 'text-blue-800' : 'text-slate-500')}>
-          {step.label}
-        </span>
-      </div>
-      {!isLast && (
-        <div className={cx('mt-5 h-0.5 min-w-8', step.complete ? 'bg-blue-800' : 'bg-slate-200')} />
-      )}
-    </>
   );
 }
 
