@@ -33,13 +33,55 @@ a {
 
 @layer components {
   .app-shell {
-    display: grid;
-    grid-template-columns: 280px minmax(0, 1fr);
     min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .app-header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    border-bottom: 1px solid #d8dee9;
+    background: rgba(255, 255, 255, 0.94);
+    padding: 14px 28px;
+    backdrop-filter: blur(12px);
+  }
+
+  .brand-lockup {
+    min-width: 0;
+  }
+
+  .brand-lockup .eyebrow {
+    margin-bottom: 4px;
+    color: #0f766e;
+  }
+
+  .brand-lockup h1 {
+    margin: 0;
+    color: #172033;
+    font-size: 1.05rem;
+    font-weight: 850;
+    line-height: 1.35;
+  }
+
+  .app-body {
+    min-height: 0;
+    flex: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-body.with-sidebar {
+    grid-template-columns: 280px minmax(0, 1fr);
     transition: grid-template-columns 0.18s ease;
   }
 
-  .app-shell.sidebar-collapsed {
+  .app-body.sidebar-collapsed {
     grid-template-columns: 76px minmax(0, 1fr);
   }
 
@@ -109,7 +151,7 @@ a {
     text-transform: uppercase;
   }
 
-  .sidebar h1 {
+  .sidebar h2 {
     margin: 0 0 28px;
     font-size: 1.65rem;
     line-height: 1.2;
@@ -143,6 +185,12 @@ a {
     padding: 28px;
   }
 
+  .workspace > *,
+  .workspace .grid > *,
+  .workspace .flex > * {
+    min-width: 0;
+  }
+
   .topbar {
     display: flex;
     justify-content: space-between;
@@ -167,7 +215,6 @@ a {
   .view-tabs {
     display: inline-flex;
     gap: 4px;
-    margin-top: 16px;
     border: 1px solid #d8dee9;
     border-radius: 8px;
     background: #ffffff;
@@ -240,11 +287,11 @@ a {
 }
 
 @media (max-width: 1120px) {
-  .app-shell {
+  .app-body.with-sidebar {
     grid-template-columns: 1fr;
   }
 
-  .app-shell.sidebar-collapsed {
+  .app-body.sidebar-collapsed {
     grid-template-columns: 1fr;
   }
 
@@ -262,8 +309,28 @@ a {
 }
 
 @media (max-width: 760px) {
+  .app-header {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 14px 18px;
+  }
+
+  .view-tabs {
+    width: 100%;
+  }
+
+  .view-tabs button {
+    flex: 1;
+  }
+
   .workspace {
     padding: 18px;
+  }
+
+  .workspace [class*="text-slate-700"],
+  .workspace [class*="text-slate-800"],
+  .workspace [class*="text-slate-900"] {
+    overflow-wrap: anywhere;
   }
 
   .topbar {

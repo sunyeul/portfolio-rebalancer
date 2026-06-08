@@ -666,68 +666,94 @@ export function App() {
     : [];
 
   return (
-    <main className={cx('app-shell', sidebarCollapsed && 'sidebar-collapsed')}>
-      <aside className="sidebar">
-        <div className="sidebar-heading">
-          <div className="sidebar-title">
-            <p className="eyebrow">Portfolio Rebalancer</p>
-            <h1>리밸런싱 워크벤치</h1>
-          </div>
+    <main className="app-shell">
+      <header className="app-header">
+        <div className="brand-lockup">
+          <p className="eyebrow">Portfolio Rebalancer</p>
+          <h1>리밸런싱 워크벤치</h1>
+        </div>
+        <nav className="view-tabs" aria-label="주요 화면">
           <button
             type="button"
-            className="sidebar-toggle"
-            aria-label={sidebarCollapsed ? '사이드바 펼치기' : '사이드바 접기'}
-            aria-expanded={!sidebarCollapsed}
-            onClick={() => setSidebarCollapsed((current) => !current)}
+            className={cx(activeView === 'workbench' && 'active')}
+            onClick={() => setActiveView('workbench')}
           >
-            {sidebarCollapsed ? <PanelLeftOpen aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}
+            워크벤치
           </button>
-        </div>
-        <form className="settings-form">
-          <label>
-            평가 기간
-            <select {...register('periodMode')}>
-              <option value="months">개월</option>
-              <option value="YTD">YTD</option>
-              <option value="Max">Max</option>
-            </select>
-          </label>
-          {settings.periodMode === 'months' && (
-            <label>
-              개월 수
-              <input type="number" min="1" max="120" {...register('months')} />
-            </label>
-          )}
-          <label>
-            무위험 수익률 (%)
-            <input type="number" step="0.1" {...register('rfPct')} />
-          </label>
-          <label>
-            벤치마크
-            <input type="text" {...register('bench')} />
-          </label>
-          <label>
-            RC Over 임계값 (%)
-            <input type="number" step="0.1" {...register('rcOverThreshPct')} />
-          </label>
-          <label>
-            E 임계값
-            <input type="number" step="0.05" min="0" max="1" {...register('eThresh')} />
-          </label>
-          <label>
-            판단 모드
-            <select {...register('decisionContext')}>
-              {decisionContextOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </form>
-      </aside>
+          <button
+            type="button"
+            className={cx(activeView === 'settings' && 'active')}
+            onClick={() => setActiveView('settings')}
+          >
+            설정
+          </button>
+        </nav>
+      </header>
 
-      <section className="workspace">
+      <div className={cx('app-body', activeView === 'workbench' && 'with-sidebar', sidebarCollapsed && 'sidebar-collapsed')}>
+        {activeView === 'workbench' && (
+          <aside className="sidebar">
+            <div className="sidebar-heading">
+              <div className="sidebar-title">
+                <p className="eyebrow">Workbench Controls</p>
+                <h2>빠른 평가 설정</h2>
+              </div>
+              <button
+                type="button"
+                className="sidebar-toggle"
+                aria-label={sidebarCollapsed ? '빠른 평가 설정 펼치기' : '빠른 평가 설정 접기'}
+                aria-expanded={!sidebarCollapsed}
+                onClick={() => setSidebarCollapsed((current) => !current)}
+              >
+                {sidebarCollapsed ? <PanelLeftOpen aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}
+              </button>
+            </div>
+            <form className="settings-form">
+              <label>
+                평가 기간
+                <select {...register('periodMode')}>
+                  <option value="months">개월</option>
+                  <option value="YTD">YTD</option>
+                  <option value="Max">Max</option>
+                </select>
+              </label>
+              {settings.periodMode === 'months' && (
+                <label>
+                  개월 수
+                  <input type="number" min="1" max="120" {...register('months')} />
+                </label>
+              )}
+              <label>
+                무위험 수익률 (%)
+                <input type="number" step="0.1" {...register('rfPct')} />
+              </label>
+              <label>
+                벤치마크
+                <input type="text" {...register('bench')} />
+              </label>
+              <label>
+                RC Over 임계값 (%)
+                <input type="number" step="0.1" {...register('rcOverThreshPct')} />
+              </label>
+              <label>
+                E 임계값
+                <input type="number" step="0.05" min="0" max="1" {...register('eThresh')} />
+              </label>
+              <label>
+                판단 모드
+                <select {...register('decisionContext')}>
+                  {decisionContextOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </form>
+          </aside>
+        )}
+
+        <section className="workspace">
         <header className="topbar">
           <div>
             <h2>{activeView === 'workbench' ? '입력 → 분석 → 평가' : '설정 관리'}</h2>
@@ -736,22 +762,6 @@ export function App() {
                 ? 'Python 계산 코어를 JSON API로 호출하고, React에서 결과를 검토합니다.'
                 : 'IPS 목표와 투자 논리 옵션을 관리하고 다음 평가에 적용합니다.'}
             </p>
-            <nav className="view-tabs" aria-label="주요 화면">
-              <button
-                type="button"
-                className={cx(activeView === 'workbench' && 'active')}
-                onClick={() => setActiveView('workbench')}
-              >
-                워크벤치
-              </button>
-              <button
-                type="button"
-                className={cx(activeView === 'settings' && 'active')}
-                onClick={() => setActiveView('settings')}
-              >
-                설정
-              </button>
-            </nav>
           </div>
           {activeView === 'workbench' && (
             <div className="status-strip">
@@ -1299,6 +1309,7 @@ export function App() {
           )}
         </div>
       </section>
+      </div>
       {editingSnapshotId !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-labelledby="snapshot-edit-title" onClick={cancelEditingSnapshot}>
           <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
