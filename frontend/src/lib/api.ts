@@ -50,6 +50,11 @@ export type ProposalRow = {
   rc_over_pct: number;
   rc_target_pct: number;
   return_total_pct: number | null;
+  target_preference_score: number;
+  target_score_efficiency: number;
+  target_score_risk: number;
+  target_score_thesis: number;
+  target_score_data_quality: number;
   group: string;
   dca_enabled: boolean;
   thesis_status: string;

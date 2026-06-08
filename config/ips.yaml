@@ -22,3 +22,17 @@ rules:
   immediate_buy_is_exception: true
   prefer_dca_over_sell: true
   min_trade_pct: 0.01
+
+target_weighting:
+  enabled: true
+  blend: 0.35
+  weights:
+    efficiency: 0.50
+    risk: 0.30
+    thesis: 0.15
+    data_quality: 0.05
+  thesis_multiplier:
+    intact: 1.0
+    watch: 0.7
+    unknown: 0.8
+    broken: 0.2

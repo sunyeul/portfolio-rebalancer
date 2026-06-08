@@ -3,6 +3,7 @@ import pandas as pd
 from services.evaluation_service import (
     _action_reason,
     build_ips_target_weights,
+    compute_target_preference_scores,
     run_evaluation,
 )
 
@@ -35,6 +36,11 @@ def test_run_evaluation_returns_ips_outputs_and_uses_ips_signals():
     assert "RC_Gap%" in result.proposal_df.columns
     assert "제안조정%" in result.proposal_df.columns
     assert "판단사유" in result.proposal_df.columns
+    assert "목표선호점수" in result.proposal_df.columns
+    assert "목표점수_E" in result.proposal_df.columns
+    assert "목표점수_RC" in result.proposal_df.columns
+    assert "목표점수_논리" in result.proposal_df.columns
+    assert "목표점수_데이터" in result.proposal_df.columns
     legacy_column = "\uc0ac\ubd84\uba74"
     assert legacy_column not in result.proposal_df.columns
     ufo = result.proposal_df.loc[result.proposal_df["ticker"] == "UFO"].iloc[0]
@@ -164,6 +170,102 @@ def test_build_ips_target_weights_keeps_cash_and_allocates_remaining_by_ips_targ
     assert round(float(target["UFO"]), 4) == 0.18
     assert round(float(target["CASH"]), 4) == 0.1
     assert round(float(target.sum()), 4) == 1.0
+
+
+def test_compute_target_preference_scores_normalizes_asset_situation_by_group():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "QQQ", "UFO"],
+            "가중치": [0.3, 0.3, 0.4],
+            "위험기여도": [0.2, 0.6, 0.5],
+            "E": [0.9, 0.2, 0.8],
+            "group": ["core", "core", "satellite"],
+            "thesis_status": ["intact", "watch", "intact"],
+            "missing_ratio": [0.0, 0.0, 0.0],
+            "observation_count": [120, 120, 120],
+        }
+    ).set_index("ticker")
+
+    scores = compute_target_preference_scores(metrics_df, {})
+
+    assert 0.0 <= scores.min() <= scores.max() <= 1.0
+    assert scores["VOO"] > scores["QQQ"]
+    assert scores["UFO"] > 0
+
+
+def test_build_ips_target_weights_tilts_group_internal_targets_by_normalized_scores():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "QQQ", "UFO"],
+            "가중치": [0.3, 0.3, 0.4],
+            "위험기여도": [0.2, 0.6, 0.5],
+            "E": [0.9, 0.2, 0.8],
+            "group": ["core", "core", "satellite"],
+            "thesis_status": ["intact", "watch", "intact"],
+            "missing_ratio": [0.0, 0.0, 0.0],
+            "observation_count": [120, 120, 120],
+        }
+    ).set_index("ticker")
+    ips_config = {
+        "target_allocation": {
+            "core": {"target": 0.8},
+            "satellite": {"target": 0.2},
+        },
+        "target_weighting": {"blend": 0.5},
+    }
+
+    target = build_ips_target_weights(metrics_df, ips_config)
+
+    assert round(float(target[["VOO", "QQQ"]].sum()), 4) == 0.8
+    assert round(float(target["UFO"]), 4) == 0.2
+    assert target["VOO"] > target["QQQ"]
+    assert round(float(target.sum()), 4) == 1.0
+
+
+def test_build_ips_target_weights_can_disable_score_tilt_for_legacy_behavior():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "QQQ"],
+            "가중치": [0.2, 0.6],
+            "위험기여도": [0.1, 0.8],
+            "E": [0.9, 0.1],
+            "group": ["core", "core"],
+            "thesis_status": ["intact", "watch"],
+        }
+    ).set_index("ticker")
+    ips_config = {
+        "target_allocation": {"core": {"target": 1.0}},
+        "target_weighting": {"enabled": False},
+    }
+
+    target = build_ips_target_weights(metrics_df, ips_config)
+
+    assert round(float(target["VOO"]), 4) == 0.25
+    assert round(float(target["QQQ"]), 4) == 0.75
+
+
+def test_build_ips_target_weights_keeps_current_internal_share_when_scores_are_tied():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "QQQ"],
+            "가중치": [0.2, 0.6],
+            "위험기여도": [0.5, 0.5],
+            "E": [0.8, 0.8],
+            "group": ["core", "core"],
+            "thesis_status": ["intact", "intact"],
+            "missing_ratio": [0.0, 0.0],
+            "observation_count": [120, 120],
+        }
+    ).set_index("ticker")
+    ips_config = {
+        "target_allocation": {"core": {"target": 1.0}},
+        "target_weighting": {"blend": 1.0},
+    }
+
+    target = build_ips_target_weights(metrics_df, ips_config)
+
+    assert round(float(target["VOO"]), 4) == 0.25
+    assert round(float(target["QQQ"]), 4) == 0.75
 
 
 def test_run_evaluation_uses_auto_targets_when_explicit_targets_are_absent():

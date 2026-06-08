@@ -485,12 +485,8 @@ export function App() {
       { accessorKey: 'current_weight_pct', header: '현재', cell: ({ row }) => pct(row.original.current_weight_pct, false) },
       { accessorKey: 'target_weight_pct', header: '목표', cell: ({ row }) => pct(row.original.target_weight_pct, false) },
       { accessorKey: 'gap_pct', header: '갭', cell: ({ row }) => pct(row.original.gap_pct, false) },
-      { accessorKey: 'reference_trade_pct', header: '참고조정', cell: ({ row }) => pct(row.original.reference_trade_pct, false) },
+      { accessorKey: 'target_preference_score', header: '목표점수', cell: ({ row }) => num(row.original.target_preference_score) },
       { accessorKey: 'suggested_trade_pct', header: '최종조정', cell: ({ row }) => pct(row.original.suggested_trade_pct, false) },
-      { accessorKey: 'return_total_pct', header: '기간 수익률', cell: ({ row }) => pct(row.original.return_total_pct, false) },
-      nullableNumberColumn('efficiency_score', 'E', (row) => row.efficiency_score, num),
-      { accessorKey: 'rc_gap_pct', header: 'RC Gap', cell: ({ row }) => pct(row.original.rc_gap_pct, false) },
-      { accessorKey: 'rc_over_pct', header: 'RC Over', cell: ({ row }) => pct(row.original.rc_over_pct, false) },
       { accessorKey: 'should_execute', header: '최종실행', cell: ({ row }) => (row.original.should_execute ? '실행' : '보류') },
       { accessorKey: 'action_reason', header: '사유' }
     ],
@@ -501,16 +497,8 @@ export function App() {
     () => [
       { accessorKey: 'ticker', header: '티커' },
       { accessorKey: 'action_label', header: '액션' },
-      { accessorKey: 'execution_type', header: '실행 유형' },
       { accessorKey: 'decision_summary', header: '판단 요약' },
-      { accessorKey: 'next_step', header: '다음 행동' },
-      { accessorKey: 'reason_codes_text', header: '근거' },
-      { accessorKey: '판단사유', header: '판단 사유' },
-      { id: 'gap_pct', header: '갭', cell: ({ row }) => pct(valueFromRecord(row.original, '갭%'), false) },
-      { id: 'reference_trade_pct', header: '참고조정', cell: ({ row }) => pct(valueFromRecord(row.original, '참고조정%'), false) },
-      { id: 'suggested_trade_pct', header: '최종조정', cell: ({ row }) => pct(valueFromRecord(row.original, '제안조정%'), false) },
-      { id: 'rc_gap_pct', header: 'RC Gap', cell: ({ row }) => pct(valueFromRecord(row.original, 'RC_Gap%'), false) },
-      { id: 'efficiency', header: 'E', cell: ({ row }) => num(valueFromRecord(row.original, 'E')) }
+      { accessorKey: 'next_step', header: '다음 행동' }
     ],
     []
   );

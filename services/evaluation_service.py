@@ -19,6 +19,23 @@ from utils.ips import (
 )
 
 
+TARGET_SCORING_DEFAULTS = {
+    "enabled": True,
+    "blend": 0.35,
+    "weights": {
+        "efficiency": 0.50,
+        "risk": 0.30,
+        "thesis": 0.15,
+        "data_quality": 0.05,
+    },
+    "thesis_multiplier": {
+        "intact": 1.0,
+        "watch": 0.7,
+        "unknown": 0.8,
+        "broken": 0.2,
+    },
+}
+
 FINAL_EXECUTABLE_ACTIONS = {
     "increase_dca",
     "decrease_dca",
@@ -43,6 +60,129 @@ class EvaluationError(Exception):
     """평가 처리 중 발생하는 오류."""
 
     pass
+
+
+def _target_scoring_config(ips_config: dict) -> dict:
+    cfg = TARGET_SCORING_DEFAULTS.copy()
+    cfg["weights"] = TARGET_SCORING_DEFAULTS["weights"].copy()
+    cfg["thesis_multiplier"] = TARGET_SCORING_DEFAULTS["thesis_multiplier"].copy()
+
+    user_cfg = ips_config.get("target_weighting", {})
+    cfg.update({key: value for key, value in user_cfg.items() if key not in {"weights", "thesis_multiplier"}})
+    cfg["weights"].update(user_cfg.get("weights", {}))
+    cfg["thesis_multiplier"].update(user_cfg.get("thesis_multiplier", {}))
+    cfg["blend"] = min(1.0, max(0.0, float(cfg.get("blend", 0.35))))
+    return cfg
+
+
+def _neutral_score(index: pd.Index) -> pd.Series:
+    return pd.Series(0.5, index=index, dtype=float)
+
+
+def _minmax_score(values: pd.Series, *, higher_is_better: bool) -> pd.Series:
+    numeric = pd.to_numeric(values, errors="coerce")
+    if numeric.notna().sum() < 2:
+        return _neutral_score(values.index)
+
+    min_value = float(numeric.min())
+    max_value = float(numeric.max())
+    if max_value == min_value:
+        return _neutral_score(values.index)
+
+    normalized = (numeric - min_value) / (max_value - min_value)
+    if not higher_is_better:
+        normalized = 1.0 - normalized
+    return normalized.fillna(0.5).clip(lower=0.0, upper=1.0)
+
+
+def compute_target_preference_breakdown(
+    metrics_df: pd.DataFrame, ips_config: dict
+) -> pd.DataFrame:
+    """자산별 목표 비중 선호 점수와 구성 점수를 계산합니다."""
+    cfg = _target_scoring_config(ips_config)
+    weights = cfg["weights"]
+    df = metrics_df.copy()
+    group_series = (
+        df.get("group", pd.Series(DEFAULT_GROUP, index=df.index))
+        .fillna(DEFAULT_GROUP)
+        .map(fixed_group)
+    )
+
+    total_weight = sum(max(0.0, float(value)) for value in weights.values())
+    columns = [
+        "target_score_efficiency",
+        "target_score_risk",
+        "target_score_thesis",
+        "target_score_data_quality",
+        "target_preference_score",
+    ]
+    if total_weight <= 0:
+        return pd.DataFrame(
+            {column: _neutral_score(df.index) for column in columns},
+            index=df.index,
+        )
+
+    result = pd.DataFrame(index=df.index)
+    thesis_map = cfg["thesis_multiplier"]
+
+    for _, group_index in group_series.groupby(group_series).groups.items():
+        group_df = df.loc[group_index]
+
+        efficiency = group_df.get("E", pd.Series(index=group_index, dtype=float))
+        efficiency_score = _minmax_score(efficiency, higher_is_better=True)
+
+        risk = group_df.get("위험기여도", pd.Series(index=group_index, dtype=float))
+        risk_score = _minmax_score(risk, higher_is_better=False)
+
+        thesis = (
+            group_df.get("thesis_status", pd.Series("unknown", index=group_index))
+            .fillna("unknown")
+            .astype(str)
+            .str.lower()
+            .map(
+                lambda value: float(
+                    thesis_map.get(value, thesis_map.get("unknown", 0.8))
+                )
+            )
+        )
+        thesis_score = thesis.clip(lower=0.0, upper=1.0)
+
+        missing_ratio = pd.to_numeric(
+            group_df.get("missing_ratio", pd.Series(0.0, index=group_index)),
+            errors="coerce",
+        ).fillna(0.0)
+        observations = pd.to_numeric(
+            group_df.get("observation_count", pd.Series(9999, index=group_index)),
+            errors="coerce",
+        ).fillna(9999)
+        data_quality = ((1.0 - missing_ratio).clip(lower=0.0, upper=1.0)) * (
+            (observations / 60.0).clip(lower=0.0, upper=1.0)
+        )
+        data_quality_score = data_quality.clip(lower=0.0, upper=1.0)
+
+        weighted_score = (
+            efficiency_score * float(weights.get("efficiency", 0.0))
+            + risk_score * float(weights.get("risk", 0.0))
+            + thesis_score * float(weights.get("thesis", 0.0))
+            + data_quality_score * float(weights.get("data_quality", 0.0))
+        )
+
+        result.loc[group_index, "target_score_efficiency"] = efficiency_score
+        result.loc[group_index, "target_score_risk"] = risk_score
+        result.loc[group_index, "target_score_thesis"] = thesis_score
+        result.loc[group_index, "target_score_data_quality"] = data_quality_score
+        result.loc[group_index, "target_preference_score"] = (
+            weighted_score / total_weight
+        ).clip(lower=0.05, upper=1.0)
+
+    return result[columns].astype(float)
+
+
+def compute_target_preference_scores(metrics_df: pd.DataFrame, ips_config: dict) -> pd.Series:
+    """자산별 상황을 0~1 선호 점수로 정규화합니다."""
+    return compute_target_preference_breakdown(metrics_df, ips_config)[
+        "target_preference_score"
+    ]
 
 
 def build_ips_target_weights(metrics_df: pd.DataFrame, ips_config: dict) -> pd.Series:
@@ -78,9 +218,31 @@ def build_ips_target_weights(metrics_df: pd.DataFrame, ips_config: dict) -> pd.S
         current_in_group = current[group_mask]
         current_group_total = float(current_in_group.sum())
         if current_group_total > 0:
-            target[group_mask] = current_in_group / current_group_total * group_target
+            current_share = current_in_group / current_group_total
         else:
-            target[group_mask] = group_target / int(group_mask.sum())
+            current_share = pd.Series(
+                1.0 / int(group_mask.sum()),
+                index=current_in_group.index,
+                dtype=float,
+            )
+
+        scoring_cfg = _target_scoring_config(ips_config)
+        if scoring_cfg.get("enabled", True) and int(group_mask.sum()) > 1:
+            preference = compute_target_preference_scores(
+                metrics_df, ips_config
+            ).reindex(current_in_group.index)
+            preference_total = float(preference.sum())
+            preference_spread = float(preference.max() - preference.min())
+            if preference_total > 0 and preference_spread > 1e-9:
+                score_share = preference / preference_total
+                blend = float(scoring_cfg.get("blend", 0.35))
+                target_share = (current_share * (1.0 - blend)) + (score_share * blend)
+            else:
+                target_share = current_share
+        else:
+            target_share = current_share
+
+        target[group_mask] = target_share * group_target
 
     if target.sum() > 0:
         target = target / target.sum()
@@ -247,6 +409,7 @@ def run_evaluation(
         tgt = pd.Series(target_weights, index=mdf.index).fillna(0)
     else:
         tgt = target_weights.reindex(mdf.index).fillna(0)
+    target_preference = compute_target_preference_breakdown(mdf, ips_config_snapshot)
 
     # RC 타깃 계산: 공분산 행렬 기반 기하학적 계산 또는 단순 비중 기반
     # AIDEV-NOTE: geometric-rc-target; 공분산 행렬을 고려한 기하학적 RC_Target 계산
@@ -287,6 +450,15 @@ def run_evaluation(
             "RC_Over%": rc_over_pct.round(2).values,
             "RC_Target%": (rc_target * 100).round(2).values,
             "return_total%": (mdf["return_total"] * 100).round(2).values,
+            "목표선호점수": target_preference["target_preference_score"]
+            .round(3)
+            .values,
+            "목표점수_E": target_preference["target_score_efficiency"].round(3).values,
+            "목표점수_RC": target_preference["target_score_risk"].round(3).values,
+            "목표점수_논리": target_preference["target_score_thesis"].round(3).values,
+            "목표점수_데이터": target_preference["target_score_data_quality"]
+            .round(3)
+            .values,
             "group": mdf["group"].values,
             "dca_enabled": mdf["dca_enabled"].values,
             "thesis_status": mdf["thesis_status"].values,

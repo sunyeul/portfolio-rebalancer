@@ -55,13 +55,13 @@ DECISION_CONTEXTS = {
 }
 
 DECISION_SUMMARIES = {
-    "increase_dca": "정기매수 배분 증액",
-    "decrease_dca": "정기매수 배분 감액",
-    "hold_observe": "유지 및 관찰",
-    "review_thesis": "투자 논리 점검 필요",
-    "exceptional_buy_review": "예외적 즉시매수 검토",
-    "consider_rebalance_sell": "예외적 매도 검토",
-    "block_action": "행동 보류",
+    "increase_dca": "목표 대비 부족하고 위험·효율 조건이 정기매수 보강을 허용합니다.",
+    "decrease_dca": "목표 대비 초과 또는 위험 상승으로 신규 매수 축소가 우선입니다.",
+    "hold_observe": "수치 조정 기준을 넘지 않아 다음 점검까지 관찰합니다.",
+    "review_thesis": "수치만으로 증액하기 어려워 보유 논리 확인이 먼저입니다.",
+    "exceptional_buy_review": "정기매수로 부족분을 해소하기 어려운 예외 조건인지 확인해야 합니다.",
+    "consider_rebalance_sell": "정기매수 조정으로 낮추기 어려운 초과 위험인지 확인해야 합니다.",
+    "block_action": "데이터나 행동 동기가 불충분해 실행 판단을 차단합니다.",
 }
 
 REASON_TEXT = {

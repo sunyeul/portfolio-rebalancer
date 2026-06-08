@@ -63,7 +63,9 @@ def test_risk_ok_efficiency_good_positive_gap_classifies_as_increase_dca():
     assert result["ips_action"] == "increase_dca"
     assert result["execution_type"] == "dca_adjustment"
     assert result["decision_context"] == "regular_review"
-    assert result["decision_summary"] == "정기매수 배분 증액"
+    assert result["action_label"] == "정기매수 증액 후보"
+    assert result["decision_summary"] == "목표 대비 부족하고 위험·효율 조건이 정기매수 보강을 허용합니다."
+    assert result["decision_summary"] != result["action_label"]
 
 
 def test_execution_type_mapping_for_core_actions():
