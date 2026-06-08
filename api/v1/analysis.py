@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from api.v1.serialization import METRICS_COLUMNS, dataframe_records, safe_mapping
 from middleware.session import session_manager
-from services.analysis_service import AnalysisError, run_analysis
+from services.analysis_service import DEFAULT_BENCH, DEFAULT_RF, AnalysisError, run_analysis
 
 router = APIRouter()
 
@@ -24,8 +24,8 @@ EVALUATION_SESSION_KEYS = (
 
 class AnalysisRunRequest(BaseModel):
     period: int | str = Field(12, description="Month count, YTD, or Max")
-    rf: float = 0.0
-    bench: str = "SPY"
+    rf: float = DEFAULT_RF
+    bench: str = DEFAULT_BENCH
 
 
 def _parse_period(period: int | str) -> int | str:

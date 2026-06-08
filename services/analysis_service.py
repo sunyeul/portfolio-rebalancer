@@ -35,6 +35,9 @@ from utils.metrics import (
     beta,
 )
 
+DEFAULT_RF = 0.025
+DEFAULT_BENCH = "SPY:80,QQQ:20"
+
 
 class AnalysisResult(NamedTuple):
     """분석 결과 데이터 구조."""
@@ -55,6 +58,79 @@ class AnalysisError(Exception):
     """분석 처리 중 발생하는 오류."""
 
     pass
+
+
+class BenchmarkSpec(NamedTuple):
+    """분석에 사용할 벤치마크 정의."""
+
+    label: str
+    components: pd.Series
+
+
+def parse_benchmark(bench: str) -> BenchmarkSpec | None:
+    """단일 티커 또는 TICKER:WEIGHT 목록을 벤치마크 정의로 파싱합니다."""
+    normalized = bench.strip().upper()
+    if not normalized:
+        return None
+
+    if ":" not in normalized:
+        return BenchmarkSpec(normalized, pd.Series({normalized: 1.0}, dtype=float))
+
+    components: dict[str, float] = {}
+    for part in normalized.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        if ":" not in token:
+            raise AnalysisError(
+                "복합 벤치마크는 'SPY:80,QQQ:20' 형식으로 입력해주세요."
+            )
+        ticker, raw_weight = token.split(":", 1)
+        ticker = ticker.strip().upper()
+        try:
+            weight = float(raw_weight.strip())
+        except ValueError as exc:
+            raise AnalysisError(
+                "복합 벤치마크 비중은 숫자로 입력해주세요. 예: SPY:80,QQQ:20"
+            ) from exc
+        if not ticker or weight <= 0:
+            raise AnalysisError("복합 벤치마크 티커와 비중은 양수여야 합니다.")
+        components[ticker] = components.get(ticker, 0.0) + weight
+
+    weights = pd.Series(components, dtype=float)
+    if weights.empty or weights.sum() <= 0:
+        raise AnalysisError("벤치마크를 1개 이상 입력해주세요.")
+    return BenchmarkSpec(normalized, weights / weights.sum())
+
+
+def _add_composite_benchmark(
+    prices: pd.DataFrame,
+    returns: pd.DataFrame,
+    benchmark: BenchmarkSpec | None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """복합 벤치마크를 가상 NAV/수익률 컬럼으로 추가합니다."""
+    if benchmark is None or len(benchmark.components) == 1:
+        return prices, returns
+    if benchmark.label in prices.columns:
+        return prices, returns
+
+    component_tickers = list(benchmark.components.index)
+    available = [ticker for ticker in component_tickers if ticker in returns.columns]
+    if not available:
+        return prices, returns
+
+    weights = benchmark.components.reindex(available)
+    weights = weights / weights.sum()
+    bench_returns = (returns[available] * weights).sum(axis=1)
+    bench_nav = (1 + bench_returns).cumprod()
+    if bench_nav.empty:
+        return prices, returns
+
+    prices_with_benchmark = prices.copy()
+    returns_with_benchmark = returns.copy()
+    prices_with_benchmark[benchmark.label] = bench_nav.reindex(prices.index).ffill()
+    returns_with_benchmark[benchmark.label] = bench_returns
+    return prices_with_benchmark, returns_with_benchmark
 
 
 def _price_data_quality(prices_raw: pd.DataFrame, ticker: str) -> dict[str, object]:
@@ -96,7 +172,7 @@ def run_analysis(
         asset_df: 정규화된 자산 데이터프레임 (ticker, allocation, weight 컬럼 포함)
         period: 평가 기간 (정수: 개월 수 또는 문자열: 'YTD', 'Max')
         rf: 무위험 수익률 (연간, 소수)
-        bench: 벤치마크 티커
+        bench: 벤치마크 티커 또는 'SPY:80,QQQ:20' 형식의 복합 벤치마크
 
     Returns:
         AnalysisResult: 분석 결과
@@ -115,9 +191,14 @@ def run_analysis(
     else:  # Max
         start = end - timedelta(days=365 * 15)
 
+    benchmark = parse_benchmark(bench)
+    bench_label = benchmark.label if benchmark else ""
+    benchmark_tickers = list(benchmark.components.index) if benchmark else []
+
     all_tickers = asset_df["ticker"].tolist()
-    if bench and bench not in all_tickers:
-        all_tickers += [bench]
+    for ticker in benchmark_tickers:
+        if ticker not in all_tickers:
+            all_tickers.append(ticker)
 
     # 가격 데이터 조회
     try:
@@ -139,27 +220,29 @@ def run_analysis(
 
     # 일일 수익률 계산
     returns = prices.pct_change(fill_method=None).dropna(how="all")
+    prices, returns = _add_composite_benchmark(prices, returns, benchmark)
 
     # AIDEV-NOTE: return-smoothing; 수익률을 윈저라이즈 + 3-window MA로 스무딩하여 이상치 완화 및 공분산 안정화
     returns_smooth = winsorize_returns(returns)
     returns_smooth = moving_average(returns_smooth).dropna(how="all")
 
     # 현재 가중치를 사용한 포트폴리오 NAV
-    weights = asset_df.set_index("ticker")["weight"].reindex(prices.columns).fillna(0)
+    priced_assets = [ticker for ticker in asset_df["ticker"] if ticker in prices.columns]
+    weights = asset_df.set_index("ticker")["weight"].reindex(priced_assets).fillna(0)
     weights_no_bench = weights
 
     # AIDEV-NOTE: priced-asset-guard; 가격 데이터가 확보된 실제 보유 자산이 없으면 포트폴리오 계산 불가능
     if weights_no_bench.sum() == 0:
         raise AnalysisError(
             f"포트폴리오에 실제 자산이 없습니다. "
-            f"입력 자산의 가격 데이터가 없거나 벤치마크('{bench}')만 조회되었습니다. "
+            f"입력 자산의 가격 데이터가 없거나 벤치마크('{bench_label}')만 조회되었습니다. "
             "최소 1개 이상의 자산을 포트폴리오에 추가해주세요."
         )
 
     port_nav = compute_portfolio_nav(
         returns_smooth[weights_no_bench.index], weights_no_bench
     )
-    bench_nav = price_to_nav(prices[bench]) if bench in prices.columns else None
+    bench_nav = price_to_nav(prices[bench_label]) if bench_label in prices.columns else None
 
     # 자산별 메트릭 계산 (스무딩된 수익률 사용)
     asset_metrics = []
@@ -180,18 +263,18 @@ def run_analysis(
         ir = np.nan
         asset_beta = np.nan
         asset_alpha = np.nan
-        if bench in returns_smooth.columns and t != bench:
-            active_returns = returns_smooth[t] - returns_smooth[bench]
+        if bench_label in returns_smooth.columns and t != bench_label:
+            active_returns = returns_smooth[t] - returns_smooth[bench_label]
             te = tracking_error(active_returns)
             bench_cagr = (
-                cagr_from_series(price_to_nav(prices[bench]))
-                if bench in prices.columns
+                cagr_from_series(price_to_nav(prices[bench_label]))
+                if bench_label in prices.columns
                 else np.nan
             )
             ir = information_ratio(cagr, bench_cagr, te)
 
             # AIDEV-NOTE: beta-alpha-computation; 벤치마크 대비 베타 및 알파 계산
-            asset_beta = beta(returns_smooth[t], returns_smooth[bench])
+            asset_beta = beta(returns_smooth[t], returns_smooth[bench_label])
             asset_alpha = alpha(cagr, asset_beta, bench_cagr, rf)
 
         asset_metrics.append(
@@ -226,10 +309,12 @@ def run_analysis(
 
     # 벤치마크 메트릭
     benchmark_metrics = None
-    if bench in prices.columns:
-        bnav = price_to_nav(prices[bench])
+    if bench_label in prices.columns:
+        bnav = price_to_nav(prices[bench_label])
         bdr = (
-            returns_smooth[bench] if bench in returns_smooth.columns else returns[bench]
+            returns_smooth[bench_label]
+            if bench_label in returns_smooth.columns
+            else returns[bench_label]
         )
         bench_cagr = cagr_from_series(bnav)
         bench_vol = daily_to_annual_vol(bdr)

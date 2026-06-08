@@ -2,7 +2,7 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from main import app
-from services.analysis_service import AnalysisResult
+from services.analysis_service import AnalysisResult, run_analysis
 from services.evaluation_service import EvaluationResult
 
 
@@ -104,6 +104,95 @@ def test_analysis_api_stores_json_safe_metrics(monkeypatch):
     payload = response.json()
     assert payload["metrics"][0]["cagr"] is None
     assert payload["portfolio_metrics"]["cagr"] is None
+
+
+def test_analysis_api_defaults_to_realistic_rf_and_composite_benchmark(monkeypatch):
+    client = TestClient(app)
+    client.post(
+        "/api/v1/portfolio/manual",
+        json={"rows": [{"ticker": "VOO", "allocation": 100}]},
+    )
+    captured = {}
+
+    def fake_run_analysis(asset_df, period, rf, bench):
+        captured.update({"period": period, "rf": rf, "bench": bench})
+        metrics_df = pd.DataFrame(
+            {
+                "ticker": ["VOO"],
+                "CAGR": [0.1],
+                "변동성": [0.2],
+                "샤프": [0.5],
+                "최대낙폭": [-0.1],
+                "IR": [0.2],
+                "베타": [1.0],
+                "알파": [0.0],
+                "data_start": ["2026-06-01"],
+                "data_end": ["2026-06-04"],
+                "observation_count": [4],
+                "missing_ratio": [0.0],
+                "위험기여도": [1.0],
+                "수익기여도": [0.1],
+                "가중치": [1.0],
+                "E": [0.7],
+                "return_total": [0.2],
+                "group": ["core"],
+                "dca_enabled": [True],
+                "thesis_status": ["intact"],
+            }
+        ).set_index("ticker")
+        return AnalysisResult(
+            prices=pd.DataFrame({"VOO": [1.0, 1.1]}),
+            returns=pd.DataFrame({"VOO": [0.1]}),
+            returns_smooth=pd.DataFrame({"VOO": [0.1]}),
+            weights_no_bench=pd.Series({"VOO": 1.0}),
+            metrics_df=metrics_df,
+            port_nav=pd.Series([1.0, 1.1]),
+            bench_nav=None,
+            portfolio_metrics={"cagr": 0.1, "volatility": 0.2, "sharpe": 0.5},
+            benchmark_metrics=None,
+            missing_tickers=[],
+        )
+
+    monkeypatch.setattr("api.v1.analysis.run_analysis", fake_run_analysis)
+
+    response = client.post("/api/v1/analysis/run", json={})
+
+    assert response.status_code == 200
+    assert captured == {"period": 12, "rf": 0.025, "bench": "SPY:80,QQQ:20"}
+
+
+def test_run_analysis_builds_composite_benchmark(monkeypatch):
+    asset_df = pd.DataFrame(
+        {
+            "ticker": ["VOO"],
+            "allocation": [100.0],
+            "weight": [1.0],
+            "return_total": [None],
+            "group": ["core"],
+            "dca_enabled": [True],
+            "thesis_status": ["intact"],
+        }
+    )
+
+    def prices_for_composite(*args, **kwargs):
+        return pd.DataFrame(
+            {
+                "VOO": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0],
+                "SPY": [100.0, 101.0, 101.0, 102.0, 103.0, 104.0],
+                "QQQ": [100.0, 102.0, 103.0, 104.0, 106.0, 108.0],
+            },
+            index=pd.date_range("2026-06-01", periods=6),
+        )
+
+    monkeypatch.setattr("services.analysis_service.fetch_prices", prices_for_composite)
+
+    result = run_analysis(asset_df, 1, 0.025, "SPY:80,QQQ:20")
+
+    assert "SPY:80,QQQ:20" in result.prices.columns
+    assert "SPY:80,QQQ:20" in result.returns_smooth.columns
+    assert result.benchmark_metrics is not None
+    assert result.bench_nav is not None
+    assert result.metrics_df.loc["SPY:80,QQQ:20", "가중치"] == 0
 
 
 def test_analysis_error_identifies_tickers_and_date_range(monkeypatch):

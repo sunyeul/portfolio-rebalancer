@@ -20,7 +20,7 @@ from api.v1.serialization import (
     dataframe_records,
     safe_mapping,
 )
-from services.analysis_service import AnalysisError, run_analysis
+from services.analysis_service import DEFAULT_BENCH, DEFAULT_RF, AnalysisError, run_analysis
 from services.evaluation_service import EvaluationError, run_evaluation
 from services.portfolio_service import (
     PortfolioInputError,
@@ -302,8 +302,8 @@ def evaluate(
     portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
     period: Annotated[str, typer.Option("--period")] = "12",
-    rf: Annotated[float, typer.Option("--rf")] = 0.0,
-    bench: Annotated[str, typer.Option("--bench")] = "SPY",
+    rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
+    bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
     rc_threshold: Annotated[float, typer.Option("--rc-threshold")] = 1.5,
     e_threshold: Annotated[float, typer.Option("--e-threshold")] = 0.5,
     decision_context: Annotated[

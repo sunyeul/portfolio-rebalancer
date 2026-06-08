@@ -74,6 +74,8 @@ import { blankRow, parsePortfolioText } from './lib/parser';
 import { type PortfolioRowInput, type SettingsValues, settingsSchema } from './lib/schemas';
 
 const sampleText = 'VOO 40\nQQQ 25\nSOXX 15\nUFO 3\nIONQ 2';
+const DEFAULT_RF_PCT = 2.5;
+const DEFAULT_BENCHMARK = 'SPY:80,QQQ:20';
 const fixedGroupOptions = [
   { value: 'core', label: '코어' },
   { value: 'satellite', label: '위성' },
@@ -262,8 +264,8 @@ export function App() {
     defaultValues: {
       periodMode: 'months',
       months: 12,
-      rfPct: 0,
-      bench: 'SPY',
+      rfPct: DEFAULT_RF_PCT,
+      bench: DEFAULT_BENCHMARK,
       rcOverThreshPct: 1.5,
       eThresh: 0.5,
       decisionContext: 'regular_review'
