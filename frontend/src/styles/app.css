@@ -36,12 +36,69 @@ a {
     display: grid;
     grid-template-columns: 280px minmax(0, 1fr);
     min-height: 100vh;
+    transition: grid-template-columns 0.18s ease;
+  }
+
+  .app-shell.sidebar-collapsed {
+    grid-template-columns: 76px minmax(0, 1fr);
   }
 
   .sidebar {
     background: #172033;
     color: #ffffff;
     padding: 28px 22px;
+    overflow: hidden;
+    transition: padding 0.18s ease;
+  }
+
+  .sidebar-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .sidebar-title {
+    min-width: 0;
+  }
+
+  .sidebar-toggle {
+    display: inline-grid;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    place-items: center;
+    border: 1px solid #3a465d;
+    border-radius: 8px;
+    background: #222d42;
+    color: #ffffff;
+    cursor: pointer;
+    transition:
+      background 0.15s ease,
+      border-color 0.15s ease;
+  }
+
+  .sidebar-toggle:hover {
+    border-color: #8dd3c7;
+    background: #2b3750;
+  }
+
+  .sidebar-toggle svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .sidebar-collapsed .sidebar {
+    padding-inline: 20px;
+  }
+
+  .sidebar-collapsed .sidebar-heading {
+    justify-content: center;
+  }
+
+  .sidebar-collapsed .sidebar-title,
+  .sidebar-collapsed .settings-form {
+    display: none;
   }
 
   .eyebrow {
@@ -187,8 +244,20 @@ a {
     grid-template-columns: 1fr;
   }
 
+  .app-shell.sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
+
   .sidebar {
     position: static;
+  }
+
+  .sidebar-collapsed .sidebar {
+    padding-block: 16px;
+  }
+
+  .sidebar-collapsed .sidebar-heading {
+    justify-content: flex-end;
   }
 }
 

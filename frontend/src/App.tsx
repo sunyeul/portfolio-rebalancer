@@ -11,6 +11,8 @@ import {
   FolderOpen,
   LineChart,
   Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Play,
   Plus,
   RefreshCcw,
@@ -180,6 +182,7 @@ function rowsSignature(rows: PortfolioRowInput[]) {
 export function App() {
   const queryClient = useQueryClient();
   const [activeView, setActiveView] = useState<AppView>('workbench');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [text, setText] = useState(sampleText);
   const [rows, setRows] = useState<PortfolioRowInput[]>(() => parsePortfolioText(sampleText));
   const [portfolio, setPortfolio] = useState<AssetRow[]>([]);
@@ -661,11 +664,22 @@ export function App() {
     : [];
 
   return (
-    <main className="app-shell">
+    <main className={cx('app-shell', sidebarCollapsed && 'sidebar-collapsed')}>
       <aside className="sidebar">
-        <div>
-          <p className="eyebrow">Portfolio Rebalancer</p>
-          <h1>리밸런싱 워크벤치</h1>
+        <div className="sidebar-heading">
+          <div className="sidebar-title">
+            <p className="eyebrow">Portfolio Rebalancer</p>
+            <h1>리밸런싱 워크벤치</h1>
+          </div>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-label={sidebarCollapsed ? '사이드바 펼치기' : '사이드바 접기'}
+            aria-expanded={!sidebarCollapsed}
+            onClick={() => setSidebarCollapsed((current) => !current)}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}
+          </button>
         </div>
         <form className="settings-form">
           <label>
