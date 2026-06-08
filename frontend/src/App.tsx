@@ -78,6 +78,12 @@ const fixedGroupOptions = [
   { value: 'cash', label: '현금' },
   { value: 'unclassified', label: '미분류' }
 ] as const;
+const decisionContextOptions = [
+  { value: 'regular_review', label: '일반 점검' },
+  { value: 'market_correction', label: '시장 조정 대응' },
+  { value: 'sharp_drop_review', label: '급락 후 추매 검토' },
+  { value: 'rebalance_review', label: '비중 리밸런싱 점검' }
+] as const;
 type AppView = 'workbench' | 'settings';
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -256,7 +262,8 @@ export function App() {
       rfPct: 0,
       bench: 'SPY',
       rcOverThreshPct: 1.5,
-      eThresh: 0.5
+      eThresh: 0.5,
+      decisionContext: 'regular_review'
     }
   });
   const settings = watch();
@@ -492,6 +499,8 @@ export function App() {
     () => [
       { accessorKey: 'ticker', header: '티커' },
       { accessorKey: 'action_label', header: '액션' },
+      { accessorKey: 'execution_type', header: '실행 유형' },
+      { accessorKey: 'decision_summary', header: '판단 요약' },
       { accessorKey: 'next_step', header: '다음 행동' },
       { accessorKey: 'reason_codes_text', header: '근거' },
       { accessorKey: '판단사유', header: '판단 사유' },
@@ -552,7 +561,8 @@ export function App() {
     const parsedSettings = settingsSchema.parse(settings);
     evaluationMutation.mutate({
       rc_over_thresh_pct: parsedSettings.rcOverThreshPct,
-      e_thresh: parsedSettings.eThresh
+      e_thresh: parsedSettings.eThresh,
+      decision_context: parsedSettings.decisionContext
     });
   }
 
@@ -687,6 +697,16 @@ export function App() {
           <label>
             E 임계값
             <input type="number" step="0.05" min="0" max="1" {...register('eThresh')} />
+          </label>
+          <label>
+            판단 모드
+            <select {...register('decisionContext')}>
+              {decisionContextOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </label>
         </form>
       </aside>

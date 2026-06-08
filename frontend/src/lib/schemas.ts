@@ -15,7 +15,13 @@ export const settingsSchema = z.object({
   rfPct: z.coerce.number(),
   bench: z.string().trim().min(1),
   rcOverThreshPct: z.coerce.number().min(0),
-  eThresh: z.coerce.number().min(0).max(1)
+  eThresh: z.coerce.number().min(0).max(1),
+  decisionContext: z.enum([
+    'regular_review',
+    'market_correction',
+    'sharp_drop_review',
+    'rebalance_review'
+  ])
 });
 
 export type PortfolioRowInput = z.infer<typeof portfolioRowSchema>;

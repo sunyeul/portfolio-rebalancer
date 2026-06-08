@@ -206,6 +206,7 @@ export function runAnalysis(payload: {
 export function runEvaluation(payload: {
   rc_over_thresh_pct: number;
   e_thresh: number;
+  decision_context: 'regular_review' | 'market_correction' | 'sharp_drop_review' | 'rebalance_review';
   target_weights?: Record<string, number>;
 }) {
   return requestJson<EvaluationResponse>('/api/v1/evaluation/run', {
