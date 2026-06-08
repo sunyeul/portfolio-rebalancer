@@ -868,6 +868,7 @@ export function App() {
         'CAGR, 변동성, MDD, Sharpe는 보조 지표이며 정책 채택 순위가 아닙니다.'
       ]
     : [];
+  const followupComplete = Boolean(counterfactual || backtest || activePortfolio?.latest_snapshot);
 
   return (
     <main className="app-shell">
@@ -901,29 +902,53 @@ export function App() {
             <h2>{activeView === 'workbench' ? '워크벤치' : '설정 관리'}</h2>
             <p>
               {activeView === 'workbench'
-                ? 'Python 계산 코어를 JSON API로 호출하고, React에서 결과를 검토합니다.'
+                ? '현재 포트폴리오를 불러와 입력을 보정하고, IPS 기준으로 실행 여부를 점검합니다.'
                 : 'IPS 목표와 투자 논리 옵션을 관리하고 다음 평가에 적용합니다.'}
             </p>
           </div>
           {activeView === 'workbench' && (
             <div className="status-strip">
-              <span className={portfolio.length ? 'done' : ''}>1 입력</span>
-              <span className={analysis ? 'done' : ''}>2 분석</span>
-              <span className={evaluation ? 'done' : ''}>3 평가</span>
+              <span className={selectedPortfolioId !== null ? 'done' : ''}>1 작업대상</span>
+              <span className={validRows.length ? 'done' : ''}>2 입력</span>
+              <span className={analysis ? 'done' : ''}>3 분석</span>
+              <span className={evaluation ? 'done' : ''}>4 IPS 평가</span>
+              <span className={followupComplete ? 'done' : ''}>5 검증/저장</span>
             </div>
           )}
         </header>
 
         <section
-          className="mx-auto w-full max-w-6xl rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+          className="current-context-panel mx-auto w-full max-w-6xl"
           hidden={activeView !== 'workbench'}
         >
-          <div className="grid gap-4 xl:grid-cols-[1fr_1.3fr]">
-            <div className="space-y-3">
+          <div className="context-panel-header">
+            <div>
               <div className="flex items-center gap-2">
                 <FolderOpen className="h-5 w-5 text-blue-700" />
-                <h3 className="text-lg font-semibold text-slate-950">저장된 포트폴리오</h3>
+                <h3 className="text-lg font-semibold text-slate-950">현재 작업 대상</h3>
               </div>
+              <p className="mt-1 text-sm text-slate-500">최근 상태를 기준으로 점검하고, 필요할 때만 새 포트폴리오나 스냅샷을 만듭니다.</p>
+            </div>
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              {activePortfolio?.latest_snapshot
+                ? `최근 저장: ${activePortfolio.latest_snapshot.name} · ${shortDate(activePortfolio.latest_snapshot.created_at)}`
+                : '아직 저장된 스냅샷이 없습니다.'}
+            </div>
+          </div>
+          <div className="context-panel-grid">
+            <div className="context-panel-fields">
+              <select
+                className="table-input"
+                value={selectedPortfolioId ?? ''}
+                onChange={(event) => setSelectedPortfolioId(event.target.value ? Number(event.target.value) : null)}
+              >
+                <option value="">포트폴리오 선택</option>
+                {savedPortfolios.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
               <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
                 <input
                   className="table-input"
@@ -941,27 +966,10 @@ export function App() {
                   만들기
                 </button>
               </div>
-              <select
-                className="table-input"
-                value={selectedPortfolioId ?? ''}
-                onChange={(event) => setSelectedPortfolioId(event.target.value ? Number(event.target.value) : null)}
-              >
-                <option value="">포트폴리오 선택</option>
-                {savedPortfolios.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-              <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                {activePortfolio?.latest_snapshot
-                  ? `최근 저장: ${activePortfolio.latest_snapshot.name} · ${shortDate(activePortfolio.latest_snapshot.created_at)}`
-                  : '아직 저장된 스냅샷이 없습니다.'}
-              </div>
               <ErrorLine error={createPortfolioMutation.error} />
             </div>
 
-            <div className="space-y-3">
+            <div className="context-panel-snapshots">
               <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
                 <input
                   className="table-input"
@@ -979,7 +987,7 @@ export function App() {
                   현재 상태 저장
                 </button>
               </div>
-              <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+              <div className="snapshot-list-compact">
                 {savedSnapshots.map((snapshot) => (
                     <div
                       key={snapshot.id}
@@ -1142,10 +1150,10 @@ export function App() {
                 <div>
                   <h3 className="flex items-center gap-2 text-xl font-semibold text-slate-950">
                     <Edit3 className="h-5 w-5 text-blue-700" />
-                    포트폴리오 붙여넣기
+                    포트폴리오 입력/수정
                   </h3>
                   <p className="mt-2 text-sm text-slate-500">
-                    티커와 비중만 한 줄씩 입력하세요. 그룹은 오른쪽 표에서 선택합니다.
+                    기존 상태를 다듬거나 티커와 비중을 한 줄씩 붙여넣습니다. 그룹은 오른쪽에서 바로 보정합니다.
                   </p>
                 </div>
                 <button
@@ -1193,9 +1201,9 @@ export function App() {
                 <div>
                   <h3 className="flex items-center gap-2 text-xl font-semibold text-slate-950">
                     <Database className="h-5 w-5 text-blue-700" />
-                    자동 인식 내용
+                    인식된 포지션
                   </h3>
-                  <p className="mt-2 text-sm text-slate-500">붙여넣기는 티커와 비중만 받고, IPS 그룹은 여기서 선택합니다.</p>
+                  <p className="mt-2 text-sm text-slate-500">이번 점검에 쓸 포지션과 IPS 그룹을 확인합니다.</p>
                 </div>
                 <div className="grid grid-cols-3 gap-3 text-right">
                   <SummaryStat label="유효 행" value={`${validRows.length}개`} />
@@ -1258,8 +1266,8 @@ export function App() {
           <section className="relative overflow-hidden rounded-xl bg-blue-800 p-6 shadow-lg">
             <div className="relative z-10 flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
               <div className="text-white">
-                <h3 className="text-2xl font-semibold">분석에 사용할 포트폴리오 확정</h3>
-                <p className="mt-2 text-sm text-blue-100">이 입력값으로 데이터 조회와 평가 워크플로우를 시작합니다.</p>
+                <h3 className="text-2xl font-semibold">이번 점검 입력 확정</h3>
+                <p className="mt-2 text-sm text-blue-100">확정된 입력을 기준으로 분석과 IPS 평가 루틴을 이어갑니다.</p>
               </div>
               <button
                 type="button"
@@ -1268,7 +1276,7 @@ export function App() {
                 onClick={() => portfolioMutation.mutate(validRows)}
               >
                 {portfolioMutation.isPending ? <Loader2 className="spin h-5 w-5" /> : <CheckCircle2 className="h-5 w-5" />}
-                이 포트폴리오 사용
+                입력 확정
               </button>
             </div>
           </section>
@@ -1285,10 +1293,10 @@ export function App() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <div className="flex items-center gap-3">
-                  <div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-100 text-sm font-bold text-violet-800">2</div>
+                  <div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-100 text-sm font-bold text-violet-800">3</div>
                   <h3 className="text-xl font-semibold text-slate-950">데이터 조회 & 보강</h3>
                 </div>
-                <p className="mt-2 text-sm text-slate-500">가격 데이터를 조회하고 포트폴리오/벤치마크/자산별 지표를 계산합니다. 이후 DCA와 투자 논리를 보정합니다.</p>
+                <p className="mt-2 text-sm text-slate-500">기본 루틴값으로 지표를 갱신합니다. 기간, RF, 벤치마크는 필요할 때만 조정합니다.</p>
               </div>
               <div className="run-controls analysis-controls">
                 <label className="control-field">
@@ -1417,10 +1425,10 @@ export function App() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <div className="flex items-center gap-3">
-                      <div className="grid h-8 w-8 place-items-center rounded-lg bg-cyan-100 text-sm font-bold text-cyan-900">3</div>
+                      <div className="grid h-8 w-8 place-items-center rounded-lg bg-cyan-100 text-sm font-bold text-cyan-900">4</div>
                       <h3 className="text-xl font-semibold text-slate-950">평가 & 실행 계획 제안</h3>
                     </div>
-                    <p className="mt-2 text-sm text-slate-500">IPS 기준으로 실행 후보, 위험 초과, DCA 조정 신호를 확인합니다.</p>
+                    <p className="mt-2 text-sm text-slate-500">기본 임계값으로 실행 후보와 보류 사유를 먼저 확인합니다.</p>
                   </div>
                   <div className="run-controls evaluation-controls">
                     <label className="control-field compact">
@@ -1462,14 +1470,6 @@ export function App() {
                   </div>
                 )}
                 {evaluation && (
-                  <EvaluationCharts
-                    actionData={actionChartData}
-                    efficiencyRiskData={efficiencyRiskData}
-                    groupAllocationData={groupAllocationData}
-                    riskBudgetData={riskBudgetData}
-                  />
-                )}
-                {evaluation && (
                   <div className="mt-5">
                     <div className="inline-flex flex-wrap rounded-lg border border-slate-200 bg-slate-50 p-1">
                       {[
@@ -1503,6 +1503,14 @@ export function App() {
                     )}
                   </div>
                 )}
+                {evaluation && (
+                  <EvaluationCharts
+                    actionData={actionChartData}
+                    efficiencyRiskData={efficiencyRiskData}
+                    groupAllocationData={groupAllocationData}
+                    riskBudgetData={riskBudgetData}
+                  />
+                )}
                 {!evaluation && (
                   <div className="mt-4">
                     <DataTable data={[]} columns={proposalColumns} emptyLabel="평가 결과가 아직 없습니다." />
@@ -1511,154 +1519,182 @@ export function App() {
               </section>
 
               <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <div className="flex items-center gap-3">
-                      <div className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-100 text-sm font-bold text-emerald-900">4</div>
-                      <h3 className="text-xl font-semibold text-slate-950">Counterfactual 비교</h3>
+                      <div className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-100 text-sm font-bold text-emerald-900">5</div>
+                      <h3 className="text-xl font-semibold text-slate-950">후속 검증</h3>
                     </div>
-                    <p className="mt-2 text-sm text-slate-500">현재 평가와 preset 정책 적용 결과를 IPS 변화량 중심으로 비교합니다.</p>
-                    <p className="mt-2 text-sm font-semibold text-slate-600">{selectedCounterfactualOption.description}</p>
+                    <p className="mt-2 text-sm text-slate-500">
+                      IPS 평가가 끝난 뒤 정책 대안과 월간 검증으로 판단의 반례를 확인합니다.
+                    </p>
                   </div>
-                  <div className="run-controls evaluation-controls">
-                    <label className="control-field wide">
-                      <span>대안 정책</span>
-                      <select
-                        className="table-input"
-                        value={counterfactualScenario}
-                        onChange={(event) => setCounterfactualScenario(event.target.value as CounterfactualScenario)}
-                      >
-                        {counterfactualScenarioOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
-                      disabled={!evaluation || rowsDirty || counterfactualMutation.isPending}
-                      onClick={runCurrentCounterfactual}
-                    >
-                      {counterfactualMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <LineChart className="h-4 w-4" />}
-                      정책 비교
-                    </button>
-                  </div>
+                  {!evaluation && (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600">
+                      IPS 평가 후 실행 가능
+                    </div>
+                  )}
                 </div>
-                <ErrorLine error={counterfactualMutation.error} />
-                <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
-                  <strong className="block font-bold">먼저 볼 것</strong>
-                  <span className="mt-1 block">코어/위성 비중 변화, 목표 갭 변화, 액션 변화, 경고 순서로 봅니다. 기대수익률 비교가 아니라 IPS 정책 차이 확인입니다.</span>
-                </div>
-                {counterfactual && (
-                  <>
-                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <MetricCard label="코어 변화" value={(counterfactual.deltas.groups.core?.delta_pct ?? 0) / 100} />
-                      <MetricCard label="위성 변화" value={(counterfactual.deltas.groups.satellite?.delta_pct ?? 0) / 100} />
-                      <MetricCard label="액션 변화" value={counterfactual.action_changes.length} format="number" />
-                      <MetricCard label="경고" value={counterfactual.warnings.length} format="number" />
-                    </div>
-                    <div className="mt-5 grid gap-3 lg:grid-cols-2">
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                        <h4 className="text-sm font-bold text-slate-800">결과 요약</h4>
-                        <ul className="mt-3 space-y-2 text-sm text-slate-600">
-                          {[...counterfactualReadout, ...counterfactual.interpretation].map((line) => (
-                            <li key={line}>{line}</li>
-                          ))}
-                        </ul>
-                      </div>
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                        <h4 className="text-sm font-bold text-slate-800">경고</h4>
-                        <ul className="mt-3 space-y-2 text-sm text-slate-600">
-                          {(counterfactual.warnings.length ? counterfactual.warnings : ['데이터 품질/투자 논리 경고가 없습니다.']).map((line) => (
-                            <li key={line}>{line}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                    <div className="mt-6">
-                      <h4 className="mb-3 text-sm font-bold text-slate-700">비중·위험 변화</h4>
-                      <p className="mb-3 text-sm text-slate-500">양수는 대안 정책 적용 후 늘어난 값, 음수는 줄어든 값입니다.</p>
-                      <DataTable data={counterfactual.deltas.assets} columns={counterfactualDeltaColumns} emptyLabel="변화량이 없습니다." />
-                    </div>
-                    <div className="mt-6">
-                      <h4 className="mb-3 text-sm font-bold text-slate-700">액션 변화</h4>
-                      <DataTable data={counterfactual.action_changes} columns={actionChangeColumns} emptyLabel="액션 변화가 없습니다." />
-                    </div>
-                  </>
-                )}
-              </section>
 
-              <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div>
-                    <div className="flex items-center gap-3">
-                      <div className="grid h-8 w-8 place-items-center rounded-lg bg-amber-100 text-sm font-bold text-amber-900">5</div>
-                      <h3 className="text-xl font-semibold text-slate-950">제한된 IPS 백테스트</h3>
+                {!evaluation ? (
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                      <strong className="block font-bold text-slate-800">Counterfactual 비교</strong>
+                      <span className="mt-1 block">평가 결과를 기준으로 코어/위성 비중과 액션 변화만 비교합니다.</span>
                     </div>
-                    <p className="mt-2 text-sm text-slate-500">월간 점검 기준으로 정책별 IPS 위반, 위성 초과, 위험기여도 초과, 조정 빈도를 비교합니다.</p>
+                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                      <strong className="block font-bold text-slate-800">제한된 IPS 백테스트</strong>
+                      <span className="mt-1 block">IPS 위반, 위성 초과, RC 초과, 조정 빈도를 우선 확인합니다.</span>
+                    </div>
                   </div>
-                  <div className="run-controls analysis-controls">
-                    <div className="grid min-w-[260px] gap-2">
-                      <span className="text-xs font-bold text-slate-500">비교 정책</span>
-                      <div className="flex flex-wrap gap-2">
-                        {backtestStrategyOptions.map((option) => (
-                          <label key={option.value} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700" title={option.description}>
-                            <input
-                              className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
-                              type="checkbox"
-                              checked={backtestStrategies.includes(option.value)}
-                              onChange={() => toggleBacktestStrategy(option.value)}
-                            />
-                            {option.label}
+                ) : (
+                  <div className="mt-5 grid gap-4">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <h4 className="text-base font-bold text-slate-950">Counterfactual 비교</h4>
+                          <p className="mt-1 text-sm text-slate-500">현재 평가와 preset 정책 적용 결과를 IPS 변화량 중심으로 비교합니다.</p>
+                          <p className="mt-2 text-sm font-semibold text-slate-600">{selectedCounterfactualOption.description}</p>
+                        </div>
+                        <div className="run-controls evaluation-controls">
+                          <label className="control-field wide">
+                            <span>대안 정책</span>
+                            <select
+                              className="table-input"
+                              value={counterfactualScenario}
+                              onChange={(event) => setCounterfactualScenario(event.target.value as CounterfactualScenario)}
+                            >
+                              {counterfactualScenarioOptions.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
                           </label>
-                        ))}
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                            disabled={rowsDirty || counterfactualMutation.isPending}
+                            onClick={runCurrentCounterfactual}
+                          >
+                            {counterfactualMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <LineChart className="h-4 w-4" />}
+                            정책 비교
+                          </button>
+                        </div>
                       </div>
+                      <ErrorLine error={counterfactualMutation.error} />
+                      <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
+                        <strong className="block font-bold">먼저 볼 것</strong>
+                        <span className="mt-1 block">코어/위성 비중 변화, 목표 갭 변화, 액션 변화, 경고 순서로 봅니다. 기대수익률 비교가 아니라 IPS 정책 차이 확인입니다.</span>
+                      </div>
+                      {counterfactual && (
+                        <>
+                          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                            <MetricCard label="코어 변화" value={(counterfactual.deltas.groups.core?.delta_pct ?? 0) / 100} />
+                            <MetricCard label="위성 변화" value={(counterfactual.deltas.groups.satellite?.delta_pct ?? 0) / 100} />
+                            <MetricCard label="액션 변화" value={counterfactual.action_changes.length} format="number" />
+                            <MetricCard label="경고" value={counterfactual.warnings.length} format="number" />
+                          </div>
+                          <div className="mt-5 grid gap-3 lg:grid-cols-2">
+                            <div className="rounded-lg border border-slate-200 bg-white p-4">
+                              <h4 className="text-sm font-bold text-slate-800">결과 요약</h4>
+                              <ul className="mt-3 space-y-2 text-sm text-slate-600">
+                                {[...counterfactualReadout, ...counterfactual.interpretation].map((line) => (
+                                  <li key={line}>{line}</li>
+                                ))}
+                              </ul>
+                            </div>
+                            <div className="rounded-lg border border-slate-200 bg-white p-4">
+                              <h4 className="text-sm font-bold text-slate-800">경고</h4>
+                              <ul className="mt-3 space-y-2 text-sm text-slate-600">
+                                {(counterfactual.warnings.length ? counterfactual.warnings : ['데이터 품질/투자 논리 경고가 없습니다.']).map((line) => (
+                                  <li key={line}>{line}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
+                          <div className="mt-6">
+                            <h4 className="mb-3 text-sm font-bold text-slate-700">비중·위험 변화</h4>
+                            <p className="mb-3 text-sm text-slate-500">양수는 대안 정책 적용 후 늘어난 값, 음수는 줄어든 값입니다.</p>
+                            <DataTable data={counterfactual.deltas.assets} columns={counterfactualDeltaColumns} emptyLabel="변화량이 없습니다." />
+                          </div>
+                          <div className="mt-6">
+                            <h4 className="mb-3 text-sm font-bold text-slate-700">액션 변화</h4>
+                            <DataTable data={counterfactual.action_changes} columns={actionChangeColumns} emptyLabel="액션 변화가 없습니다." />
+                          </div>
+                        </>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
-                      disabled={!analysis || rowsDirty || backtestStrategies.length === 0 || backtestMutation.isPending}
-                      onClick={runCurrentBacktest}
-                    >
-                      {backtestMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Play className="h-4 w-4" />}
-                      월간 검증
-                    </button>
+
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <h4 className="text-base font-bold text-slate-950">제한된 IPS 백테스트</h4>
+                          <p className="mt-1 text-sm text-slate-500">월간 점검 기준으로 정책별 IPS 위반, 위성 초과, 위험기여도 초과, 조정 빈도를 비교합니다.</p>
+                        </div>
+                        <div className="run-controls analysis-controls">
+                          <div className="grid min-w-[260px] gap-2">
+                            <span className="text-xs font-bold text-slate-500">비교 정책</span>
+                            <div className="flex flex-wrap gap-2">
+                              {backtestStrategyOptions.map((option) => (
+                                <label key={option.value} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700" title={option.description}>
+                                  <input
+                                    className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
+                                    type="checkbox"
+                                    checked={backtestStrategies.includes(option.value)}
+                                    onChange={() => toggleBacktestStrategy(option.value)}
+                                  />
+                                  {option.label}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                            disabled={rowsDirty || backtestStrategies.length === 0 || backtestMutation.isPending}
+                            onClick={runCurrentBacktest}
+                          >
+                            {backtestMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Play className="h-4 w-4" />}
+                            월간 검증
+                          </button>
+                        </div>
+                      </div>
+                      <ErrorLine error={backtestMutation.error} />
+                      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                          <strong className="block font-bold">먼저 볼 것</strong>
+                          <span className="mt-1 block">IPS 위반, 위성 초과, RC 초과, 조정 빈도를 먼저 보고 성과 지표는 나중에 봅니다.</span>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                          <strong className="block font-bold text-slate-800">선택한 정책</strong>
+                          <span className="mt-1 block">
+                            {selectedBacktestOptions.length
+                              ? selectedBacktestOptions.map((option) => `${option.label}: ${option.description}`).join(' / ')
+                              : '비교할 정책을 1개 이상 선택하세요.'}
+                          </span>
+                        </div>
+                      </div>
+                      {backtest && (
+                        <>
+                          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                            <MetricCard label="비교 정책" value={backtest.strategy_summaries.length} format="number" />
+                            <MetricCard label="최소 IPS 위반" value={Math.min(...backtest.strategy_summaries.map((row) => row.ips_violation_count))} format="number" />
+                            <MetricCard label="최소 위성 초과" value={Math.min(...backtest.strategy_summaries.map((row) => row.satellite_over_periods))} format="number" />
+                            <MetricCard label="최소 RC 초과" value={Math.min(...backtest.strategy_summaries.map((row) => row.risk_contribution_over_count))} format="number" />
+                          </div>
+                          <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+                            {backtestReadout.map((line) => (
+                              <span key={line} className="block">{line}</span>
+                            ))}
+                          </div>
+                          <div className="mt-6">
+                            <DataTable data={backtest.strategy_summaries} columns={backtestColumns} emptyLabel="백테스트 결과가 없습니다." />
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <ErrorLine error={backtestMutation.error} />
-                <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-                    <strong className="block font-bold">먼저 볼 것</strong>
-                    <span className="mt-1 block">IPS 위반, 위성 초과, RC 초과, 조정 빈도를 먼저 보고 성과 지표는 나중에 봅니다.</span>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                    <strong className="block font-bold text-slate-800">선택한 정책</strong>
-                    <span className="mt-1 block">
-                      {selectedBacktestOptions.length
-                        ? selectedBacktestOptions.map((option) => `${option.label}: ${option.description}`).join(' / ')
-                        : '비교할 정책을 1개 이상 선택하세요.'}
-                    </span>
-                  </div>
-                </div>
-                {backtest && (
-                  <>
-                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <MetricCard label="비교 정책" value={backtest.strategy_summaries.length} format="number" />
-                      <MetricCard label="최소 IPS 위반" value={Math.min(...backtest.strategy_summaries.map((row) => row.ips_violation_count))} format="number" />
-                      <MetricCard label="최소 위성 초과" value={Math.min(...backtest.strategy_summaries.map((row) => row.satellite_over_periods))} format="number" />
-                      <MetricCard label="최소 RC 초과" value={Math.min(...backtest.strategy_summaries.map((row) => row.risk_contribution_over_count))} format="number" />
-                    </div>
-                    <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
-                      {backtestReadout.map((line) => (
-                        <span key={line} className="block">{line}</span>
-                      ))}
-                    </div>
-                    <div className="mt-6">
-                      <DataTable data={backtest.strategy_summaries} columns={backtestColumns} emptyLabel="백테스트 결과가 없습니다." />
-                    </div>
-                  </>
                 )}
               </section>
             </>
