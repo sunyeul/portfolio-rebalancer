@@ -83,6 +83,8 @@ REASON_TEXT = {
     "prefer_dca_over_sell": "매도보다 정기매수 조정을 우선합니다.",
     "core_priority_context": "현재 판단 모드에서는 코어 보강을 우선합니다.",
     "satellite_downgraded_for_core_priority": "코어가 부족한 하락장에서는 위성 증액 전 보유 가능성을 먼저 점검합니다.",
+    "correction_core_reinforcement": "하락장에서는 목표 비중보다 부족한 코어를 정기매수로 우선 보강합니다.",
+    "satellite_correction_requires_review": "하락장 위성 추가매수 전에는 투자 논리와 장기 보유 가능성을 먼저 점검합니다.",
     "sharp_drop_buy_caution": "단기 급락은 단독 매수 사유가 아닙니다.",
     "unclassified": "분류되지 않은 판단 조합입니다.",
 }
@@ -241,6 +243,37 @@ def apply_contextual_ips_overlay(
     if context == "sharp_drop_review" and gap > 0:
         risk_notes.append("하루 급락, 프리마켓 급락, 평단 방어는 단독 매수 사유가 아닙니다.")
         risk_notes.append("FOMO 가능성을 점검하고 정기매수 증액으로 대응 가능한지 먼저 확인합니다.")
+
+    is_correction_core_reinforcement = (
+        "correction_core_reinforcement" in action.get("reason_codes", [])
+    )
+
+    if (
+        correction_context
+        and core_under_target
+        and group == "core"
+        and action["ips_action"] == "increase_dca"
+        and is_correction_core_reinforcement
+    ):
+        return _with_action_metadata(
+            action,
+            "increase_dca",
+            ips_config,
+            context,
+            reason_codes=[*action["reason_codes"], "core_priority_context"],
+            decision_summary="하락장 코어 정기매수 증액 후보",
+            decision_reasons=[
+                f"현재 판단 모드가 {context}입니다.",
+                "코어 비중이 IPS 목표보다 낮습니다.",
+                "최근 효율 점수는 낮지만 하락장 코어 보강 원칙을 우선합니다.",
+                "즉시매수가 아니라 다음 정기매수 배분 조정으로 처리합니다.",
+            ],
+            risk_notes=risk_notes
+            or [
+                "최근 효율 점수는 낮지만, 하락장 코어 보강 원칙에 따라 정기매수 증액 후보로 분류했습니다."
+            ],
+            next_step="다음 정기매수에서 부족한 코어 자산의 배분을 늘립니다.",
+        )
 
     if correction_context and core_under_target and group == "core" and action["ips_action"] == "increase_dca":
         return _with_action_metadata(
@@ -433,6 +466,54 @@ def classify_ips_action(
         )
 
     if not risk_over and not efficiency_good:
+        correction_context = decision_context in {"market_correction", "sharp_drop_review"}
+        if (
+            correction_context
+            and group == "core"
+            and gap > 0
+            and dca_enabled
+            and thesis_status != "broken"
+        ):
+            action = _action_result(
+                "increase_dca",
+                [
+                    "risk_ok",
+                    "efficiency_low",
+                    "positive_gap",
+                    "correction_core_reinforcement",
+                    *data_reasons,
+                ],
+                ips_config,
+                decision_context,
+                decision_summary="하락장 코어 정기매수 증액 후보",
+                risk_notes=[
+                    "최근 효율 점수는 낮지만, 하락장 코어 보강 원칙에 따라 정기매수 증액 후보로 분류했습니다."
+                ],
+                next_step="다음 정기매수에서 부족한 코어 자산의 배분을 늘립니다.",
+            )
+            return apply_contextual_ips_overlay(
+                action, row, allocation_status, decision_context, ips_config
+            )
+
+        if correction_context and group == "satellite" and gap > 0:
+            action = _action_result(
+                "review_thesis",
+                [
+                    "risk_ok",
+                    "efficiency_low",
+                    "positive_gap",
+                    "satellite_correction_requires_review",
+                    *data_reasons,
+                ],
+                ips_config,
+                decision_context,
+                decision_summary="하락장 위성 추가매수 전 점검",
+                next_step="위성 자산의 투자 논리와 장기 보유 가능성을 확인한 뒤 다음 정기매수 반영 여부를 결정합니다.",
+            )
+            return apply_contextual_ips_overlay(
+                action, row, allocation_status, decision_context, ips_config
+            )
+
         action = _action_result(
             "review_thesis",
             ["risk_ok", "efficiency_low", *data_reasons],

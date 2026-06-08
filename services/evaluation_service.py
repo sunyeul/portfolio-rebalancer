@@ -149,7 +149,14 @@ def _apply_ips_execution_gate(
         if final_execute:
             gated.at[idx, "실행"] = True
             gated.at[idx, "제안조정%"] = row["참고조정%"]
-            gated.at[idx, "판단사유"] = _action_reason(gated.loc[idx])
+            reason_codes = action.get("reason_codes", []) if action is not None else []
+            if "correction_core_reinforcement" in reason_codes:
+                gated.at[idx, "판단사유"] = action.get(
+                    "decision_summary",
+                    "하락장 코어 정기매수 증액 후보",
+                )
+            else:
+                gated.at[idx, "판단사유"] = _action_reason(gated.loc[idx])
         else:
             gated.at[idx, "실행"] = False
             gated.at[idx, "제안조정%"] = 0.0

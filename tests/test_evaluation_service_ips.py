@@ -108,6 +108,41 @@ def test_market_correction_context_downgrades_satellite_buy_and_blocks_final_tra
     assert ufo_proposal["판단사유"] == "투자 논리 점검"
 
 
+def test_market_correction_context_increases_underweight_core_even_with_low_efficiency():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "UFO"],
+            "가중치": [0.6, 0.4],
+            "위험기여도": [0.2, 0.8],
+            "E": [0.2, 0.9],
+            "return_total": [-0.1, 0.2],
+            "group": ["core", "satellite"],
+            "dca_enabled": [True, True],
+            "thesis_status": ["intact", "intact"],
+            "missing_ratio": [0.0, 0.0],
+            "observation_count": [120, 120],
+        }
+    ).set_index("ticker")
+
+    result = run_evaluation(
+        metrics_df,
+        None,
+        rc_over_thresh_pct=100.0,
+        e_thresh=0.5,
+        decision_context="market_correction",
+    )
+
+    voo_action = result.ips_action_df.loc[result.ips_action_df["ticker"] == "VOO"].iloc[0]
+    voo_proposal = result.proposal_df.loc[result.proposal_df["ticker"] == "VOO"].iloc[0]
+    assert voo_action["ips_action"] == "increase_dca"
+    assert voo_action["decision_summary"] == "하락장 코어 정기매수 증액 후보"
+    assert "correction_core_reinforcement" in voo_action["reason_codes"]
+    assert bool(voo_proposal["수치후보"]) is True
+    assert bool(voo_proposal["실행"]) is True
+    assert voo_proposal["제안조정%"] > 0
+    assert voo_proposal["판단사유"] == "하락장 코어 정기매수 증액 후보"
+
+
 def test_build_ips_target_weights_keeps_cash_and_allocates_remaining_by_ips_targets():
     metrics_df = pd.DataFrame(
         {

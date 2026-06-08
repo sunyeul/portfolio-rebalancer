@@ -150,6 +150,49 @@ def test_market_correction_keeps_core_increase_with_core_priority_summary():
     assert any("코어" in reason for reason in result["decision_reasons"])
 
 
+def test_market_correction_allows_core_increase_when_efficiency_is_low():
+    result = classify_ips_action(
+        {
+            "risk_over": False,
+            "efficiency_good": False,
+            "갭%": 3.0,
+            "실행": True,
+            "group": "core",
+            "dca_enabled": True,
+            "thesis_status": "intact",
+        },
+        {"core_status": "under_target", "satellite_status": "in_range"},
+        _ips_config(),
+        decision_context="market_correction",
+    )
+
+    assert result["ips_action"] == "increase_dca"
+    assert result["execution_type"] == "dca_adjustment"
+    assert result["decision_summary"] == "하락장 코어 정기매수 증액 후보"
+    assert "correction_core_reinforcement" in result["reason_codes"]
+    assert "efficiency_low" in result["reason_codes"]
+    assert any("최근 효율 점수는 낮지만" in note for note in result["risk_notes"])
+
+
+def test_regular_review_keeps_low_efficiency_core_in_review():
+    result = classify_ips_action(
+        {
+            "risk_over": False,
+            "efficiency_good": False,
+            "갭%": 3.0,
+            "실행": True,
+            "group": "core",
+            "dca_enabled": True,
+            "thesis_status": "intact",
+        },
+        {"core_status": "under_target", "satellite_status": "in_range"},
+        _ips_config(),
+    )
+
+    assert result["ips_action"] == "review_thesis"
+    assert "correction_core_reinforcement" not in result["reason_codes"]
+
+
 def test_market_correction_downgrades_satellite_increase_when_core_is_under_target():
     result = classify_ips_action(
         {
@@ -170,6 +213,27 @@ def test_market_correction_downgrades_satellite_increase_when_core_is_under_targ
     assert result["execution_type"] == "review_required"
     assert result["decision_summary"] == "하락장 위성 증액 전 점검"
     assert "satellite_downgraded_for_core_priority" in result["reason_codes"]
+
+
+def test_market_correction_satellite_low_efficiency_requires_review():
+    result = classify_ips_action(
+        {
+            "risk_over": False,
+            "efficiency_good": False,
+            "갭%": 3.0,
+            "실행": True,
+            "group": "satellite",
+            "dca_enabled": True,
+            "thesis_status": "intact",
+        },
+        {"core_status": "under_target", "satellite_status": "in_range"},
+        _ips_config(),
+        decision_context="market_correction",
+    )
+
+    assert result["ips_action"] == "review_thesis"
+    assert result["decision_summary"] == "하락장 위성 추가매수 전 점검"
+    assert "satellite_correction_requires_review" in result["reason_codes"]
 
 
 def test_sharp_drop_review_adds_buy_caution_without_immediate_buy_action():
