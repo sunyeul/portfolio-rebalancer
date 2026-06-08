@@ -152,11 +152,11 @@ def test_current_state_auto_save_does_not_create_snapshot(monkeypatch, tmp_path)
     assert snapshot_response.json()["snapshot"]["position_count"] == 2
 
 
-def test_current_state_serializes_legacy_evaluation_defaults(monkeypatch, tmp_path):
+def test_current_state_serializes_missing_evaluation_defaults(monkeypatch, tmp_path):
     client = _client_with_db(monkeypatch, tmp_path)
     portfolio_id = client.post(
         "/api/v1/portfolios",
-        json={"name": "레거시 평가 계좌"},
+        json={"name": "평가 기본값 계좌"},
     ).json()["portfolio"]["id"]
     persist_current_state(
         portfolio_id,
@@ -186,7 +186,9 @@ def test_current_state_serializes_legacy_evaluation_defaults(monkeypatch, tmp_pa
                     "dca_enabled": True,
                     "thesis_status": "intact",
                     "risk_over": False,
-                    "efficiency_good": True,
+                    "efficiency_warning": False,
+                    "IPS적합도": 82.0,
+                    "IPS등급": "high",
                     "히스테리시스제외": None,
                     "최소거래미만": None,
                     "실행": None,
@@ -443,7 +445,9 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
                 "dca_enabled": [True],
                 "thesis_status": ["intact"],
                 "risk_over": [False],
-                "efficiency_good": [True],
+                "efficiency_warning": [False],
+                "IPS적합도": [82.0],
+                "IPS등급": ["high"],
                 "히스테리시스제외": [True],
                 "최소거래미만": [True],
                 "실행": [False],

@@ -274,6 +274,9 @@ def _proposal_frame(rows: list[dict] | None) -> pd.DataFrame:
         "히스테리시스제외": False,
         "최소거래미만": False,
         "실행": False,
+        "IPS적합도": None,
+        "IPS등급": None,
+        "efficiency_warning": False,
     }
     for column, default in defaults.items():
         if column not in proposal_df.columns:
@@ -286,7 +289,7 @@ def _proposal_frame(rows: list[dict] | None) -> pd.DataFrame:
     proposal_df["제안조정%"] = proposal_df["제안조정%"].fillna(0.0)
     proposal_df["참고조정%"] = proposal_df["참고조정%"].fillna(proposal_df["제안조정%"])
     proposal_df["판단사유"] = proposal_df["판단사유"].fillna("")
-    for column in ["히스테리시스제외", "최소거래미만", "수치후보", "실행"]:
+    for column in ["히스테리시스제외", "최소거래미만", "수치후보", "실행", "efficiency_warning"]:
         proposal_df[column] = proposal_df[column].where(proposal_df[column].notna(), False).astype(bool)
 
     return proposal_df

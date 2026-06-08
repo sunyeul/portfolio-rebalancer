@@ -571,7 +571,9 @@ export function App() {
       { accessorKey: 'current_weight_pct', header: '현재', cell: ({ row }) => pct(row.original.current_weight_pct, false) },
       { accessorKey: 'target_weight_pct', header: '목표', cell: ({ row }) => pct(row.original.target_weight_pct, false) },
       { accessorKey: 'gap_pct', header: '갭', cell: ({ row }) => pct(row.original.gap_pct, false) },
-      { accessorKey: 'target_preference_score', header: '목표점수', cell: ({ row }) => num(row.original.target_preference_score) },
+      { accessorKey: 'ips_fit_score', header: 'IPS 적합도', cell: ({ row }) => num(row.original.ips_fit_score) },
+      { accessorKey: 'ips_fit_band', header: 'IPS 등급' },
+      nullableNumberColumn('efficiency_score', 'E', (row) => row.efficiency_score, num),
       { accessorKey: 'suggested_trade_pct', header: '최종조정', cell: ({ row }) => pct(row.original.suggested_trade_pct, false) },
       { accessorKey: 'should_execute', header: '최종실행', cell: ({ row }) => (row.original.should_execute ? '실행' : '보류') },
       { accessorKey: 'action_reason', header: '사유' }
@@ -582,6 +584,8 @@ export function App() {
   const actionColumns = useMemo<ColumnDef<Record<string, unknown>>[]>(
     () => [
       { accessorKey: 'ticker', header: '티커' },
+      { accessorKey: 'IPS적합도', header: 'IPS 적합도' },
+      { accessorKey: 'IPS등급', header: 'IPS 등급' },
       { accessorKey: 'action_label', header: '액션' },
       { accessorKey: 'decision_summary', header: '판단 요약' },
       { accessorKey: 'next_step', header: '다음 행동' }
