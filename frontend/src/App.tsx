@@ -50,6 +50,7 @@ import {
   type IpsRule,
   type MetricRow,
   type ProposalRow,
+  type SnapshotLoadResponse,
   type SnapshotSummary,
   type TargetAllocation,
   createPortfolio,
@@ -319,6 +320,22 @@ export function App() {
     }
   }
 
+  async function restoreSnapshotToWorkbench(data: SnapshotLoadResponse) {
+    const nextRows = rowsFromAssets(data.portfolio.assets);
+    setRows(nextRows);
+    setText(nextRows.map(rowInputLine).join('\n'));
+    setAppliedRowsSignature(rowsSignature(nextRows));
+    setPortfolio(data.portfolio.assets);
+    setAnalysis(data.analysis);
+    setEvaluation(data.evaluation);
+    setCounterfactual(null);
+    setBacktest(null);
+    setSelectedPortfolioId(data.snapshot.portfolio_id);
+    await queryClient.invalidateQueries({
+      queryKey: ['portfolio-current-state', data.snapshot.portfolio_id]
+    });
+  }
+
   const portfolioMutation = useMutation({
     mutationFn: submitPortfolio,
     onSuccess: async (data) => {
@@ -440,7 +457,7 @@ export function App() {
       snapshotId: number;
       payload: { name?: string; note?: string; rows?: PortfolioRowInput[] };
     }) => updateSnapshot(snapshotId, payload),
-    onSuccess: async () => {
+    onSuccess: async (_data, variables) => {
       setEditingSnapshotId(null);
       setEditingSnapshotName('');
       setEditingSnapshotNote('');
@@ -449,6 +466,10 @@ export function App() {
         queryClient.invalidateQueries({ queryKey: ['portfolios'] }),
         queryClient.invalidateQueries({ queryKey: ['portfolio-snapshots', selectedPortfolioId] })
       ]);
+      if (variables.payload.rows !== undefined) {
+        const snapshot = await loadSnapshot(variables.snapshotId);
+        await restoreSnapshotToWorkbench(snapshot);
+      }
     }
   });
 
@@ -482,17 +503,7 @@ export function App() {
   const loadSnapshotMutation = useMutation({
     mutationFn: loadSnapshot,
     onSuccess: async (data) => {
-      const nextRows = rowsFromAssets(data.portfolio.assets);
-      setRows(nextRows);
-      setText(nextRows.map(rowInputLine).join('\n'));
-      setAppliedRowsSignature(rowsSignature(nextRows));
-      setPortfolio(data.portfolio.assets);
-      setAnalysis(data.analysis);
-      setEvaluation(data.evaluation);
-      setCounterfactual(null);
-      setBacktest(null);
-      setSelectedPortfolioId(data.snapshot.portfolio_id);
-      await queryClient.invalidateQueries({ queryKey: ['portfolio-current-state', data.snapshot.portfolio_id] });
+      await restoreSnapshotToWorkbench(data);
     }
   });
 

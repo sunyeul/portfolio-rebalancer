@@ -330,6 +330,7 @@ def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp
                 {
                     "ticker": "VOO",
                     "allocation": 70,
+                    "return_total": 12,
                     "group": "satellite",
                     "dca_enabled": False,
                     "thesis_status": "watch",
@@ -352,6 +353,7 @@ def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp
     assert load_response.status_code == 200
     payload = load_response.json()
     assert payload["analysis"] is None
+    assert payload["evaluation"] is None
     assert payload["snapshot"]["position_count"] == 2
     assert payload["portfolio"]["assets"] == [
         {
@@ -366,7 +368,7 @@ def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp
         {
             "ticker": "VOO",
             "allocation": 70.0,
-            "return_total": None,
+            "return_total": 0.12,
             "group": "satellite",
             "dca_enabled": False,
             "thesis_status": "watch",
