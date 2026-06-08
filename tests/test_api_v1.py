@@ -1,3 +1,5 @@
+import math
+
 import pandas as pd
 from fastapi.testclient import TestClient
 
@@ -192,7 +194,10 @@ def test_run_analysis_builds_composite_benchmark(monkeypatch):
     assert "SPY:80,QQQ:20" in result.returns_smooth.columns
     assert result.benchmark_metrics is not None
     assert result.bench_nav is not None
-    assert result.metrics_df.loc["SPY:80,QQQ:20", "가중치"] == 0
+    assert math.isfinite(result.benchmark_metrics["sharpe"])
+    assert math.isfinite(result.metrics_df.loc["VOO", "IR"])
+    assert math.isfinite(result.metrics_df.loc["VOO", "알파"])
+    assert "SPY:80,QQQ:20" not in result.metrics_df.index
 
 
 def test_analysis_error_identifies_tickers_and_date_range(monkeypatch):
@@ -260,7 +265,7 @@ def test_analysis_ignores_all_null_tickers_and_keeps_mixed_exchange_dates(
     assert response.status_code == 200
     payload = response.json()
     assert payload["missing_tickers"] == ["000600.KS"]
-    assert [row["ticker"] for row in payload["metrics"]] == ["005930.KS", "VOO", "SPY"]
+    assert [row["ticker"] for row in payload["metrics"]] == ["005930.KS", "VOO"]
     samsung = payload["metrics"][0]
     assert samsung["data_start"] == "2026-06-01"
     assert samsung["data_end"] == "2026-06-04"

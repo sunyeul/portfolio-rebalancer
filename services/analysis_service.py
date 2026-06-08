@@ -122,7 +122,9 @@ def _add_composite_benchmark(
     weights = benchmark.components.reindex(available)
     weights = weights / weights.sum()
     bench_returns = (returns[available] * weights).sum(axis=1)
-    bench_nav = (1 + bench_returns).cumprod()
+    bench_nav = pd.concat(
+        [pd.Series([1.0], index=prices.index[:1]), (1 + bench_returns).cumprod()]
+    )
     if bench_nav.empty:
         return prices, returns
 
@@ -246,7 +248,7 @@ def run_analysis(
 
     # 자산별 메트릭 계산 (스무딩된 수익률 사용)
     asset_metrics = []
-    for t in prices.columns:
+    for t in priced_assets:
         px = prices[t].dropna()
         nav = price_to_nav(px)
         dr = (
