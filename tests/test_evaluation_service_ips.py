@@ -44,6 +44,68 @@ def test_run_evaluation_returns_ips_outputs_and_uses_ips_signals():
     assert "ips_action" in result.ips_action_df.columns
     assert "risk_over" in result.ips_action_df.columns
     assert "efficiency_good" in result.ips_action_df.columns
+    assert "execution_type" in result.ips_action_df.columns
+    assert "decision_summary" in result.ips_action_df.columns
+    assert "risk_notes" in result.ips_action_df.columns
+
+
+def test_run_evaluation_defaults_to_regular_review_context():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO"],
+            "가중치": [1.0],
+            "위험기여도": [0.5],
+            "E": [0.8],
+            "return_total": [0.1],
+            "group": ["core"],
+            "dca_enabled": [True],
+            "thesis_status": ["intact"],
+        }
+    ).set_index("ticker")
+
+    result = run_evaluation(
+        metrics_df,
+        None,
+        rc_over_thresh_pct=1.0,
+        e_thresh=0.5,
+    )
+
+    action = result.ips_action_df.iloc[0]
+    assert action["decision_context"] == "regular_review"
+    assert result.ips_config_snapshot["decision_context"] == "regular_review"
+
+
+def test_market_correction_context_downgrades_satellite_buy_and_blocks_final_trade():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "UFO", "CASH"],
+            "가중치": [0.7, 0.1, 0.2],
+            "위험기여도": [0.3, 0.1, 0.0],
+            "E": [0.8, 0.8, 0.0],
+            "return_total": [0.1, 0.2, 0.0],
+            "group": ["core", "satellite", "cash"],
+            "dca_enabled": [True, True, False],
+            "thesis_status": ["intact", "intact", "intact"],
+        }
+    ).set_index("ticker")
+
+    result = run_evaluation(
+        metrics_df,
+        None,
+        rc_over_thresh_pct=100.0,
+        e_thresh=0.5,
+        decision_context="market_correction",
+    )
+
+    ufo_action = result.ips_action_df.loc[result.ips_action_df["ticker"] == "UFO"].iloc[0]
+    ufo_proposal = result.proposal_df.loc[result.proposal_df["ticker"] == "UFO"].iloc[0]
+    assert ufo_action["ips_action"] == "review_thesis"
+    assert ufo_action["execution_type"] == "review_required"
+    assert ufo_action["decision_summary"] == "하락장 위성 증액 전 점검"
+    assert bool(ufo_proposal["수치후보"]) is True
+    assert bool(ufo_proposal["실행"]) is False
+    assert ufo_proposal["제안조정%"] == 0.0
+    assert ufo_proposal["판단사유"] == "투자 논리 점검"
 
 
 def test_build_ips_target_weights_keeps_cash_and_allocates_remaining_by_ips_targets():

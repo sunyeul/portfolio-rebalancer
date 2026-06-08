@@ -25,9 +25,10 @@ ACTION_PRIORITY_SEEDS = [
     ("increase_dca", "정기매수 증액 후보", 1),
     ("decrease_dca", "정기매수 감액/중단 후보", 2),
     ("review_thesis", "투자 논리 점검", 3),
-    ("consider_rebalance_sell", "예외적 리밸런싱 매도 검토", 4),
-    ("hold_observe", "유지·관찰", 5),
-    ("block_action", "행동 보류", 6),
+    ("exceptional_buy_review", "예외적 즉시매수 검토", 4),
+    ("consider_rebalance_sell", "예외적 리밸런싱 매도 검토", 5),
+    ("hold_observe", "유지·관찰", 6),
+    ("block_action", "행동 보류", 7),
 ]
 
 IPS_RULE_SEEDS = [

@@ -12,9 +12,10 @@ action_priority:
   increase_dca: 1
   decrease_dca: 2
   review_thesis: 3
-  consider_rebalance_sell: 4
-  hold_observe: 5
-  block_action: 6
+  exceptional_buy_review: 4
+  consider_rebalance_sell: 5
+  hold_observe: 6
+  block_action: 7
 
 rules:
   default_when_uncertain: core

@@ -189,6 +189,7 @@ def run_evaluation(
     rc_over_thresh_pct: float,
     e_thresh: float,
     cov_matrix: pd.DataFrame | None = None,
+    decision_context: str = "regular_review",
 ) -> EvaluationResult:
     """평가 & 실행 계획 제안을 실행합니다.
 
@@ -198,6 +199,7 @@ def run_evaluation(
         rc_over_thresh_pct: RC_Over 임계값 (%)
         e_thresh: 효율 점수 E 임계값
         cov_matrix: 연율화된 공분산 행렬 (None이면 단순 비중 기반 RC_Target 사용)
+        decision_context: IPS 판단 모드
 
     Returns:
         EvaluationResult: 평가 결과
@@ -207,6 +209,7 @@ def run_evaluation(
     """
     mdf = metrics_df.copy()
     ips_config_snapshot = load_ips_config()
+    ips_config_snapshot["decision_context"] = decision_context
     mdf["group"] = (
         mdf.get("group", pd.Series(DEFAULT_GROUP, index=mdf.index))
         .fillna(DEFAULT_GROUP)
@@ -405,6 +408,7 @@ def run_evaluation(
         group_summary_df=group_summary_df,
         allocation_status=allocation_status,
         ips_config=ips_config_snapshot,
+        decision_context=decision_context,
     )
     proposal = _apply_ips_execution_gate(proposal, ips_action_df)
     ips_action_df = classify_ips_actions(
@@ -413,6 +417,7 @@ def run_evaluation(
         group_summary_df=group_summary_df,
         allocation_status=allocation_status,
         ips_config=ips_config_snapshot,
+        decision_context=decision_context,
     )
 
     sell_list = proposal[(proposal["갭%"] < 0) & proposal["실행"]].copy()
