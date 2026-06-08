@@ -271,31 +271,39 @@ def _action_reason(row: pd.Series | dict) -> str:
             return "최소 거래 미만"
         return "보류"
 
-    ips_band = str(row.get("IPS등급", "") or "")
-    if ips_band == "high":
-        reason = "IPS 적합"
-    elif ips_band == "medium":
-        reason = "IPS 조건부 점검"
-    elif ips_band == "low":
-        reason = "IPS 부적합"
-    else:
-        reason = "실행 후보"
-
     risk_over = bool(row.get("risk_over", False))
     efficiency_warning = bool(row.get("efficiency_warning", False))
     gap_pct = float(row.get("갭%", 0) or 0)
+    return_total = row.get("return_total%", row.get("return_total"))
+    signals: list[str] = []
 
-    if risk_over:
-        reason += " · 위험 초과"
-    if efficiency_warning:
-        reason += " · 효율 경고"
     if gap_pct > 0:
-        reason += " · 목표 대비 부족"
+        signals.append("비중 목표 미달")
     elif gap_pct < 0:
-        reason += " · 목표 대비 초과"
+        signals.append("비중 목표 초과")
+    if risk_over:
+        signals.append("위험기여도 초과")
+    if efficiency_warning:
+        signals.append("효율 점수 미달")
+    if return_total is not None and not pd.isna(return_total):
+        return_pct = float(return_total)
+        if "return_total%" not in row:
+            return_pct *= 100
+        if return_pct <= -5:
+            signals.append("수익률 부진")
+        elif return_pct >= 15:
+            signals.append("수익률 양호")
     if bool(row.get("data_quality_low", False)):
-        reason += " · 데이터 신뢰도 낮음"
-    return reason
+        signals.append("데이터 신뢰도 낮음")
+
+    ips_band = str(row.get("IPS등급", "") or "")
+    policy_signal = {
+        "high": "정책 적합",
+        "medium": "정책 조건부",
+        "low": "정책 부적합",
+    }.get(ips_band, "실행 후보")
+    signals.append(policy_signal)
+    return " · ".join(signals)
 
 
 def _apply_ips_execution_gate(
@@ -326,12 +334,12 @@ def _apply_ips_execution_gate(
             if "correction_core_reinforcement" in reason_codes:
                 gated.at[idx, "판단사유"] = action.get(
                     "decision_summary",
-                    "하락장 코어 정기매수 증액 후보",
+                    "하락장에는 목표보다 낮은 코어 비중을 정기매수로 보강합니다.",
                 )
             elif "core_priority_context" in reason_codes:
                 gated.at[idx, "판단사유"] = action.get(
                     "decision_summary",
-                    "코어 정기매수 증액 우선",
+                    "목표보다 낮은 코어 비중을 정기매수로 보강합니다.",
                 )
             else:
                 gated.at[idx, "판단사유"] = _action_reason(gated.loc[idx])
@@ -443,7 +451,7 @@ def run_evaluation(
     rc_gap = mdf["위험기여도"] - mdf["RC_Target"]
     mdf["RC_Over"] = rc_gap.clip(lower=0)
 
-    # E는 효율 보조 신호로 유지하고, 최종 판단은 IPS 적합도가 주도합니다.
+    # E는 위험 대비 수익 효율 신호로 노출하고, 실행 방식은 IPS 게이트로 제한합니다.
     mdf["효율E"] = mdf["E"]
 
     rc_over_pct = mdf["RC_Over"] * 100  # 백분율로 표시

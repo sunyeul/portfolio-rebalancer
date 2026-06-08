@@ -18,12 +18,12 @@ ACTION_LABELS = {
 }
 
 NEXT_STEPS = {
-    "increase_dca": "다음 정기매수 배분에서 해당 자산 또는 그룹의 비중을 늘립니다.",
+    "increase_dca": "다음 정기매수에서 현재 비중이 목표보다 낮은 자산 또는 그룹의 배분을 늘립니다.",
     "decrease_dca": "신규 매수 중단 또는 정기매수 배분 축소를 우선 검토합니다.",
     "hold_observe": "매매하지 않고 다음 점검까지 관찰합니다.",
     "review_thesis": "투자 논리, 중복성, ETF 대체 가능성을 점검합니다.",
-    "exceptional_buy_review": "투자 논리, 목표 비중, 정기매수로 대응 불가 여부를 모두 확인한 뒤에만 즉시매수를 검토합니다.",
-    "consider_rebalance_sell": "정기매수 조정으로 해결하기 어려운 경우에만 매도 여부를 검토합니다.",
+    "exceptional_buy_review": "투자 논리, 목표 비중 미달, 정기매수로 대응하기 어려운 이유를 모두 확인한 뒤에만 즉시매수를 검토합니다.",
+    "consider_rebalance_sell": "정기매수 축소만으로 목표 비중과 위험기여도 초과를 낮추기 어려운 경우에만 매도 여부를 검토합니다.",
     "block_action": "FOMO, 단기 급락, 평단 방어성 행동을 보류합니다.",
 }
 
@@ -55,12 +55,12 @@ DECISION_CONTEXTS = {
 }
 
 DECISION_SUMMARIES = {
-    "increase_dca": "IPS 적합도가 정기매수 보강을 허용합니다.",
-    "decrease_dca": "IPS 적합도와 초과 상태상 신규 매수 축소가 우선입니다.",
+    "increase_dca": "현재 비중이 목표보다 낮고, 위험기여도와 효율 점수가 정기매수 보강을 막을 수준은 아닙니다.",
+    "decrease_dca": "현재 비중이 목표보다 높거나 위험기여도가 높아, 신규 매수 축소가 우선입니다.",
     "hold_observe": "수치 조정 기준을 넘지 않아 다음 점검까지 관찰합니다.",
-    "review_thesis": "IPS 조건이 충분하지 않아 보유 논리 확인이 먼저입니다.",
-    "exceptional_buy_review": "정기매수로 부족분을 해소하기 어려운 예외 조건인지 확인해야 합니다.",
-    "consider_rebalance_sell": "정기매수 조정으로 낮추기 어려운 초과 위험인지 확인해야 합니다.",
+    "review_thesis": "효율 점수, 위험기여도, 중복 노출을 보면 증액 전 보유 논리 확인이 먼저입니다.",
+    "exceptional_buy_review": "정기매수만으로 목표 비중 미달을 해소하기 어려운 예외 상황인지 확인해야 합니다.",
+    "consider_rebalance_sell": "정기매수 축소만으로 위험기여도 초과를 낮추기 어려운지 확인해야 합니다.",
     "block_action": "데이터나 행동 동기가 불충분해 실행 판단을 차단합니다.",
 }
 
@@ -68,25 +68,25 @@ REASON_TEXT = {
     "within_hysteresis_or_below_min_trade": "히스테리시스 범위이거나 최소 거래 기준에 미달합니다.",
     "data_quality_low": "데이터 신뢰도가 낮습니다.",
     "unclassified_group": "자산 그룹이 미분류 상태입니다.",
-    "risk_ok": "위험기여도가 허용 범위 안에 있습니다.",
-    "risk_over": "위험기여도가 기준을 초과했습니다.",
-    "ips_fit_high": "IPS 적합도가 높습니다.",
-    "ips_fit_medium": "IPS 적합도가 조건부 구간입니다.",
-    "ips_fit_low": "IPS 적합도가 낮습니다.",
-    "efficiency_warning": "효율 점수가 기준보다 낮습니다.",
-    "positive_gap": "목표 비중 대비 부족합니다.",
-    "negative_gap": "목표 비중 대비 초과 상태입니다.",
+    "risk_ok": "위험기여도가 기준 범위 안에 있습니다.",
+    "risk_over": "위험기여도가 기준보다 높습니다.",
+    "ips_fit_high": "정책 기준에 잘 맞습니다.",
+    "ips_fit_medium": "정책 기준상 조건부 확인이 필요합니다.",
+    "ips_fit_low": "정책 기준에 잘 맞지 않습니다.",
+    "efficiency_warning": "효율 점수가 기준보다 낮아 위험 대비 보상이 약합니다.",
+    "positive_gap": "현재 비중이 목표보다 낮습니다.",
+    "negative_gap": "현재 비중이 목표보다 높습니다.",
     "dca_disabled": "정기매수가 비활성화되어 있습니다.",
     "avoid_immediate_increase": "즉시 증액보다 관찰을 우선합니다.",
-    "sell_gate_passed": "예외적 매도 검토 조건을 통과했습니다.",
-    "sell_gate_blocked": "매도 게이트 조건을 충족하지 못했습니다.",
+    "sell_gate_passed": "비중 초과 또는 논리 훼손으로 예외적 매도 검토 조건에 걸립니다.",
+    "sell_gate_blocked": "비중 초과만으로는 매도 검토 조건이 충분하지 않습니다.",
     "thesis_broken": "투자 논리가 훼손되었습니다.",
     "thesis_not_broken": "투자 논리 훼손이 확인되지 않았습니다.",
     "prefer_dca_over_sell": "매도보다 정기매수 조정을 우선합니다.",
-    "core_priority_context": "현재 판단 모드에서는 코어 보강을 우선합니다.",
-    "satellite_downgraded_for_core_priority": "코어가 부족한 하락장에서는 위성 증액 전 보유 가능성을 먼저 점검합니다.",
-    "correction_core_reinforcement": "하락장에서는 목표 비중보다 부족한 코어를 정기매수로 우선 보강합니다.",
-    "satellite_correction_requires_review": "하락장 위성 추가매수 전에는 투자 논리와 장기 보유 가능성을 먼저 점검합니다.",
+    "core_priority_context": "현재 판단 모드에서는 목표보다 낮은 코어 비중을 먼저 보강합니다.",
+    "satellite_downgraded_for_core_priority": "코어 비중이 낮은 하락장에서는 위성 증액 전 보유 가능성을 먼저 점검합니다.",
+    "correction_core_reinforcement": "하락장에서는 목표보다 낮은 코어 비중을 정기매수로 우선 보강합니다.",
+    "satellite_correction_requires_review": "하락장 위성 추가매수 전에는 수익률 지속성, 변동성, 장기 보유 가능성을 먼저 점검합니다.",
     "sharp_drop_buy_caution": "단기 급락은 단독 매수 사유가 아닙니다.",
     "unclassified": "분류되지 않은 판단 조합입니다.",
 }
@@ -263,18 +263,18 @@ def apply_contextual_ips_overlay(
             ips_config,
             context,
             reason_codes=[*action["reason_codes"], "core_priority_context"],
-            decision_summary="하락장 코어 정기매수 증액 후보",
+            decision_summary="하락장에는 목표보다 낮은 코어 비중을 정기매수로 보강합니다.",
             decision_reasons=[
                 f"현재 판단 모드가 {context}입니다.",
-                "코어 비중이 IPS 목표보다 낮습니다.",
-                "최근 효율 점수는 낮지만 하락장 코어 보강 원칙을 우선합니다.",
+                "코어 비중이 목표보다 낮아 장기 시장 노출이 부족합니다.",
+                "최근 효율 점수는 낮지만, 코어 비중 미달이 더 중요한 조정 신호입니다.",
                 "즉시매수가 아니라 다음 정기매수 배분 조정으로 처리합니다.",
             ],
             risk_notes=risk_notes
             or [
-                "최근 효율 점수는 낮지만, 하락장 코어 보강 원칙에 따라 정기매수 증액 후보로 분류했습니다."
+                "효율 점수 미달은 확인하되, 하락장에서는 목표보다 낮은 코어 비중을 정기매수로 보강하는 쪽을 우선했습니다."
             ],
-            next_step="다음 정기매수에서 부족한 코어 자산의 배분을 늘립니다.",
+            next_step="다음 정기매수에서 현재 비중이 목표보다 낮은 코어 자산의 배분을 늘립니다.",
         )
 
     if correction_context and core_under_target and group == "core" and action["ips_action"] == "increase_dca":
@@ -284,11 +284,11 @@ def apply_contextual_ips_overlay(
             ips_config,
             context,
             reason_codes=[*action["reason_codes"], "core_priority_context"],
-            decision_summary="코어 정기매수 증액 우선",
+            decision_summary="목표보다 낮은 코어 비중을 정기매수로 보강합니다.",
             decision_reasons=[
                 f"현재 판단 모드가 {context}입니다.",
-                "코어 비중이 IPS 목표보다 낮습니다.",
-                "IPS상 하락장 또는 급락 검토에서는 위성보다 코어 보강을 우선합니다.",
+                "코어 비중이 목표보다 낮아 장기 시장 노출이 부족합니다.",
+                "하락장 또는 급락 검토에서는 위성 확대보다 목표보다 낮은 코어 비중 보강을 우선합니다.",
             ],
             risk_notes=risk_notes or ["즉시매수가 아니라 다음 정기매수 배분 조정으로 처리합니다."],
             next_step="다음 정기매수에서 코어 자산의 배분을 늘립니다.",
@@ -301,11 +301,11 @@ def apply_contextual_ips_overlay(
             ips_config,
             context,
             reason_codes=[*action["reason_codes"], "satellite_downgraded_for_core_priority"],
-            decision_summary="하락장 위성 증액 전 점검",
+            decision_summary="하락장 위성 자산은 증액 전 수익률과 변동성을 점검합니다.",
             decision_reasons=[
                 f"현재 판단 모드가 {context}입니다.",
-                "코어 비중이 IPS 목표보다 낮습니다.",
-                "하락장에서는 위성 증액보다 코어 보강과 위성 보유 가능성 점검을 우선합니다.",
+                "코어 비중이 목표보다 낮아 기본 노출이 부족합니다.",
+                "위성 자산 증액 전 수익률 지속성, 변동성 부담, 장기 보유 가능성을 먼저 점검합니다.",
             ],
             risk_notes=risk_notes,
             next_step="위성 자산의 투자 논리와 장기 보유 가능성을 확인한 뒤 다음 정기매수 반영 여부를 결정합니다.",
@@ -319,10 +319,10 @@ def apply_contextual_ips_overlay(
             ips_config,
             context,
             reason_codes=[*action["reason_codes"], "core_priority_context"],
-            decision_summary="미분류 자산 점검",
+            decision_summary="미분류 자산은 비중 조정 전 그룹을 먼저 확인합니다.",
             decision_reasons=[
                 "자산 그룹이 미분류 상태입니다.",
-                "코어 비중이 IPS 목표보다 낮아 판단이 어려운 자산보다 코어 보강을 우선합니다.",
+                "코어 비중이 목표보다 낮아 판단이 어려운 자산보다 코어 보강을 우선합니다.",
             ],
             risk_notes=risk_notes,
             next_step=next_step,
@@ -441,7 +441,7 @@ def classify_ips_action(
                 [*base_reasons, "negative_gap", "sell_gate_passed", "thesis_broken"],
                 ips_config,
                 decision_context,
-                decision_summary="투자 논리 훼손으로 예외적 매도 검토",
+                decision_summary="투자 논리가 훼손되어 예외적 매도 검토가 필요합니다.",
             )
             return apply_contextual_ips_overlay(
                 action, row, allocation_status, decision_context, ips_config
@@ -451,8 +451,8 @@ def classify_ips_action(
             [*base_reasons, "thesis_broken"],
             ips_config,
             decision_context,
-            decision_summary="투자 논리 훼손 점검",
-            next_step="투자 논리 훼손 원인을 확인하고 정기매수 중단 또는 예외적 정리를 검토합니다.",
+            decision_summary="투자 논리가 훼손되어 비중 조정보다 원인 확인이 먼저입니다.",
+            next_step="투자 논리 훼손 원인을 확인하고 정기매수 중단 또는 예외적 매도 검토 여부를 결정합니다.",
         )
         return apply_contextual_ips_overlay(
             action, row, allocation_status, decision_context, ips_config
@@ -464,7 +464,7 @@ def classify_ips_action(
             [*base_reasons, "positive_gap", "dca_disabled"],
             ips_config,
             decision_context,
-            decision_summary="정기매수 비활성화로 증액 보류",
+            decision_summary="현재 비중은 목표보다 낮지만 정기매수가 꺼져 있어 증액을 보류합니다.",
         )
         return apply_contextual_ips_overlay(
             action, row, allocation_status, decision_context, ips_config
@@ -476,7 +476,7 @@ def classify_ips_action(
             [*base_reasons, "negative_gap", "dca_disabled", "sell_gate_blocked"],
             ips_config,
             decision_context,
-            blocked_reason="정기매수 조정이 비활성화되어 있고 매도 게이트도 충족하지 못했습니다.",
+            blocked_reason="정기매수 조정이 꺼져 있고, 비중 초과만으로는 매도 검토 조건도 충분하지 않습니다.",
         )
         return apply_contextual_ips_overlay(
             action, row, allocation_status, decision_context, ips_config
@@ -493,7 +493,7 @@ def classify_ips_action(
             reason_codes,
             ips_config,
             decision_context,
-            decision_summary="IPS 초과 상태로 예외적 매도 검토",
+            decision_summary="현재 비중이 목표보다 높고 위험기여도도 높아 예외적 매도 검토가 필요합니다.",
         )
         return apply_contextual_ips_overlay(
             action, row, allocation_status, decision_context, ips_config
@@ -508,7 +508,7 @@ def classify_ips_action(
                 [*base_reasons, "positive_gap"],
                 ips_config,
                 decision_context,
-                decision_summary="IPS 적합 정기매수 증액 후보",
+                decision_summary="현재 비중이 목표보다 낮고, 위험기여도와 효율 점수도 보강을 막을 수준은 아닙니다.",
             )
             return apply_contextual_ips_overlay(
                 action, row, allocation_status, decision_context, ips_config
@@ -519,7 +519,7 @@ def classify_ips_action(
                 [*base_reasons, "negative_gap", "prefer_dca_over_sell"],
                 ips_config,
                 decision_context,
-                decision_summary="IPS 초과 정기매수 감액 후보",
+                decision_summary="현재 비중이 목표보다 높아 신규 매수 축소가 우선입니다.",
             )
             return apply_contextual_ips_overlay(
                 action, row, allocation_status, decision_context, ips_config
@@ -529,7 +529,7 @@ def classify_ips_action(
             base_reasons,
             ips_config,
             decision_context,
-            decision_summary="IPS 적합 유지·관찰",
+            decision_summary="현재 비중, 위험기여도, 효율 점수 모두 큰 조정 신호는 아닙니다.",
         )
         return apply_contextual_ips_overlay(
             action, row, allocation_status, decision_context, ips_config
@@ -546,18 +546,18 @@ def classify_ips_action(
                 ips_config,
                 decision_context,
                 decision_summary=(
-                    "하락장 코어 정기매수 증액 후보"
+                    "하락장에는 목표보다 낮은 코어 비중을 정기매수로 보강합니다."
                     if correction_context
-                    else "IPS 조건부 코어 정기매수 증액 후보"
+                    else "현재 비중이 목표보다 낮은 코어 자산은 정기매수 보강 후보입니다."
                 ),
                 risk_notes=[
-                    "IPS 적합도가 조건부 구간이므로 정기매수 증액 후 다음 점검에서 재확인합니다."
+                    "위험기여도나 효율 점수가 완전히 양호한 것은 아니므로 정기매수 증액 후 다음 점검에서 재확인합니다."
                 ]
                 if not correction_context
                 else [
-                    "최근 효율 점수는 낮을 수 있지만, 하락장 코어 보강 원칙을 우선합니다."
+                    "효율 점수 미달은 확인하되, 하락장에서는 목표보다 낮은 코어 비중 보강을 우선합니다."
                 ],
-                next_step="다음 정기매수에서 부족한 코어 자산의 배분을 늘립니다.",
+                next_step="다음 정기매수에서 현재 비중이 목표보다 낮은 코어 자산의 배분을 늘립니다.",
             )
             return apply_contextual_ips_overlay(
                 action, row, allocation_status, decision_context, ips_config
@@ -568,7 +568,7 @@ def classify_ips_action(
                 [*base_reasons, "negative_gap", "prefer_dca_over_sell"],
                 ips_config,
                 decision_context,
-                decision_summary="IPS 조건부 초과 정기매수 감액 후보",
+                decision_summary="현재 비중이 목표보다 높아 정기매수 감액이 우선입니다.",
             )
             return apply_contextual_ips_overlay(
                 action, row, allocation_status, decision_context, ips_config
@@ -584,9 +584,9 @@ def classify_ips_action(
             ips_config,
             decision_context,
             decision_summary=(
-                "하락장 위성 추가매수 전 점검"
+                "하락장 위성 자산은 추가매수 전 수익률과 변동성을 점검합니다."
                 if correction_context and group == "satellite" and gap > 0
-                else "IPS 조건부 투자 논리 점검"
+                else "효율 점수와 위험기여도를 보면 투자 논리 점검이 필요합니다."
             ),
             next_step="투자 논리, 중복성, ETF 대체 가능성을 확인한 뒤 다음 정기매수 반영 여부를 결정합니다.",
         )
@@ -600,7 +600,7 @@ def classify_ips_action(
             [*base_reasons, "negative_gap", "thesis_not_broken", "prefer_dca_over_sell"],
             ips_config,
             decision_context,
-            decision_summary="IPS 부적합 초과 정기매수 감액 후보",
+            decision_summary="현재 비중이 목표보다 높고 효율 또는 위험 지표가 약해 정기매수 감액이 우선입니다.",
         )
         return apply_contextual_ips_overlay(
             action, row, allocation_status, decision_context, ips_config
@@ -616,11 +616,11 @@ def classify_ips_action(
             ],
             ips_config,
             decision_context,
-            decision_summary="하락장 코어 정기매수 증액 후보",
+            decision_summary="하락장에는 목표보다 낮은 코어 비중을 소폭 보강합니다.",
             risk_notes=[
-                "IPS 적합도는 낮지만 하락장 코어 보강 원칙과 목표 부족 상태를 함께 반영합니다."
+                "효율 점수는 낮지만 하락장 코어 보강 원칙과 목표 비중 미달을 함께 반영합니다."
             ],
-            next_step="다음 정기매수에서 부족한 코어 자산의 배분을 소폭 늘리고 다음 점검에서 재확인합니다.",
+            next_step="다음 정기매수에서 현재 비중이 목표보다 낮은 코어 자산의 배분을 소폭 늘리고 다음 점검에서 재확인합니다.",
         )
         return apply_contextual_ips_overlay(
             action, row, allocation_status, decision_context, ips_config
@@ -638,8 +638,8 @@ def classify_ips_action(
         reason_codes,
         ips_config,
         decision_context,
-        decision_summary="IPS 부적합 투자 논리 점검",
-        blocked_reason="IPS 적합도가 낮아 실행보다 투자 논리 점검이 우선입니다.",
+        decision_summary="효율 점수나 위험기여도가 약해 투자 논리 점검이 우선입니다.",
+        blocked_reason="효율 점수, 위험기여도, 정책 기준 중 하나 이상이 약해 실행보다 투자 논리 점검이 우선입니다.",
     )
     return apply_contextual_ips_overlay(
         action, row, allocation_status, decision_context, ips_config

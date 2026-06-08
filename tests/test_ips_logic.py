@@ -72,7 +72,7 @@ def test_high_ips_fit_positive_core_gap_classifies_as_increase_dca():
 
     assert result["ips_action"] == "increase_dca"
     assert result["execution_type"] == "dca_adjustment"
-    assert result["decision_summary"] == "IPS 적합 정기매수 증액 후보"
+    assert result["decision_summary"] == "현재 비중이 목표보다 낮고, 위험기여도와 효율 점수도 보강을 막을 수준은 아닙니다."
     assert "ips_fit_high" in result["reason_codes"]
 
 
@@ -96,7 +96,7 @@ def test_medium_core_positive_gap_allows_conditional_increase():
     )
 
     assert result["ips_action"] == "increase_dca"
-    assert result["decision_summary"] == "IPS 조건부 코어 정기매수 증액 후보"
+    assert result["decision_summary"] == "현재 비중이 목표보다 낮은 코어 자산은 정기매수 보강 후보입니다."
 
 
 def test_medium_satellite_positive_gap_requires_thesis_review():
@@ -109,7 +109,7 @@ def test_medium_satellite_positive_gap_requires_thesis_review():
 
     assert result["ips_action"] == "review_thesis"
     assert result["execution_type"] == "review_required"
-    assert result["decision_summary"] == "하락장 위성 추가매수 전 점검"
+    assert result["decision_summary"] == "하락장 위성 자산은 추가매수 전 수익률과 변동성을 점검합니다."
     assert "satellite_correction_requires_review" in result["reason_codes"]
 
 
@@ -121,7 +121,7 @@ def test_low_ips_fit_defaults_to_thesis_review():
     )
 
     assert result["ips_action"] == "review_thesis"
-    assert result["blocked_reason"] == "IPS 적합도가 낮아 실행보다 투자 논리 점검이 우선입니다."
+    assert result["blocked_reason"] == "효율 점수, 위험기여도, 정책 기준 중 하나 이상이 약해 실행보다 투자 논리 점검이 우선입니다."
 
 
 def test_low_data_quality_blocks_otherwise_executable_action():
@@ -177,7 +177,7 @@ def test_market_correction_allows_core_reinforcement_even_with_efficiency_warnin
     )
 
     assert result["ips_action"] == "increase_dca"
-    assert result["decision_summary"] == "하락장 코어 정기매수 증액 후보"
+    assert result["decision_summary"] == "하락장에는 목표보다 낮은 코어 비중을 정기매수로 보강합니다."
     assert "efficiency_warning" in result["reason_codes"]
     assert "correction_core_reinforcement" in result["reason_codes"]
 

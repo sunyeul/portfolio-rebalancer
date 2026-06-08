@@ -49,7 +49,7 @@ def test_run_evaluation_returns_ips_outputs_and_uses_ips_signals():
     assert bool(ufo["risk_over"]) is True
     assert bool(ufo["efficiency_warning"]) is True
     assert ufo["IPS등급"] == "high"
-    assert "효율 경고" in ufo["판단사유"]
+    assert "효율 점수 미달" in ufo["판단사유"]
     assert "ips_action" in result.ips_action_df.columns
     assert "risk_over" in result.ips_action_df.columns
     assert "efficiency_warning" in result.ips_action_df.columns
@@ -139,7 +139,7 @@ def test_market_correction_context_downgrades_satellite_buy_and_blocks_final_tra
     ufo_proposal = result.proposal_df.loc[result.proposal_df["ticker"] == "UFO"].iloc[0]
     assert ufo_action["ips_action"] == "review_thesis"
     assert ufo_action["execution_type"] == "review_required"
-    assert ufo_action["decision_summary"] == "하락장 위성 증액 전 점검"
+    assert ufo_action["decision_summary"] == "하락장 위성 자산은 증액 전 수익률과 변동성을 점검합니다."
     assert bool(ufo_proposal["수치후보"]) is True
     assert bool(ufo_proposal["실행"]) is False
     assert ufo_proposal["제안조정%"] == 0.0
@@ -173,13 +173,13 @@ def test_market_correction_context_increases_underweight_core_even_with_low_effi
     voo_action = result.ips_action_df.loc[result.ips_action_df["ticker"] == "VOO"].iloc[0]
     voo_proposal = result.proposal_df.loc[result.proposal_df["ticker"] == "VOO"].iloc[0]
     assert voo_action["ips_action"] == "increase_dca"
-    assert voo_action["decision_summary"] == "코어 정기매수 증액 우선"
+    assert voo_action["decision_summary"] == "목표보다 낮은 코어 비중을 정기매수로 보강합니다."
     assert "core_priority_context" in voo_action["reason_codes"]
     assert "efficiency_warning" in voo_action["reason_codes"]
     assert bool(voo_proposal["수치후보"]) is True
     assert bool(voo_proposal["실행"]) is True
     assert voo_proposal["제안조정%"] > 0
-    assert voo_proposal["판단사유"] == "코어 정기매수 증액 우선"
+    assert voo_proposal["판단사유"] == "목표보다 낮은 코어 비중을 정기매수로 보강합니다."
 
 
 def test_build_ips_target_weights_keeps_cash_and_allocates_remaining_by_ips_targets():
@@ -421,21 +421,34 @@ def test_action_reason_labels_filter_and_execution_causes():
     )
     assert (
         _action_reason({"실행": True, "IPS등급": "high", "risk_over": True, "efficiency_warning": True, "갭%": 2})
-        == "IPS 적합 · 위험 초과 · 효율 경고 · 목표 대비 부족"
+        == "비중 목표 미달 · 위험기여도 초과 · 효율 점수 미달 · 정책 적합"
     )
     assert (
         _action_reason({"실행": True, "IPS등급": "medium", "risk_over": True, "efficiency_warning": False, "갭%": 2})
-        == "IPS 조건부 점검 · 위험 초과 · 목표 대비 부족"
+        == "비중 목표 미달 · 위험기여도 초과 · 정책 조건부"
     )
     assert (
         _action_reason({"실행": True, "IPS등급": "low", "risk_over": False, "efficiency_warning": True, "갭%": 2})
-        == "IPS 부적합 · 효율 경고 · 목표 대비 부족"
+        == "비중 목표 미달 · 효율 점수 미달 · 정책 부적합"
     )
     assert (
         _action_reason({"실행": True, "IPS등급": "high", "risk_over": False, "efficiency_warning": False, "갭%": 2})
-        == "IPS 적합 · 목표 대비 부족"
+        == "비중 목표 미달 · 정책 적합"
     )
     assert (
         _action_reason({"실행": True, "IPS등급": "high", "risk_over": False, "efficiency_warning": False, "갭%": -2})
-        == "IPS 적합 · 목표 대비 초과"
+        == "비중 목표 초과 · 정책 적합"
+    )
+    assert (
+        _action_reason(
+            {
+                "실행": True,
+                "IPS등급": "medium",
+                "risk_over": False,
+                "efficiency_warning": True,
+                "갭%": 2,
+                "return_total%": -8,
+            }
+        )
+        == "비중 목표 미달 · 효율 점수 미달 · 수익률 부진 · 정책 조건부"
     )
