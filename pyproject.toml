@@ -16,7 +16,21 @@ dependencies = [
     "pyyaml>=6.0.0",
     "yfinance>=0.2.66",
     "scipy>=1.16.2",
+    "typer>=0.12.0",
 ]
+
+[project.scripts]
+portfolio-rebalancer = "cli:app"
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["cli", "main"]
+
+[tool.setuptools.packages.find]
+include = ["api*", "core*", "middleware*", "services*", "storage*", "utils*"]
 
 [dependency-groups]
 dev = [
