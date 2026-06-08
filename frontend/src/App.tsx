@@ -11,8 +11,6 @@ import {
   FolderOpen,
   LineChart,
   Loader2,
-  PanelLeftClose,
-  PanelLeftOpen,
   Play,
   Plus,
   RefreshCcw,
@@ -184,7 +182,6 @@ function rowsSignature(rows: PortfolioRowInput[]) {
 export function App() {
   const queryClient = useQueryClient();
   const [activeView, setActiveView] = useState<AppView>('workbench');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [text, setText] = useState(sampleText);
   const [rows, setRows] = useState<PortfolioRowInput[]>(() => parsePortfolioText(sampleText));
   const [portfolio, setPortfolio] = useState<AssetRow[]>([]);
@@ -690,69 +687,7 @@ export function App() {
         </nav>
       </header>
 
-      <div className={cx('app-body', activeView === 'workbench' && 'with-sidebar', sidebarCollapsed && 'sidebar-collapsed')}>
-        {activeView === 'workbench' && (
-          <aside className="sidebar">
-            <div className="sidebar-heading">
-              <div className="sidebar-title">
-                <p className="eyebrow">Workbench Controls</p>
-                <h2>빠른 평가 설정</h2>
-              </div>
-              <button
-                type="button"
-                className="sidebar-toggle"
-                aria-label={sidebarCollapsed ? '빠른 평가 설정 펼치기' : '빠른 평가 설정 접기'}
-                aria-expanded={!sidebarCollapsed}
-                onClick={() => setSidebarCollapsed((current) => !current)}
-              >
-                {sidebarCollapsed ? <PanelLeftOpen aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}
-              </button>
-            </div>
-            <form className="settings-form">
-              <label>
-                평가 기간
-                <select {...register('periodMode')}>
-                  <option value="months">개월</option>
-                  <option value="YTD">YTD</option>
-                  <option value="Max">Max</option>
-                </select>
-              </label>
-              {settings.periodMode === 'months' && (
-                <label>
-                  개월 수
-                  <input type="number" min="1" max="120" {...register('months')} />
-                </label>
-              )}
-              <label>
-                무위험 수익률 (%)
-                <input type="number" step="0.1" {...register('rfPct')} />
-              </label>
-              <label>
-                벤치마크
-                <input type="text" {...register('bench')} />
-              </label>
-              <label>
-                RC Over 임계값 (%)
-                <input type="number" step="0.1" {...register('rcOverThreshPct')} />
-              </label>
-              <label>
-                E 임계값
-                <input type="number" step="0.05" min="0" max="1" {...register('eThresh')} />
-              </label>
-              <label>
-                판단 모드
-                <select {...register('decisionContext')}>
-                  {decisionContextOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </form>
-          </aside>
-        )}
-
+      <div className="app-body">
         <section className="workspace">
         <header className="topbar">
           <div>
@@ -1148,7 +1083,7 @@ export function App() {
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <div className="flex items-center gap-3">
                   <div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-100 text-sm font-bold text-violet-800">2</div>
@@ -1156,15 +1091,39 @@ export function App() {
                 </div>
                 <p className="mt-2 text-sm text-slate-500">가격 데이터를 조회하고 포트폴리오/벤치마크/자산별 지표를 계산합니다. 이후 DCA와 투자 논리를 보정합니다.</p>
               </div>
-              <button
-                type="button"
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
-                disabled={(!portfolio.length && !validRows.length) || portfolioMutation.isPending || analysisMutation.isPending}
-                onClick={shouldApplyRowsBeforeAnalysis ? applyRowsAndRunAnalysis : runCurrentAnalysis}
-              >
-                {portfolioMutation.isPending || analysisMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <BarChart3 className="h-4 w-4" />}
-                {shouldApplyRowsBeforeAnalysis ? '입력 반영 후 분석 실행' : '분석 실행'}
-              </button>
+              <div className="run-controls analysis-controls">
+                <label className="control-field">
+                  <span>평가 기간</span>
+                  <select className="table-input" {...register('periodMode')}>
+                    <option value="months">개월</option>
+                    <option value="YTD">YTD</option>
+                    <option value="Max">Max</option>
+                  </select>
+                </label>
+                {settings.periodMode === 'months' && (
+                  <label className="control-field compact">
+                    <span>개월 수</span>
+                    <input className="table-input" type="number" min="1" max="120" {...register('months')} />
+                  </label>
+                )}
+                <label className="control-field compact">
+                  <span>무위험 수익률 (%)</span>
+                  <input className="table-input" type="number" step="0.1" {...register('rfPct')} />
+                </label>
+                <label className="control-field wide">
+                  <span>벤치마크</span>
+                  <input className="table-input" type="text" {...register('bench')} />
+                </label>
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                  disabled={(!portfolio.length && !validRows.length) || portfolioMutation.isPending || analysisMutation.isPending}
+                  onClick={shouldApplyRowsBeforeAnalysis ? applyRowsAndRunAnalysis : runCurrentAnalysis}
+                >
+                  {portfolioMutation.isPending || analysisMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <BarChart3 className="h-4 w-4" />}
+                  {shouldApplyRowsBeforeAnalysis ? '입력 반영 후 분석 실행' : '분석 실행'}
+                </button>
+              </div>
             </div>
             <ErrorLine error={analysisMutation.error} />
             {analysis && (
@@ -1256,7 +1215,7 @@ export function App() {
           )}
 
               <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <div className="flex items-center gap-3">
                       <div className="grid h-8 w-8 place-items-center rounded-lg bg-cyan-100 text-sm font-bold text-cyan-900">3</div>
@@ -1264,15 +1223,35 @@ export function App() {
                     </div>
                     <p className="mt-2 text-sm text-slate-500">IPS 기준으로 실행 후보, 위험 초과, DCA 조정 신호를 확인합니다.</p>
                   </div>
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
-                    disabled={!analysis || rowsDirty || evaluationMutation.isPending}
-                    onClick={runCurrentEvaluation}
-                  >
-                    {evaluationMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Play className="h-4 w-4" />}
-                    평가 실행
-                  </button>
+                  <div className="run-controls evaluation-controls">
+                    <label className="control-field compact">
+                      <span>RC Over (%)</span>
+                      <input className="table-input" type="number" step="0.1" {...register('rcOverThreshPct')} />
+                    </label>
+                    <label className="control-field compact">
+                      <span>E 임계값</span>
+                      <input className="table-input" type="number" step="0.05" min="0" max="1" {...register('eThresh')} />
+                    </label>
+                    <label className="control-field">
+                      <span>판단 모드</span>
+                      <select className="table-input" {...register('decisionContext')}>
+                        {decisionContextOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                      disabled={!analysis || rowsDirty || evaluationMutation.isPending}
+                      onClick={runCurrentEvaluation}
+                    >
+                      {evaluationMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Play className="h-4 w-4" />}
+                      평가 실행
+                    </button>
+                  </div>
                 </div>
                 <ErrorLine error={evaluationMutation.error} />
                 {analysis && rowsDirty && (
