@@ -137,6 +137,38 @@ def test_evaluate_text_outputs_agent_readable_json(monkeypatch):
     assert payload["error"] is None
 
 
+def test_evaluate_can_include_counterfactual_and_backtest(monkeypatch):
+    monkeypatch.setattr("cli.run_analysis", _fake_analysis)
+    monkeypatch.setattr("cli.run_evaluation", _fake_evaluation)
+
+    result = runner.invoke(
+        app,
+        [
+            "evaluate",
+            "--text",
+            "VOO 40\nQQQ 60",
+            "--decision-context",
+            "market_correction",
+            "--counterfactual-scenario",
+            "pause_satellite_new_buys",
+            "--backtest-strategy",
+            "current_ips",
+            "--backtest-strategy",
+            "core_first_dca",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["input"]["counterfactual_scenario"] == "pause_satellite_new_buys"
+    assert payload["input"]["backtest_strategies"] == ["current_ips", "core_first_dca"]
+    assert payload["simulation"]["counterfactual"]["interpretation"]
+    assert len(payload["simulation"]["backtest"]["strategy_summaries"]) == 2
+    assert {
+        row["strategy_label"] for row in payload["simulation"]["backtest"]["strategy_summaries"]
+    } == {"현재 IPS 유지", "코어 부족분 우선"}
+
+
 def test_evaluate_rejects_missing_or_multiple_inputs_as_json():
     result = runner.invoke(app, ["evaluate"])
 

@@ -28,6 +28,11 @@ from services.portfolio_service import (
     parse_csv_to_assets,
     parse_text_to_assets_service,
 )
+from services.simulation_service import (
+    SimulationError,
+    run_counterfactual_simulation,
+    run_ips_backtest,
+)
 from storage.database import db_path, initialize_database
 from storage.portfolio_store import (
     StorageError,
@@ -68,6 +73,23 @@ class DecisionContext(str, Enum):
     market_correction = "market_correction"
     sharp_drop_review = "sharp_drop_review"
     rebalance_review = "rebalance_review"
+
+
+class CounterfactualScenarioOption(str, Enum):
+    """Counterfactual preset options."""
+
+    core_reinforcement = "core_reinforcement"
+    pause_satellite_new_buys = "pause_satellite_new_buys"
+    dca_shift_to_core = "dca_shift_to_core"
+
+
+class BacktestStrategyOption(str, Enum):
+    """Limited IPS backtest policy options."""
+
+    current_ips = "current_ips"
+    core_first_dca = "core_first_dca"
+    pause_overweight_satellite = "pause_overweight_satellite"
+    return_chasing_reference = "return_chasing_reference"
 
 
 def _json_safe(value: Any) -> Any:
@@ -310,6 +332,14 @@ def evaluate(
         DecisionContext,
         typer.Option("--decision-context"),
     ] = DecisionContext.regular_review,
+    counterfactual_scenario: Annotated[
+        CounterfactualScenarioOption | None,
+        typer.Option("--counterfactual-scenario"),
+    ] = None,
+    backtest_strategy: Annotated[
+        list[BacktestStrategyOption] | None,
+        typer.Option("--backtest-strategy"),
+    ] = None,
     output_dir: Annotated[Path | None, typer.Option("--output-dir")] = None,
     save: Annotated[bool, typer.Option("--save")] = False,
     save_to_portfolio_id: Annotated[int | None, typer.Option("--save-to-portfolio-id")] = None,
@@ -332,17 +362,46 @@ def evaluate(
         except AnalysisError as exc:
             raise CliError("analysis", str(exc)) from exc
 
+        cov_matrix = _cov_matrix(analysis.returns_smooth, analysis.metrics_df)
+
         try:
             evaluation = run_evaluation(
                 analysis.metrics_df,
                 None,
                 rc_threshold,
                 e_threshold,
-                cov_matrix=_cov_matrix(analysis.returns_smooth, analysis.metrics_df),
+                cov_matrix=cov_matrix,
                 decision_context=decision_context.value,
             )
         except EvaluationError as exc:
             raise CliError("evaluation", str(exc)) from exc
+
+        simulation: dict[str, Any] = {
+            "counterfactual": None,
+            "backtest": None,
+        }
+        try:
+            if counterfactual_scenario is not None:
+                simulation["counterfactual"] = run_counterfactual_simulation(
+                    metrics_df=analysis.metrics_df,
+                    scenario=counterfactual_scenario.value,
+                    rc_over_thresh_pct=rc_threshold,
+                    e_thresh=e_threshold,
+                    cov_matrix=cov_matrix,
+                    decision_context=decision_context.value,
+                )
+            if backtest_strategy:
+                simulation["backtest"] = run_ips_backtest(
+                    returns_smooth=analysis.returns_smooth,
+                    metrics_df=analysis.metrics_df,
+                    strategies=[strategy.value for strategy in backtest_strategy],
+                    cov_matrix=cov_matrix,
+                    frequency="monthly",
+                    decision_context=decision_context.value,
+                    rf=rf,
+                )
+        except SimulationError as exc:
+            raise CliError("simulation", str(exc)) from exc
 
         metrics = dataframe_records(
             analysis.metrics_df, METRICS_COLUMNS, include_index=True
@@ -429,6 +488,12 @@ def evaluate(
                     "rf": rf,
                     "bench": bench_ticker,
                     "decision_context": decision_context.value,
+                    "counterfactual_scenario": counterfactual_scenario.value
+                    if counterfactual_scenario is not None
+                    else None,
+                    "backtest_strategies": [
+                        strategy.value for strategy in backtest_strategy or []
+                    ],
                     "database_path": str(db_path()),
                 },
                 "warnings": warnings,
@@ -445,6 +510,7 @@ def evaluate(
                     "rc_violations": rc_violations,
                     "ips_config_snapshot": evaluation.ips_config_snapshot,
                 },
+                "simulation": simulation,
                 "agent_summary": {
                     **_agent_summary(proposal, metrics, analysis.missing_tickers),
                     "save_status": saved,
