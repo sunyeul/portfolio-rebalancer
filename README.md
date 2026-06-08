@@ -61,10 +61,21 @@ QQQ 60"
 uv run portfolio-rebalancer evaluate --file portfolio.csv --output-dir out
 uv run portfolio-rebalancer portfolios list
 uv run portfolio-rebalancer snapshots list --portfolio-id 1
+uv run portfolio-rebalancer evaluate --snapshot-id 14
 uv run portfolio-rebalancer evaluate --portfolio-id 1 --save
 ```
 
 `--portfolio-id`는 웹앱의 current-state를 읽고, `--snapshot-id`는 저장된 스냅샷을 읽습니다. DB 저장은 `--save` 또는 `--save-to-portfolio-id`를 명시한 경우에만 수행합니다.
+
+Codex에게 사용을 맡길 때는 먼저 포트폴리오와 스냅샷 목록을 확인하게 한 뒤, 원하는 스냅샷을 평가하게 하면 됩니다.
+
+```bash
+uv run portfolio-rebalancer portfolios list
+uv run portfolio-rebalancer snapshots list --portfolio-id 1
+uv run portfolio-rebalancer evaluate --snapshot-id 14 --output-dir /tmp/portfolio_eval_14
+```
+
+평가 JSON에서는 `agent_summary.recommended_actions`, `agent_summary.hold_actions`, `agent_summary.data_quality_warnings`, `analysis.portfolio_metrics`, `evaluation.proposal`을 우선 읽으면 됩니다. `--output-dir`를 지정하면 같은 결과가 `metrics.csv`, `proposal.csv`, `ips_actions.csv`, `group_summary.csv`, `rc_violations.csv`로도 저장됩니다.
 
 프론트 검증:
 
