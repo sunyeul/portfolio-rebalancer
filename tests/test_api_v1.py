@@ -316,6 +316,113 @@ def test_evaluation_requires_analysis_first():
     assert "데이터 분석" in response.json()["detail"]
 
 
+def test_simulation_endpoints_require_analysis_first():
+    client = TestClient(app)
+
+    counterfactual = client.post("/api/v1/simulation/counterfactual", json={})
+    backtest = client.post("/api/v1/simulation/backtest", json={})
+
+    assert counterfactual.status_code == 400
+    assert backtest.status_code == 400
+    assert "데이터 분석" in counterfactual.json()["detail"]
+    assert "데이터 분석" in backtest.json()["detail"]
+
+
+def test_simulation_counterfactual_and_backtest_api_return_json_safe_payloads(monkeypatch):
+    client = TestClient(app)
+    client.post(
+        "/api/v1/portfolio/manual",
+        json={
+            "rows": [
+                {
+                    "ticker": "VOO",
+                    "allocation": 55,
+                    "group": "core",
+                    "thesis_status": "intact",
+                },
+                {
+                    "ticker": "QQQ",
+                    "allocation": 15,
+                    "group": "core",
+                    "thesis_status": "intact",
+                },
+                {
+                    "ticker": "UFO",
+                    "allocation": 30,
+                    "group": "satellite",
+                    "thesis_status": "watch",
+                },
+            ]
+        },
+    )
+
+    def fake_run_analysis(*args, **kwargs):
+        index = pd.date_range("2025-01-31", periods=8, freq="ME")
+        prices = pd.DataFrame(
+            {
+                "VOO": [100, 102, 101, 103, 104, 105, 106, 107],
+                "QQQ": [100, 103, 101, 104, 106, 107, 108, 110],
+                "UFO": [100, 108, 102, 106, 109, 107, 112, 115],
+            },
+            index=index,
+        )
+        returns = prices.pct_change(fill_method=None).dropna()
+        metrics_df = pd.DataFrame(
+            {
+                "ticker": ["VOO", "QQQ", "UFO"],
+                "가중치": [0.55, 0.15, 0.30],
+                "위험기여도": [0.35, 0.15, 0.50],
+                "E": [0.8, 0.7, 0.65],
+                "return_total": [0.1, 0.08, 0.2],
+                "group": ["core", "core", "satellite"],
+                "dca_enabled": [True, True, True],
+                "thesis_status": ["intact", "intact", "watch"],
+                "missing_ratio": [0.0, 0.0, 0.0],
+                "observation_count": [120, 120, 120],
+            }
+        ).set_index("ticker")
+        return AnalysisResult(
+            prices=prices,
+            returns=returns,
+            returns_smooth=returns,
+            weights_no_bench=pd.Series({"VOO": 0.55, "QQQ": 0.15, "UFO": 0.30}),
+            metrics_df=metrics_df,
+            port_nav=pd.Series([1.0, 1.1]),
+            bench_nav=None,
+            portfolio_metrics={"cagr": 0.1, "volatility": 0.2, "sharpe": 1.0},
+            benchmark_metrics=None,
+            missing_tickers=[],
+        )
+
+    monkeypatch.setattr("api.v1.analysis.run_analysis", fake_run_analysis)
+    assert client.post("/api/v1/analysis/run", json={}).status_code == 200
+
+    counterfactual_response = client.post(
+        "/api/v1/simulation/counterfactual",
+        json={"scenario": "pause_satellite_new_buys"},
+    )
+    assert counterfactual_response.status_code == 200
+    counterfactual_payload = counterfactual_response.json()
+    assert counterfactual_payload["baseline"]["weights"]
+    assert counterfactual_payload["deltas"]["assets"]
+    assert isinstance(counterfactual_payload["warnings"], list)
+
+    backtest_response = client.post(
+        "/api/v1/simulation/backtest",
+        json={"strategies": ["current_ips", "core_first_dca"], "frequency": "monthly"},
+    )
+    assert backtest_response.status_code == 200
+    backtest_payload = backtest_response.json()
+    assert len(backtest_payload["strategy_summaries"]) == 2
+    assert backtest_payload["ips_fit_summary"]
+    assert backtest_payload["performance_summary"]
+    assert backtest_payload["strategy_summaries"][0]["strategy_label"] in {
+        "현재 IPS 유지",
+        "코어 부족분 우선",
+    }
+    assert all(row["cagr"] is not None for row in backtest_payload["strategy_summaries"])
+
+
 def test_evaluation_api_and_download(monkeypatch):
     client = TestClient(app)
     client.post(
