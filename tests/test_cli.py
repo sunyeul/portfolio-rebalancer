@@ -106,15 +106,32 @@ def _fake_evaluation(*args, **kwargs):
 
 
 def test_evaluate_text_outputs_agent_readable_json(monkeypatch):
-    monkeypatch.setattr("cli.run_analysis", _fake_analysis)
-    monkeypatch.setattr("cli.run_evaluation", _fake_evaluation)
+    captured_kwargs = {}
 
-    result = runner.invoke(app, ["evaluate", "--text", "VOO 40\nQQQ 60"])
+    def fake_evaluation_with_capture(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return _fake_evaluation(*args, **kwargs)
+
+    monkeypatch.setattr("cli.run_analysis", _fake_analysis)
+    monkeypatch.setattr("cli.run_evaluation", fake_evaluation_with_capture)
+
+    result = runner.invoke(
+        app,
+        [
+            "evaluate",
+            "--text",
+            "VOO 40\nQQQ 60",
+            "--decision-context",
+            "market_correction",
+        ],
+    )
 
     assert result.exit_code == 0
     payload = _payload(result)
     assert payload["ok"] is True
     assert payload["input"]["source"] == "text"
+    assert payload["input"]["decision_context"] == "market_correction"
+    assert captured_kwargs["decision_context"] == "market_correction"
     assert payload["agent_summary"]["rebalance_needed"] is True
     assert payload["agent_summary"]["recommended_actions"][0]["ticker"] == "VOO"
     assert payload["error"] is None

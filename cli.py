@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -58,6 +59,15 @@ class CliError(Exception):
         self.stage = stage
         self.message = message
         self.hint = hint
+
+
+class DecisionContext(str, Enum):
+    """IPS evaluation context options."""
+
+    regular_review = "regular_review"
+    market_correction = "market_correction"
+    sharp_drop_review = "sharp_drop_review"
+    rebalance_review = "rebalance_review"
 
 
 def _json_safe(value: Any) -> Any:
@@ -296,6 +306,10 @@ def evaluate(
     bench: Annotated[str, typer.Option("--bench")] = "SPY",
     rc_threshold: Annotated[float, typer.Option("--rc-threshold")] = 1.5,
     e_threshold: Annotated[float, typer.Option("--e-threshold")] = 0.5,
+    decision_context: Annotated[
+        DecisionContext,
+        typer.Option("--decision-context"),
+    ] = DecisionContext.regular_review,
     output_dir: Annotated[Path | None, typer.Option("--output-dir")] = None,
     save: Annotated[bool, typer.Option("--save")] = False,
     save_to_portfolio_id: Annotated[int | None, typer.Option("--save-to-portfolio-id")] = None,
@@ -325,6 +339,7 @@ def evaluate(
                 rc_threshold,
                 e_threshold,
                 cov_matrix=_cov_matrix(analysis.returns_smooth, analysis.metrics_df),
+                decision_context=decision_context.value,
             )
         except EvaluationError as exc:
             raise CliError("evaluation", str(exc)) from exc
@@ -380,6 +395,7 @@ def evaluate(
                 "rc_over_thresh_pct": rc_threshold,
                 "e_thresh": e_threshold,
                 "target_weights": None,
+                "decision_context": decision_context.value,
             },
             "ips_config_snapshot": evaluation.ips_config_snapshot,
         }
@@ -412,6 +428,7 @@ def evaluate(
                     "period": parsed_period,
                     "rf": rf,
                     "bench": bench_ticker,
+                    "decision_context": decision_context.value,
                     "database_path": str(db_path()),
                 },
                 "warnings": warnings,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -24,6 +26,12 @@ class EvaluationRunRequest(BaseModel):
     rc_over_thresh_pct: float = 1.5
     e_thresh: float = 0.5
     target_weights: dict[str, float] | None = Field(default=None)
+    decision_context: Literal[
+        "regular_review",
+        "market_correction",
+        "sharp_drop_review",
+        "rebalance_review",
+    ] = "regular_review"
 
 
 def _cov_matrix_for_session(session_id: str, metrics_df: pd.DataFrame):
@@ -61,6 +69,7 @@ async def run_evaluation_endpoint(payload: EvaluationRunRequest, request: Reques
             payload.rc_over_thresh_pct,
             payload.e_thresh,
             cov_matrix=_cov_matrix_for_session(session_id, metrics_df),
+            decision_context=payload.decision_context,
         )
     except EvaluationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -82,6 +91,7 @@ async def run_evaluation_endpoint(payload: EvaluationRunRequest, request: Reques
             "rc_over_thresh_pct": payload.rc_over_thresh_pct,
             "e_thresh": payload.e_thresh,
             "target_weights": payload.target_weights,
+            "decision_context": payload.decision_context,
         },
     )
 

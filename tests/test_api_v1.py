@@ -257,7 +257,10 @@ def test_evaluation_api_and_download(monkeypatch):
             missing_tickers=[],
         )
 
+    captured_evaluation_kwargs = {}
+
     def fake_run_evaluation(*args, **kwargs):
+        captured_evaluation_kwargs.update(kwargs)
         proposal = pd.DataFrame(
             {
                 "ticker": ["VOO"],
@@ -295,8 +298,12 @@ def test_evaluation_api_and_download(monkeypatch):
     monkeypatch.setattr("api.v1.evaluation.run_evaluation", fake_run_evaluation)
     client.post("/api/v1/analysis/run", json={})
 
-    response = client.post("/api/v1/evaluation/run", json={})
+    response = client.post(
+        "/api/v1/evaluation/run",
+        json={"decision_context": "market_correction"},
+    )
     assert response.status_code == 200
+    assert captured_evaluation_kwargs["decision_context"] == "market_correction"
     proposal_row = response.json()["proposal"][0]
     assert proposal_row["current_weight_pct"] == 100.0
     assert proposal_row["rc_gap_pct"] == 0.0
@@ -345,7 +352,10 @@ def test_analysis_rerun_clears_stale_evaluation_outputs(monkeypatch):
             missing_tickers=[],
         )
 
+    captured_evaluation_kwargs = {}
+
     def fake_run_evaluation(*args, **kwargs):
+        captured_evaluation_kwargs.update(kwargs)
         proposal = pd.DataFrame(
             {
                 "ticker": ["VOO"],
@@ -384,6 +394,7 @@ def test_analysis_rerun_clears_stale_evaluation_outputs(monkeypatch):
 
     assert client.post("/api/v1/analysis/run", json={"period": 12}).status_code == 200
     assert client.post("/api/v1/evaluation/run", json={}).status_code == 200
+    assert captured_evaluation_kwargs["decision_context"] == "regular_review"
     assert client.get("/api/v1/evaluation/download-csv?type=proposal").status_code == 200
 
     assert client.post("/api/v1/analysis/run", json={"period": 6}).status_code == 200
