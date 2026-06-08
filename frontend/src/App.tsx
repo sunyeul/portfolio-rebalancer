@@ -41,7 +41,11 @@ import {
   type AnalysisResponse,
   type ActionPriority,
   type AssetRow,
+  type BacktestResponse,
+  type BacktestStrategy,
   type ConfigOption,
+  type CounterfactualResponse,
+  type CounterfactualScenario,
   type EvaluationResponse,
   type IpsRule,
   type MetricRow,
@@ -59,6 +63,8 @@ import {
   listSnapshots,
   loadSnapshot,
   runAnalysis,
+  runBacktest,
+  runCounterfactual,
   runEvaluation,
   saveCurrentState,
   saveIpsRules,
@@ -86,6 +92,17 @@ const decisionContextOptions = [
   { value: 'sharp_drop_review', label: '급락 후 추매 검토' },
   { value: 'rebalance_review', label: '비중 리밸런싱 점검' }
 ] as const;
+const counterfactualScenarioOptions: Array<{ value: CounterfactualScenario; label: string; description: string }> = [
+  { value: 'core_reinforcement', label: '코어 보강', description: '부족한 코어 목표 비중을 정기매수 조정으로 더 우선합니다.' },
+  { value: 'pause_satellite_new_buys', label: '위성 신규매수 중단', description: '위성의 추가 매수분만 막고, 초과 위성의 감액 검토는 유지합니다.' },
+  { value: 'dca_shift_to_core', label: '정기매수 코어 이동', description: '위성으로 향할 신규 정기매수 여력을 코어 쪽으로 돌려봅니다.' }
+];
+const backtestStrategyOptions: Array<{ value: BacktestStrategy; label: string; description: string }> = [
+  { value: 'current_ips', label: '현재 IPS 유지', description: '현재 IPS 목표와 평가 모드를 그대로 적용하는 기준 정책입니다.' },
+  { value: 'core_first_dca', label: '코어 부족분 우선', description: '코어가 목표보다 낮으면 정기매수 여력을 코어 회복에 먼저 둡니다.' },
+  { value: 'pause_overweight_satellite', label: '위성 초과 신규매수 중단', description: '위성이 IPS 상한을 넘는 기간에는 위성 신규매수를 막습니다.' },
+  { value: 'return_chasing_reference', label: '수익률 중심 참고', description: '최근 수익률을 우선한 비교용 정책이며 IPS 적합성 판단의 반례로 봅니다.' }
+];
 type AppView = 'workbench' | 'settings';
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -107,6 +124,13 @@ function groupLabel(value: string | null | undefined) {
 function pct(value: number | null | undefined, fromUnit = true) {
   if (value === null || value === undefined) return 'N/A';
   return `${(fromUnit ? value * 100 : value).toFixed(2)}%`;
+}
+
+function signedPct(value: number | null | undefined, fromUnit = true) {
+  if (value === null || value === undefined) return 'N/A';
+  const numeric = fromUnit ? value * 100 : value;
+  const sign = numeric > 0 ? '+' : '';
+  return `${sign}${numeric.toFixed(2)}%`;
 }
 
 function num(value: number | null | undefined) {
@@ -187,6 +211,16 @@ export function App() {
   const [portfolio, setPortfolio] = useState<AssetRow[]>([]);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [evaluation, setEvaluation] = useState<EvaluationResponse | null>(null);
+  const [counterfactualScenario, setCounterfactualScenario] = useState<CounterfactualScenario>('core_reinforcement');
+  const [counterfactual, setCounterfactual] = useState<CounterfactualResponse | null>(null);
+  const [backtestStrategies, setBacktestStrategies] = useState<BacktestStrategy[]>([
+    'current_ips',
+    'core_first_dca',
+    'pause_overweight_satellite'
+  ]);
+  const [backtest, setBacktest] = useState<BacktestResponse | null>(null);
+  const [runCounterfactualAfterEvaluation, setRunCounterfactualAfterEvaluation] = useState(true);
+  const [runBacktestAfterEvaluation, setRunBacktestAfterEvaluation] = useState(false);
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<number | null>(null);
   const [newPortfolioName, setNewPortfolioName] = useState('');
   const [snapshotName, setSnapshotName] = useState('');
@@ -255,6 +289,8 @@ export function App() {
     setPortfolio(currentStateQuery.data.portfolio.assets);
     setAnalysis(currentStateQuery.data.analysis);
     setEvaluation(currentStateQuery.data.evaluation);
+    setCounterfactual(null);
+    setBacktest(null);
   }, [currentStateQuery.data]);
 
   const { register, watch } = useForm<SettingsValues>({
@@ -292,6 +328,8 @@ export function App() {
       setPortfolio(data.assets);
       setAnalysis(null);
       setEvaluation(null);
+      setCounterfactual(null);
+      setBacktest(null);
       await persistCurrentState();
     }
   });
@@ -315,6 +353,8 @@ export function App() {
     onSuccess: async (data) => {
       setAnalysis(data);
       setEvaluation(null);
+      setCounterfactual(null);
+      setBacktest(null);
       await persistCurrentState();
     }
   });
@@ -323,7 +363,40 @@ export function App() {
     mutationFn: runEvaluation,
     onSuccess: async (data) => {
       setEvaluation(data);
+      setCounterfactual(null);
+      setBacktest(null);
+      const parsedSettings = settingsSchema.parse(settings);
+      if (runCounterfactualAfterEvaluation) {
+        counterfactualMutation.mutate({
+          scenario: counterfactualScenario,
+          rc_over_thresh_pct: parsedSettings.rcOverThreshPct,
+          e_thresh: parsedSettings.eThresh,
+          decision_context: parsedSettings.decisionContext
+        });
+      }
+      if (runBacktestAfterEvaluation && backtestStrategies.length > 0) {
+        backtestMutation.mutate({
+          strategies: backtestStrategies,
+          frequency: 'monthly',
+          decision_context: parsedSettings.decisionContext,
+          rf: parsedSettings.rfPct / 100
+        });
+      }
       await persistCurrentState();
+    }
+  });
+
+  const counterfactualMutation = useMutation({
+    mutationFn: runCounterfactual,
+    onSuccess: (data) => {
+      setCounterfactual(data);
+    }
+  });
+
+  const backtestMutation = useMutation({
+    mutationFn: runBacktest,
+    onSuccess: (data) => {
+      setBacktest(data);
     }
   });
 
@@ -416,6 +489,8 @@ export function App() {
       setPortfolio(data.portfolio.assets);
       setAnalysis(data.analysis);
       setEvaluation(data.evaluation);
+      setCounterfactual(null);
+      setBacktest(null);
       setSelectedPortfolioId(data.snapshot.portfolio_id);
       await queryClient.invalidateQueries({ queryKey: ['portfolio-current-state', data.snapshot.portfolio_id] });
     }
@@ -503,6 +578,44 @@ export function App() {
     []
   );
 
+  const counterfactualDeltaColumns = useMemo<ColumnDef<CounterfactualResponse['deltas']['assets'][number]>[]>(
+    () => [
+      { accessorKey: 'ticker', header: '티커' },
+      { accessorKey: 'baseline_weight', header: '기준 비중', cell: ({ row }) => pct(row.original.baseline_weight) },
+      { accessorKey: 'scenario_weight', header: '정책 후 비중', cell: ({ row }) => pct(row.original.scenario_weight) },
+      { accessorKey: 'delta_weight_pct', header: '비중 변화', cell: ({ row }) => pct(row.original.delta_weight_pct, false) },
+      { accessorKey: 'delta_risk_contribution_pct', header: 'RC 변화', cell: ({ row }) => pct(row.original.delta_risk_contribution_pct, false) },
+      { accessorKey: 'baseline_gap_pct', header: '기준 갭', cell: ({ row }) => pct(row.original.baseline_gap_pct, false) },
+      { accessorKey: 'scenario_gap_pct', header: '정책 후 갭', cell: ({ row }) => pct(row.original.scenario_gap_pct, false) }
+    ],
+    []
+  );
+
+  const actionChangeColumns = useMemo<ColumnDef<CounterfactualResponse['action_changes'][number]>[]>(
+    () => [
+      { accessorKey: 'ticker', header: '티커' },
+      { accessorKey: 'baseline_label', header: '기준 액션' },
+      { accessorKey: 'scenario_label', header: '정책 후 액션' }
+    ],
+    []
+  );
+
+  const backtestColumns = useMemo<ColumnDef<BacktestResponse['strategy_summaries'][number]>[]>(
+    () => [
+      { accessorKey: 'strategy_label', header: '정책' },
+      { accessorKey: 'ips_violation_count', header: 'IPS 위반' },
+      { accessorKey: 'satellite_over_periods', header: '위성 초과' },
+      { accessorKey: 'risk_contribution_over_count', header: 'RC 초과' },
+      { accessorKey: 'adjustment_count', header: '조정 빈도' },
+      { accessorKey: 'avg_core_gap', header: '평균 코어 갭', cell: ({ row }) => pct(row.original.avg_core_gap) },
+      nullableNumberColumn('cagr', 'CAGR', (row) => row.cagr, pct),
+      nullableNumberColumn('volatility', '변동성', (row) => row.volatility, pct),
+      nullableNumberColumn('max_drawdown', 'MDD', (row) => row.max_drawdown, pct),
+      nullableNumberColumn('sharpe', 'Sharpe', (row) => row.sharpe, num)
+    ],
+    []
+  );
+
   function syncText(nextText: string) {
     setText(nextText);
     setRows(parsePortfolioText(nextText));
@@ -553,6 +666,34 @@ export function App() {
       rc_over_thresh_pct: parsedSettings.rcOverThreshPct,
       e_thresh: parsedSettings.eThresh,
       decision_context: parsedSettings.decisionContext
+    });
+  }
+
+  function runCurrentCounterfactual() {
+    const parsedSettings = settingsSchema.parse(settings);
+    counterfactualMutation.mutate({
+      scenario: counterfactualScenario,
+      rc_over_thresh_pct: parsedSettings.rcOverThreshPct,
+      e_thresh: parsedSettings.eThresh,
+      decision_context: parsedSettings.decisionContext
+    });
+  }
+
+  function toggleBacktestStrategy(strategy: BacktestStrategy) {
+    setBacktestStrategies((current) =>
+      current.includes(strategy)
+        ? current.filter((item) => item !== strategy)
+        : [...current, strategy]
+    );
+  }
+
+  function runCurrentBacktest() {
+    const parsedSettings = settingsSchema.parse(settings);
+    backtestMutation.mutate({
+      strategies: backtestStrategies,
+      frequency: 'monthly',
+      decision_context: parsedSettings.decisionContext,
+      rf: parsedSettings.rfPct / 100
     });
   }
 
@@ -647,6 +788,42 @@ export function App() {
           },
           { label: '비중' }
         )
+      ]
+    : [];
+  const selectedCounterfactualOption =
+    counterfactualScenarioOptions.find((option) => option.value === counterfactualScenario) ??
+    counterfactualScenarioOptions[0];
+  const selectedBacktestOptions = backtestStrategyOptions.filter((option) =>
+    backtestStrategies.includes(option.value)
+  );
+  const counterfactualReadout = counterfactual
+    ? [
+        `코어 ${signedPct(counterfactual.deltas.groups.core?.delta_pct ?? 0, false)}, 위성 ${signedPct(counterfactual.deltas.groups.satellite?.delta_pct ?? 0, false)}`,
+        counterfactual.action_changes.length
+          ? `액션 변화 ${counterfactual.action_changes.length}건은 아래 표에서 기준 액션과 정책 후 액션을 비교합니다.`
+          : '액션 변화가 없으면 이 대안은 현재 IPS 판단을 크게 바꾸지 않습니다.',
+        counterfactual.warnings.length
+          ? '경고가 있으면 비중 변화보다 데이터 품질과 투자 논리 확인을 먼저 봅니다.'
+          : '경고가 없으면 비중, 위험기여도, 목표 갭 변화 순서로 보면 됩니다.'
+      ]
+    : [];
+  const bestIpsBacktest = backtest?.strategy_summaries[0] ?? null;
+  const bestReturnBacktest = backtest?.strategy_summaries.reduce(
+    (best, row) => {
+      if (!best) return row;
+      return (row.cagr ?? -Infinity) > (best.cagr ?? -Infinity) ? row : best;
+    },
+    null as BacktestResponse['strategy_summaries'][number] | null
+  ) ?? null;
+  const backtestReadout = backtest
+    ? [
+        bestIpsBacktest
+          ? `IPS 적합성 우선 정렬 기준의 첫 정책은 ${bestIpsBacktest.strategy_label}입니다.`
+          : '비교할 정책 결과가 없습니다.',
+        bestReturnBacktest && bestIpsBacktest && bestReturnBacktest.strategy !== bestIpsBacktest.strategy
+          ? `성과 지표만 보면 ${bestReturnBacktest.strategy_label}가 앞설 수 있지만, 먼저 IPS 위반과 위성/RC 초과를 확인합니다.`
+          : '성과 지표와 IPS 적합성이 크게 충돌하지 않는지 확인합니다.',
+        'CAGR, 변동성, MDD, Sharpe는 보조 지표이며 정책 채택 순위가 아닙니다.'
       ]
     : [];
 
@@ -1222,18 +1399,43 @@ export function App() {
                         ))}
                       </select>
                     </label>
+                    <div className="grid min-w-[230px] gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      <span className="text-xs font-bold text-slate-500">평가 후 검증</span>
+                      <label className="inline-flex items-center gap-2 font-semibold">
+                        <input
+                          className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
+                          type="checkbox"
+                          checked={runCounterfactualAfterEvaluation}
+                          onChange={(event) => setRunCounterfactualAfterEvaluation(event.target.checked)}
+                        />
+                        Counterfactual 자동 실행
+                      </label>
+                      <label className="inline-flex items-center gap-2 font-semibold">
+                        <input
+                          className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
+                          type="checkbox"
+                          checked={runBacktestAfterEvaluation}
+                          onChange={(event) => setRunBacktestAfterEvaluation(event.target.checked)}
+                        />
+                        제한 백테스트 자동 실행
+                      </label>
+                    </div>
                     <button
                       type="button"
                       className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
-                      disabled={!analysis || rowsDirty || evaluationMutation.isPending}
+                      disabled={!analysis || rowsDirty || evaluationMutation.isPending || counterfactualMutation.isPending || backtestMutation.isPending}
                       onClick={runCurrentEvaluation}
                     >
-                      {evaluationMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Play className="h-4 w-4" />}
+                      {evaluationMutation.isPending || counterfactualMutation.isPending || backtestMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Play className="h-4 w-4" />}
                       평가 실행
                     </button>
                   </div>
                 </div>
                 <ErrorLine error={evaluationMutation.error} />
+                <ErrorLine error={counterfactualMutation.error ?? backtestMutation.error} />
+                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  Counterfactual와 백테스트는 평가 결과의 후속 검증입니다. 자동 실행을 켜면 현재 판단 모드와 임계값을 그대로 사용합니다.
+                </div>
                 {analysis && rowsDirty && (
                   <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
                     세부 판단값 변경사항을 먼저 분석 결과에 반영해야 평가를 실행할 수 있습니다.
@@ -1262,6 +1464,158 @@ export function App() {
                     <a className="download-link" href={csvDownloadUrl('ips_actions')}><Download className="h-4 w-4" /> IPS CSV</a>
                     <a className="download-link" href={csvDownloadUrl('group_summary')}><Download className="h-4 w-4" /> 그룹 CSV</a>
                   </div>
+                )}
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <div className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-100 text-sm font-bold text-emerald-900">4</div>
+                      <h3 className="text-xl font-semibold text-slate-950">Counterfactual 비교</h3>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-500">현재 평가와 preset 정책 적용 결과를 IPS 변화량 중심으로 비교합니다.</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-600">{selectedCounterfactualOption.description}</p>
+                  </div>
+                  <div className="run-controls evaluation-controls">
+                    <label className="control-field wide">
+                      <span>대안 정책</span>
+                      <select
+                        className="table-input"
+                        value={counterfactualScenario}
+                        onChange={(event) => setCounterfactualScenario(event.target.value as CounterfactualScenario)}
+                      >
+                        {counterfactualScenarioOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                      disabled={!evaluation || rowsDirty || counterfactualMutation.isPending}
+                      onClick={runCurrentCounterfactual}
+                    >
+                      {counterfactualMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <LineChart className="h-4 w-4" />}
+                      정책 비교
+                    </button>
+                  </div>
+                </div>
+                <ErrorLine error={counterfactualMutation.error} />
+                <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
+                  <strong className="block font-bold">먼저 볼 것</strong>
+                  <span className="mt-1 block">코어/위성 비중 변화, 목표 갭 변화, 액션 변화, 경고 순서로 봅니다. 기대수익률 비교가 아니라 IPS 정책 차이 확인입니다.</span>
+                </div>
+                {counterfactual && (
+                  <>
+                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <MetricCard label="코어 변화" value={(counterfactual.deltas.groups.core?.delta_pct ?? 0) / 100} />
+                      <MetricCard label="위성 변화" value={(counterfactual.deltas.groups.satellite?.delta_pct ?? 0) / 100} />
+                      <MetricCard label="액션 변화" value={counterfactual.action_changes.length} format="number" />
+                      <MetricCard label="경고" value={counterfactual.warnings.length} format="number" />
+                    </div>
+                    <div className="mt-5 grid gap-3 lg:grid-cols-2">
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <h4 className="text-sm font-bold text-slate-800">결과 요약</h4>
+                        <ul className="mt-3 space-y-2 text-sm text-slate-600">
+                          {[...counterfactualReadout, ...counterfactual.interpretation].map((line) => (
+                            <li key={line}>{line}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <h4 className="text-sm font-bold text-slate-800">경고</h4>
+                        <ul className="mt-3 space-y-2 text-sm text-slate-600">
+                          {(counterfactual.warnings.length ? counterfactual.warnings : ['데이터 품질/투자 논리 경고가 없습니다.']).map((line) => (
+                            <li key={line}>{line}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                    <div className="mt-6">
+                      <h4 className="mb-3 text-sm font-bold text-slate-700">비중·위험 변화</h4>
+                      <p className="mb-3 text-sm text-slate-500">양수는 대안 정책 적용 후 늘어난 값, 음수는 줄어든 값입니다.</p>
+                      <DataTable data={counterfactual.deltas.assets} columns={counterfactualDeltaColumns} emptyLabel="변화량이 없습니다." />
+                    </div>
+                    <div className="mt-6">
+                      <h4 className="mb-3 text-sm font-bold text-slate-700">액션 변화</h4>
+                      <DataTable data={counterfactual.action_changes} columns={actionChangeColumns} emptyLabel="액션 변화가 없습니다." />
+                    </div>
+                  </>
+                )}
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <div className="grid h-8 w-8 place-items-center rounded-lg bg-amber-100 text-sm font-bold text-amber-900">5</div>
+                      <h3 className="text-xl font-semibold text-slate-950">제한된 IPS 백테스트</h3>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-500">월간 점검 기준으로 정책별 IPS 위반, 위성 초과, 위험기여도 초과, 조정 빈도를 비교합니다.</p>
+                  </div>
+                  <div className="run-controls analysis-controls">
+                    <div className="grid min-w-[260px] gap-2">
+                      <span className="text-xs font-bold text-slate-500">비교 정책</span>
+                      <div className="flex flex-wrap gap-2">
+                        {backtestStrategyOptions.map((option) => (
+                          <label key={option.value} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700" title={option.description}>
+                            <input
+                              className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
+                              type="checkbox"
+                              checked={backtestStrategies.includes(option.value)}
+                              onChange={() => toggleBacktestStrategy(option.value)}
+                            />
+                            {option.label}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                      disabled={!analysis || rowsDirty || backtestStrategies.length === 0 || backtestMutation.isPending}
+                      onClick={runCurrentBacktest}
+                    >
+                      {backtestMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Play className="h-4 w-4" />}
+                      월간 검증
+                    </button>
+                  </div>
+                </div>
+                <ErrorLine error={backtestMutation.error} />
+                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                    <strong className="block font-bold">먼저 볼 것</strong>
+                    <span className="mt-1 block">IPS 위반, 위성 초과, RC 초과, 조정 빈도를 먼저 보고 성과 지표는 나중에 봅니다.</span>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    <strong className="block font-bold text-slate-800">선택한 정책</strong>
+                    <span className="mt-1 block">
+                      {selectedBacktestOptions.length
+                        ? selectedBacktestOptions.map((option) => `${option.label}: ${option.description}`).join(' / ')
+                        : '비교할 정책을 1개 이상 선택하세요.'}
+                    </span>
+                  </div>
+                </div>
+                {backtest && (
+                  <>
+                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <MetricCard label="비교 정책" value={backtest.strategy_summaries.length} format="number" />
+                      <MetricCard label="최소 IPS 위반" value={Math.min(...backtest.strategy_summaries.map((row) => row.ips_violation_count))} format="number" />
+                      <MetricCard label="최소 위성 초과" value={Math.min(...backtest.strategy_summaries.map((row) => row.satellite_over_periods))} format="number" />
+                      <MetricCard label="최소 RC 초과" value={Math.min(...backtest.strategy_summaries.map((row) => row.risk_contribution_over_count))} format="number" />
+                    </div>
+                    <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+                      {backtestReadout.map((line) => (
+                        <span key={line} className="block">{line}</span>
+                      ))}
+                    </div>
+                    <div className="mt-6">
+                      <DataTable data={backtest.strategy_summaries} columns={backtestColumns} emptyLabel="백테스트 결과가 없습니다." />
+                    </div>
+                  </>
                 )}
               </section>
             </>

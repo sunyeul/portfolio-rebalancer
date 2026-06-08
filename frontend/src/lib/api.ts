@@ -80,6 +80,91 @@ export type EvaluationResponse = {
   ips_config_snapshot?: Record<string, unknown> | null;
 };
 
+export type CounterfactualScenario =
+  | 'current_proposal'
+  | 'core_reinforcement'
+  | 'pause_satellite_new_buys'
+  | 'dca_shift_to_core';
+
+export type DecisionContext =
+  | 'regular_review'
+  | 'market_correction'
+  | 'sharp_drop_review'
+  | 'rebalance_review';
+
+export type CounterfactualAssetDelta = {
+  ticker: string;
+  baseline_weight: number;
+  scenario_weight: number;
+  delta_weight_pct: number;
+  baseline_risk_contribution: number;
+  scenario_risk_contribution: number;
+  delta_risk_contribution_pct: number;
+  baseline_gap_pct: number;
+  scenario_gap_pct: number;
+};
+
+export type CounterfactualResponse = {
+  baseline: {
+    weights: Record<string, number>;
+    risk_contributions: Record<string, number>;
+    target_gaps_pct: Record<string, number>;
+    group_weights: Record<string, number>;
+    actions: Record<string, string>;
+    action_labels: Record<string, string>;
+  };
+  scenario: {
+    weights: Record<string, number>;
+    risk_contributions: Record<string, number>;
+    target_gaps_pct: Record<string, number>;
+    group_weights: Record<string, number>;
+    actions: Record<string, string>;
+    action_labels: Record<string, string>;
+  };
+  deltas: {
+    assets: CounterfactualAssetDelta[];
+    groups: Record<string, { baseline: number; scenario: number; delta_pct: number }>;
+  };
+  action_changes: Array<{
+    ticker: string;
+    baseline_action: string;
+    scenario_action: string;
+    baseline_label: string;
+    scenario_label: string;
+  }>;
+  warnings: string[];
+  interpretation: string[];
+};
+
+export type BacktestStrategy =
+  | 'current_ips'
+  | 'core_first_dca'
+  | 'pause_overweight_satellite'
+  | 'return_chasing_reference';
+
+export type BacktestStrategySummary = {
+  strategy: string;
+  strategy_label: string;
+  decision_context: string;
+  cagr: number | null;
+  volatility: number | null;
+  max_drawdown: number | null;
+  sharpe: number | null;
+  ips_violation_count: number;
+  satellite_over_periods: number;
+  risk_contribution_over_count: number;
+  adjustment_count: number;
+  avg_core_gap: number;
+  months_to_core_target_recovery: number | null;
+};
+
+export type BacktestResponse = {
+  strategy_summaries: BacktestStrategySummary[];
+  ips_fit_summary: Array<Record<string, unknown>>;
+  performance_summary: Array<Record<string, unknown>>;
+  timeline: Array<Record<string, unknown>>;
+};
+
 export type ConfigOption = {
   value: string;
   label: string;
@@ -211,10 +296,34 @@ export function runAnalysis(payload: {
 export function runEvaluation(payload: {
   rc_over_thresh_pct: number;
   e_thresh: number;
-  decision_context: 'regular_review' | 'market_correction' | 'sharp_drop_review' | 'rebalance_review';
+  decision_context: DecisionContext;
   target_weights?: Record<string, number>;
 }) {
   return requestJson<EvaluationResponse>('/api/v1/evaluation/run', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function runCounterfactual(payload: {
+  scenario: CounterfactualScenario;
+  rc_over_thresh_pct: number;
+  e_thresh: number;
+  decision_context: DecisionContext;
+}) {
+  return requestJson<CounterfactualResponse>('/api/v1/simulation/counterfactual', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function runBacktest(payload: {
+  strategies: BacktestStrategy[];
+  frequency: 'monthly';
+  decision_context: DecisionContext;
+  rf?: number;
+}) {
+  return requestJson<BacktestResponse>('/api/v1/simulation/backtest', {
     method: 'POST',
     body: JSON.stringify(payload)
   });
