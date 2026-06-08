@@ -220,8 +220,6 @@ export function App() {
     'pause_overweight_satellite'
   ]);
   const [backtest, setBacktest] = useState<BacktestResponse | null>(null);
-  const [runCounterfactualAfterEvaluation, setRunCounterfactualAfterEvaluation] = useState(true);
-  const [runBacktestAfterEvaluation, setRunBacktestAfterEvaluation] = useState(false);
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<number | null>(null);
   const [newPortfolioName, setNewPortfolioName] = useState('');
   const [snapshotName, setSnapshotName] = useState('');
@@ -382,23 +380,6 @@ export function App() {
       setEvaluation(data);
       setCounterfactual(null);
       setBacktest(null);
-      const parsedSettings = settingsSchema.parse(settings);
-      if (runCounterfactualAfterEvaluation) {
-        counterfactualMutation.mutate({
-          scenario: counterfactualScenario,
-          rc_over_thresh_pct: parsedSettings.rcOverThreshPct,
-          e_thresh: parsedSettings.eThresh,
-          decision_context: parsedSettings.decisionContext
-        });
-      }
-      if (runBacktestAfterEvaluation && backtestStrategies.length > 0) {
-        backtestMutation.mutate({
-          strategies: backtestStrategies,
-          frequency: 'monthly',
-          decision_context: parsedSettings.decisionContext,
-          rf: parsedSettings.rfPct / 100
-        });
-      }
       await persistCurrentState();
     }
   });
@@ -1414,42 +1395,20 @@ export function App() {
                         ))}
                       </select>
                     </label>
-                    <div className="grid min-w-[230px] gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                      <span className="text-xs font-bold text-slate-500">평가 후 검증</span>
-                      <label className="inline-flex items-center gap-2 font-semibold">
-                        <input
-                          className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
-                          type="checkbox"
-                          checked={runCounterfactualAfterEvaluation}
-                          onChange={(event) => setRunCounterfactualAfterEvaluation(event.target.checked)}
-                        />
-                        Counterfactual 자동 실행
-                      </label>
-                      <label className="inline-flex items-center gap-2 font-semibold">
-                        <input
-                          className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
-                          type="checkbox"
-                          checked={runBacktestAfterEvaluation}
-                          onChange={(event) => setRunBacktestAfterEvaluation(event.target.checked)}
-                        />
-                        제한 백테스트 자동 실행
-                      </label>
-                    </div>
                     <button
                       type="button"
                       className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
-                      disabled={!analysis || rowsDirty || evaluationMutation.isPending || counterfactualMutation.isPending || backtestMutation.isPending}
+                      disabled={!analysis || rowsDirty || evaluationMutation.isPending}
                       onClick={runCurrentEvaluation}
                     >
-                      {evaluationMutation.isPending || counterfactualMutation.isPending || backtestMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Play className="h-4 w-4" />}
+                      {evaluationMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Play className="h-4 w-4" />}
                       평가 실행
                     </button>
                   </div>
                 </div>
                 <ErrorLine error={evaluationMutation.error} />
-                <ErrorLine error={counterfactualMutation.error ?? backtestMutation.error} />
                 <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                  Counterfactual와 백테스트는 평가 결과의 후속 검증입니다. 자동 실행을 켜면 현재 판단 모드와 임계값을 그대로 사용합니다.
+                  Counterfactual와 백테스트는 평가 결과의 후속 검증입니다. 아래 검증 섹션에서 필요할 때 별도로 실행합니다.
                 </div>
                 {analysis && rowsDirty && (
                   <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
