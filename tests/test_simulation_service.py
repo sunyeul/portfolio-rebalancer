@@ -105,7 +105,7 @@ def test_pause_satellite_new_buys_keeps_satellite_reduction_available_when_overw
         e_thresh=0.5,
     )
 
-    assert result["scenario"]["actions"]["UFO"] == "decrease_dca"
+    assert result["scenario"]["actions"]["UFO"] == "consider_rebalance_sell"
     assert result["deltas"]["groups"]["satellite"]["delta_pct"] == 0
 
 
@@ -194,6 +194,7 @@ def test_ips_backtest_applies_selected_decision_context_to_monthly_policy_gate()
 
     regular_core = regular["timeline"][0]["core_weight"]
     correction_core = correction["timeline"][0]["core_weight"]
-    assert correction_core > regular_core
+    assert regular_core == 0.8
+    assert correction_core == 0.8
     assert regular["timeline"][0]["decision_context"] == "regular_review"
     assert correction["timeline"][0]["decision_context"] == "market_correction"

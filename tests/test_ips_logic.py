@@ -22,7 +22,25 @@ def _ips_config():
             "hold_observe": 6,
             "block_action": 7,
         },
+        "rules": {"prefer_dca_over_sell": True},
     }
+
+
+def _row(**overrides):
+    base = {
+        "risk_over": False,
+        "efficiency_warning": False,
+        "IPS적합도": 82.0,
+        "IPS등급": "high",
+        "갭%": 3.0,
+        "실행": True,
+        "수치후보": True,
+        "group": "core",
+        "dca_enabled": True,
+        "thesis_status": "intact",
+    }
+    base.update(overrides)
+    return base
 
 
 def test_compute_group_summary_and_allocation_status():
@@ -45,167 +63,45 @@ def test_compute_group_summary_and_allocation_status():
     assert status["satellite_status"] == "in_range"
 
 
-def test_risk_ok_efficiency_good_positive_gap_classifies_as_increase_dca():
+def test_high_ips_fit_positive_core_gap_classifies_as_increase_dca():
     result = classify_ips_action(
-        {
-            "risk_over": False,
-            "efficiency_good": True,
-            "갭%": 3.0,
-            "실행": True,
-            "group": "core",
-            "dca_enabled": True,
-            "thesis_status": "intact",
-        },
+        _row(),
         {"core_status": "under_target", "satellite_status": "in_range"},
         _ips_config(),
     )
 
     assert result["ips_action"] == "increase_dca"
     assert result["execution_type"] == "dca_adjustment"
-    assert result["decision_context"] == "regular_review"
-    assert result["action_label"] == "정기매수 증액 후보"
-    assert result["decision_summary"] == "목표 대비 부족하고 위험·효율 조건이 정기매수 보강을 허용합니다."
-    assert result["decision_summary"] != result["action_label"]
+    assert result["decision_summary"] == "IPS 적합 정기매수 증액 후보"
+    assert "ips_fit_high" in result["reason_codes"]
 
 
-def test_execution_type_mapping_for_core_actions():
-    cases = [
-        (
-            {
-                "risk_over": False,
-                "efficiency_good": True,
-                "갭%": 0.0,
-                "실행": False,
-                "group": "core",
-            },
-            "hold_observe",
-            "observe",
-        ),
-        (
-            {
-                "risk_over": False,
-                "efficiency_good": False,
-                "갭%": 3.0,
-                "실행": True,
-                "group": "core",
-            },
-            "review_thesis",
-            "review_required",
-        ),
-        (
-            {
-                "risk_over": True,
-                "efficiency_good": False,
-                "갭%": -3.0,
-                "실행": True,
-                "group": "satellite",
-                "dca_enabled": False,
-                "thesis_status": "broken",
-            },
-            "consider_rebalance_sell",
-            "exceptional_sell_review",
-        ),
-        (
-            {
-                "risk_over": False,
-                "efficiency_good": True,
-                "갭%": 3.0,
-                "실행": True,
-                "group": "core",
-                "data_quality_low": True,
-            },
-            "block_action",
-            "blocked",
-        ),
-    ]
-
-    for row, expected_action, expected_execution_type in cases:
-        result = classify_ips_action(
-            row,
-            {"core_status": "in_range", "satellite_status": "in_range"},
-            _ips_config(),
-        )
-        assert result["ips_action"] == expected_action
-        assert result["execution_type"] == expected_execution_type
-
-
-def test_market_correction_keeps_core_increase_with_core_priority_summary():
+def test_high_ips_fit_negative_gap_classifies_as_decrease_dca():
     result = classify_ips_action(
-        {
-            "risk_over": False,
-            "efficiency_good": True,
-            "갭%": 3.0,
-            "실행": True,
-            "group": "core",
-            "dca_enabled": True,
-            "thesis_status": "intact",
-        },
+        _row(group="satellite", **{"갭%": -3.0, "risk_over": True}),
+        {"core_status": "in_range", "satellite_status": "in_range"},
+        _ips_config(),
+    )
+
+    assert result["ips_action"] == "decrease_dca"
+    assert result["execution_type"] == "dca_adjustment"
+    assert "prefer_dca_over_sell" in result["reason_codes"]
+
+
+def test_medium_core_positive_gap_allows_conditional_increase():
+    result = classify_ips_action(
+        _row(**{"IPS적합도": 62.0, "IPS등급": "medium"}),
         {"core_status": "under_target", "satellite_status": "in_range"},
         _ips_config(),
-        decision_context="market_correction",
     )
 
     assert result["ips_action"] == "increase_dca"
-    assert result["execution_type"] == "dca_adjustment"
-    assert result["decision_summary"] == "코어 정기매수 증액 우선"
-    assert "core_priority_context" in result["reason_codes"]
-    assert any("코어" in reason for reason in result["decision_reasons"])
+    assert result["decision_summary"] == "IPS 조건부 코어 정기매수 증액 후보"
 
 
-def test_market_correction_allows_core_increase_when_efficiency_is_low():
+def test_medium_satellite_positive_gap_requires_thesis_review():
     result = classify_ips_action(
-        {
-            "risk_over": False,
-            "efficiency_good": False,
-            "갭%": 3.0,
-            "실행": True,
-            "group": "core",
-            "dca_enabled": True,
-            "thesis_status": "intact",
-        },
-        {"core_status": "under_target", "satellite_status": "in_range"},
-        _ips_config(),
-        decision_context="market_correction",
-    )
-
-    assert result["ips_action"] == "increase_dca"
-    assert result["execution_type"] == "dca_adjustment"
-    assert result["decision_summary"] == "하락장 코어 정기매수 증액 후보"
-    assert "correction_core_reinforcement" in result["reason_codes"]
-    assert "efficiency_low" in result["reason_codes"]
-    assert any("최근 효율 점수는 낮지만" in note for note in result["risk_notes"])
-
-
-def test_regular_review_keeps_low_efficiency_core_in_review():
-    result = classify_ips_action(
-        {
-            "risk_over": False,
-            "efficiency_good": False,
-            "갭%": 3.0,
-            "실행": True,
-            "group": "core",
-            "dca_enabled": True,
-            "thesis_status": "intact",
-        },
-        {"core_status": "under_target", "satellite_status": "in_range"},
-        _ips_config(),
-    )
-
-    assert result["ips_action"] == "review_thesis"
-    assert "correction_core_reinforcement" not in result["reason_codes"]
-
-
-def test_market_correction_downgrades_satellite_increase_when_core_is_under_target():
-    result = classify_ips_action(
-        {
-            "risk_over": False,
-            "efficiency_good": True,
-            "갭%": 3.0,
-            "실행": True,
-            "group": "satellite",
-            "dca_enabled": True,
-            "thesis_status": "intact",
-        },
+        _row(group="satellite", **{"IPS적합도": 62.0, "IPS등급": "medium"}),
         {"core_status": "under_target", "satellite_status": "in_range"},
         _ips_config(),
         decision_context="market_correction",
@@ -213,42 +109,82 @@ def test_market_correction_downgrades_satellite_increase_when_core_is_under_targ
 
     assert result["ips_action"] == "review_thesis"
     assert result["execution_type"] == "review_required"
-    assert result["decision_summary"] == "하락장 위성 증액 전 점검"
-    assert "satellite_downgraded_for_core_priority" in result["reason_codes"]
+    assert result["decision_summary"] == "하락장 위성 추가매수 전 점검"
+    assert "satellite_correction_requires_review" in result["reason_codes"]
 
 
-def test_market_correction_satellite_low_efficiency_requires_review():
+def test_low_ips_fit_defaults_to_thesis_review():
     result = classify_ips_action(
-        {
-            "risk_over": False,
-            "efficiency_good": False,
-            "갭%": 3.0,
-            "실행": True,
-            "group": "satellite",
-            "dca_enabled": True,
-            "thesis_status": "intact",
-        },
+        _row(**{"IPS적합도": 38.0, "IPS등급": "low"}),
+        {"core_status": "in_range", "satellite_status": "in_range"},
+        _ips_config(),
+    )
+
+    assert result["ips_action"] == "review_thesis"
+    assert result["blocked_reason"] == "IPS 적합도가 낮아 실행보다 투자 논리 점검이 우선입니다."
+
+
+def test_low_data_quality_blocks_otherwise_executable_action():
+    result = classify_ips_action(
+        _row(data_quality_low=True),
+        {"core_status": "under_target", "satellite_status": "in_range"},
+        _ips_config(),
+    )
+
+    assert result["ips_action"] == "block_action"
+    assert result["execution_type"] == "blocked"
+
+
+def test_broken_thesis_negative_gap_can_consider_sell():
+    result = classify_ips_action(
+        _row(
+            group="satellite",
+            dca_enabled=False,
+            thesis_status="broken",
+            risk_over=True,
+            efficiency_warning=True,
+            **{"갭%": -3.0, "IPS적합도": 35.0, "IPS등급": "low"},
+        ),
+        {"core_status": "in_range", "satellite_status": "in_range"},
+        _ips_config(),
+    )
+
+    assert result["ips_action"] == "consider_rebalance_sell"
+    assert "sell_gate_passed" in result["reason_codes"]
+    assert "thesis_broken" in result["reason_codes"]
+
+
+def test_satellite_over_max_can_consider_sell_without_broken_thesis():
+    result = classify_ips_action(
+        _row(group="satellite", risk_over=True, **{"갭%": -3.0, "IPS적합도": 45.0, "IPS등급": "low"}),
+        {"core_status": "in_range", "satellite_status": "over_max"},
+        _ips_config(),
+    )
+
+    assert result["ips_action"] == "consider_rebalance_sell"
+    assert "sell_gate_passed" in result["reason_codes"]
+
+
+def test_market_correction_allows_core_reinforcement_even_with_efficiency_warning():
+    result = classify_ips_action(
+        _row(
+            efficiency_warning=True,
+            **{"IPS적합도": 62.0, "IPS등급": "medium"},
+        ),
         {"core_status": "under_target", "satellite_status": "in_range"},
         _ips_config(),
         decision_context="market_correction",
     )
 
-    assert result["ips_action"] == "review_thesis"
-    assert result["decision_summary"] == "하락장 위성 추가매수 전 점검"
-    assert "satellite_correction_requires_review" in result["reason_codes"]
+    assert result["ips_action"] == "increase_dca"
+    assert result["decision_summary"] == "하락장 코어 정기매수 증액 후보"
+    assert "efficiency_warning" in result["reason_codes"]
+    assert "correction_core_reinforcement" in result["reason_codes"]
 
 
 def test_sharp_drop_review_adds_buy_caution_without_immediate_buy_action():
     result = classify_ips_action(
-        {
-            "risk_over": False,
-            "efficiency_good": True,
-            "갭%": 3.0,
-            "실행": True,
-            "group": "core",
-            "dca_enabled": True,
-            "thesis_status": "intact",
-        },
+        _row(),
         {"core_status": "in_range", "satellite_status": "in_range"},
         _ips_config(),
         decision_context="sharp_drop_review",
@@ -259,78 +195,3 @@ def test_sharp_drop_review_adds_buy_caution_without_immediate_buy_action():
     assert result["ips_action"] != "exceptional_buy_review"
     assert "sharp_drop_buy_caution" in result["reason_codes"]
     assert any("FOMO" in note for note in result["risk_notes"])
-
-
-def test_risk_over_efficiency_low_broken_thesis_can_consider_sell():
-    result = classify_ips_action(
-        {
-            "risk_over": True,
-            "efficiency_good": False,
-            "갭%": -3.0,
-            "실행": True,
-            "group": "satellite",
-            "dca_enabled": False,
-            "thesis_status": "broken",
-        },
-        {"core_status": "in_range", "satellite_status": "in_range"},
-        _ips_config(),
-    )
-
-    assert result["ips_action"] == "consider_rebalance_sell"
-
-
-def test_risk_over_efficiency_low_intact_thesis_does_not_consider_sell():
-    result = classify_ips_action(
-        {
-            "risk_over": True,
-            "efficiency_good": False,
-            "갭%": -3.0,
-            "실행": True,
-            "group": "satellite",
-            "dca_enabled": True,
-            "thesis_status": "intact",
-        },
-        {"core_status": "in_range", "satellite_status": "in_range"},
-        _ips_config(),
-    )
-
-    assert result["ips_action"] in {"decrease_dca", "review_thesis"}
-    assert result["ips_action"] != "consider_rebalance_sell"
-
-
-def test_prefer_dca_over_sell_blocks_satellite_over_max_sell_until_thesis_breaks():
-    result = classify_ips_action(
-        {
-            "risk_over": True,
-            "efficiency_good": False,
-            "갭%": -3.0,
-            "실행": True,
-            "group": "satellite",
-            "dca_enabled": True,
-            "thesis_status": "intact",
-        },
-        {"core_status": "in_range", "satellite_status": "over_max"},
-        _ips_config(),
-    )
-
-    assert result["ips_action"] == "decrease_dca"
-    assert "prefer_dca_over_sell" in result["reason_codes"]
-
-
-def test_low_data_quality_blocks_otherwise_executable_action():
-    result = classify_ips_action(
-        {
-            "risk_over": False,
-            "efficiency_good": True,
-            "갭%": 3.0,
-            "실행": True,
-            "group": "core",
-            "dca_enabled": True,
-            "thesis_status": "intact",
-            "data_quality_low": True,
-        },
-        {"core_status": "under_target", "satellite_status": "in_range"},
-        _ips_config(),
-    )
-
-    assert result["ips_action"] == "block_action"

@@ -55,10 +55,10 @@ DECISION_CONTEXTS = {
 }
 
 DECISION_SUMMARIES = {
-    "increase_dca": "목표 대비 부족하고 위험·효율 조건이 정기매수 보강을 허용합니다.",
-    "decrease_dca": "목표 대비 초과 또는 위험 상승으로 신규 매수 축소가 우선입니다.",
+    "increase_dca": "IPS 적합도가 정기매수 보강을 허용합니다.",
+    "decrease_dca": "IPS 적합도와 초과 상태상 신규 매수 축소가 우선입니다.",
     "hold_observe": "수치 조정 기준을 넘지 않아 다음 점검까지 관찰합니다.",
-    "review_thesis": "수치만으로 증액하기 어려워 보유 논리 확인이 먼저입니다.",
+    "review_thesis": "IPS 조건이 충분하지 않아 보유 논리 확인이 먼저입니다.",
     "exceptional_buy_review": "정기매수로 부족분을 해소하기 어려운 예외 조건인지 확인해야 합니다.",
     "consider_rebalance_sell": "정기매수 조정으로 낮추기 어려운 초과 위험인지 확인해야 합니다.",
     "block_action": "데이터나 행동 동기가 불충분해 실행 판단을 차단합니다.",
@@ -70,8 +70,10 @@ REASON_TEXT = {
     "unclassified_group": "자산 그룹이 미분류 상태입니다.",
     "risk_ok": "위험기여도가 허용 범위 안에 있습니다.",
     "risk_over": "위험기여도가 기준을 초과했습니다.",
-    "efficiency_good": "효율 점수가 기준 이상입니다.",
-    "efficiency_low": "효율 점수가 기준보다 낮습니다.",
+    "ips_fit_high": "IPS 적합도가 높습니다.",
+    "ips_fit_medium": "IPS 적합도가 조건부 구간입니다.",
+    "ips_fit_low": "IPS 적합도가 낮습니다.",
+    "efficiency_warning": "효율 점수가 기준보다 낮습니다.",
     "positive_gap": "목표 비중 대비 부족합니다.",
     "negative_gap": "목표 비중 대비 초과 상태입니다.",
     "dca_disabled": "정기매수가 비활성화되어 있습니다.",
@@ -372,17 +374,25 @@ def classify_ips_action(
     decision_context = _normalize_decision_context(decision_context)
     gap = float(row.get("갭%", 0) or 0)
     risk_over = bool(row.get("risk_over", False))
-    efficiency_good = bool(row.get("efficiency_good", False))
+    efficiency_warning = bool(row.get("efficiency_warning", False))
+    ips_band = str(row.get("IPS등급", row.get("ips_fit_band", "low")) or "low")
+    ips_score = float(row.get("IPS적합도", row.get("ips_fit_score", 0)) or 0)
     group = fixed_group(row.get("group", DEFAULT_GROUP))
     dca_enabled = bool(row.get("dca_enabled", True))
     thesis_status = row.get("thesis_status", "unknown")
     should_execute = bool(row.get("수치후보", row.get("실행", False)))
     low_data_quality = bool(row.get("data_quality_low", False))
+    fit_reason = {
+        "high": "ips_fit_high",
+        "medium": "ips_fit_medium",
+        "low": "ips_fit_low",
+    }.get(ips_band, "ips_fit_low")
 
     if not should_execute:
         reason_codes = ["within_hysteresis_or_below_min_trade"]
         if low_data_quality:
             reason_codes.append("data_quality_low")
+        reason_codes.append(fit_reason)
         action = _action_result(
             "hold_observe",
             reason_codes,
@@ -399,7 +409,7 @@ def classify_ips_action(
             next_step += " 판단이 어려운 자산보다 코어 정기매수 증액을 우선합니다."
         action = _action_result(
             "review_thesis",
-            ["unclassified_group"],
+            ["unclassified_group", fit_reason],
             ips_config,
             decision_context,
             next_step=next_step,
@@ -411,7 +421,7 @@ def classify_ips_action(
     if low_data_quality:
         action = _action_result(
             "block_action",
-            ["data_quality_low"],
+            ["data_quality_low", fit_reason],
             ips_config,
             decision_context,
             blocked_reason="데이터 신뢰도가 낮아 실행 판단을 보류합니다.",
@@ -420,180 +430,217 @@ def classify_ips_action(
             action, row, allocation_status, decision_context, ips_config
         )
 
-    data_reasons = ["data_quality_low"] if low_data_quality else []
+    base_reasons = [fit_reason, "risk_over" if risk_over else "risk_ok"]
+    if efficiency_warning:
+        base_reasons.append("efficiency_warning")
 
-    if not risk_over and efficiency_good:
-        if gap > 0 and dca_enabled:
+    if thesis_status == "broken":
+        if gap < 0 and _sell_gate_allows(row, allocation_status):
             action = _action_result(
-                "increase_dca",
-                ["risk_ok", "efficiency_good", "positive_gap", *data_reasons],
+                "consider_rebalance_sell",
+                [*base_reasons, "negative_gap", "sell_gate_passed", "thesis_broken"],
                 ips_config,
                 decision_context,
+                decision_summary="투자 논리 훼손으로 예외적 매도 검토",
             )
             return apply_contextual_ips_overlay(
                 action, row, allocation_status, decision_context, ips_config
             )
-        reason_codes = ["risk_ok", "efficiency_good", *data_reasons]
-        if gap > 0:
-            reason_codes.extend(["positive_gap", "dca_disabled"])
-        action = _action_result("hold_observe", reason_codes, ips_config, decision_context)
+        action = _action_result(
+            "review_thesis",
+            [*base_reasons, "thesis_broken"],
+            ips_config,
+            decision_context,
+            decision_summary="투자 논리 훼손 점검",
+            next_step="투자 논리 훼손 원인을 확인하고 정기매수 중단 또는 예외적 정리를 검토합니다.",
+        )
         return apply_contextual_ips_overlay(
             action, row, allocation_status, decision_context, ips_config
         )
 
-    if risk_over and efficiency_good:
-        if gap < 0 and dca_enabled:
-            action = _action_result(
-                "decrease_dca",
-                ["risk_over", "efficiency_good", "negative_gap", *data_reasons],
-                ips_config,
-                decision_context,
-            )
-            return apply_contextual_ips_overlay(
-                action, row, allocation_status, decision_context, ips_config
-            )
-        reason_codes = ["risk_over", "efficiency_good", "avoid_immediate_increase", *data_reasons]
-        if gap < 0:
-            reason_codes.extend(["negative_gap", "dca_disabled"])
+    if gap > 0 and not dca_enabled:
         action = _action_result(
             "hold_observe",
+            [*base_reasons, "positive_gap", "dca_disabled"],
+            ips_config,
+            decision_context,
+            decision_summary="정기매수 비활성화로 증액 보류",
+        )
+        return apply_contextual_ips_overlay(
+            action, row, allocation_status, decision_context, ips_config
+        )
+
+    if gap < 0 and not dca_enabled and not _sell_gate_allows(row, allocation_status):
+        action = _action_result(
+            "review_thesis",
+            [*base_reasons, "negative_gap", "dca_disabled", "sell_gate_blocked"],
+            ips_config,
+            decision_context,
+            blocked_reason="정기매수 조정이 비활성화되어 있고 매도 게이트도 충족하지 못했습니다.",
+        )
+        return apply_contextual_ips_overlay(
+            action, row, allocation_status, decision_context, ips_config
+        )
+
+    if gap < 0 and _sell_gate_allows(row, allocation_status):
+        reason_codes = [*base_reasons, "negative_gap", "sell_gate_passed"]
+        if thesis_status == "broken":
+            reason_codes.append("thesis_broken")
+        else:
+            reason_codes.append("thesis_not_broken")
+        action = _action_result(
+            "consider_rebalance_sell",
             reason_codes,
             ips_config,
             decision_context,
+            decision_summary="IPS 초과 상태로 예외적 매도 검토",
         )
         return apply_contextual_ips_overlay(
             action, row, allocation_status, decision_context, ips_config
         )
 
-    if not risk_over and not efficiency_good:
-        correction_context = decision_context in {"market_correction", "sharp_drop_review"}
-        if (
-            correction_context
-            and group == "core"
-            and gap > 0
-            and dca_enabled
-            and thesis_status != "broken"
-        ):
+    correction_context = decision_context in {"market_correction", "sharp_drop_review"}
+
+    if ips_band == "high":
+        if gap > 0:
             action = _action_result(
                 "increase_dca",
-                [
-                    "risk_ok",
-                    "efficiency_low",
-                    "positive_gap",
-                    "correction_core_reinforcement",
-                    *data_reasons,
-                ],
+                [*base_reasons, "positive_gap"],
                 ips_config,
                 decision_context,
-                decision_summary="하락장 코어 정기매수 증액 후보",
+                decision_summary="IPS 적합 정기매수 증액 후보",
+            )
+            return apply_contextual_ips_overlay(
+                action, row, allocation_status, decision_context, ips_config
+            )
+        if gap < 0:
+            action = _action_result(
+                "decrease_dca",
+                [*base_reasons, "negative_gap", "prefer_dca_over_sell"],
+                ips_config,
+                decision_context,
+                decision_summary="IPS 초과 정기매수 감액 후보",
+            )
+            return apply_contextual_ips_overlay(
+                action, row, allocation_status, decision_context, ips_config
+            )
+        action = _action_result(
+            "hold_observe",
+            base_reasons,
+            ips_config,
+            decision_context,
+            decision_summary="IPS 적합 유지·관찰",
+        )
+        return apply_contextual_ips_overlay(
+            action, row, allocation_status, decision_context, ips_config
+        )
+
+    if ips_band == "medium":
+        if group == "core" and gap > 0 and dca_enabled:
+            reason_codes = [*base_reasons, "positive_gap"]
+            if correction_context:
+                reason_codes.append("correction_core_reinforcement")
+            action = _action_result(
+                "increase_dca",
+                reason_codes,
+                ips_config,
+                decision_context,
+                decision_summary=(
+                    "하락장 코어 정기매수 증액 후보"
+                    if correction_context
+                    else "IPS 조건부 코어 정기매수 증액 후보"
+                ),
                 risk_notes=[
-                    "최근 효율 점수는 낮지만, 하락장 코어 보강 원칙에 따라 정기매수 증액 후보로 분류했습니다."
+                    "IPS 적합도가 조건부 구간이므로 정기매수 증액 후 다음 점검에서 재확인합니다."
+                ]
+                if not correction_context
+                else [
+                    "최근 효율 점수는 낮을 수 있지만, 하락장 코어 보강 원칙을 우선합니다."
                 ],
                 next_step="다음 정기매수에서 부족한 코어 자산의 배분을 늘립니다.",
             )
             return apply_contextual_ips_overlay(
                 action, row, allocation_status, decision_context, ips_config
             )
-
-        if correction_context and group == "satellite" and gap > 0:
+        if gap < 0:
             action = _action_result(
-                "review_thesis",
-                [
-                    "risk_ok",
-                    "efficiency_low",
-                    "positive_gap",
-                    "satellite_correction_requires_review",
-                    *data_reasons,
-                ],
+                "decrease_dca",
+                [*base_reasons, "negative_gap", "prefer_dca_over_sell"],
                 ips_config,
                 decision_context,
-                decision_summary="하락장 위성 추가매수 전 점검",
-                next_step="위성 자산의 투자 논리와 장기 보유 가능성을 확인한 뒤 다음 정기매수 반영 여부를 결정합니다.",
+                decision_summary="IPS 조건부 초과 정기매수 감액 후보",
             )
             return apply_contextual_ips_overlay(
                 action, row, allocation_status, decision_context, ips_config
             )
-
+        reason_codes = [*base_reasons]
+        if gap > 0:
+            reason_codes.append("positive_gap")
+            if correction_context and group == "satellite":
+                reason_codes.append("satellite_correction_requires_review")
         action = _action_result(
             "review_thesis",
-            ["risk_ok", "efficiency_low", *data_reasons],
+            reason_codes,
             ips_config,
             decision_context,
+            decision_summary=(
+                "하락장 위성 추가매수 전 점검"
+                if correction_context and group == "satellite" and gap > 0
+                else "IPS 조건부 투자 논리 점검"
+            ),
+            next_step="투자 논리, 중복성, ETF 대체 가능성을 확인한 뒤 다음 정기매수 반영 여부를 결정합니다.",
         )
         return apply_contextual_ips_overlay(
             action, row, allocation_status, decision_context, ips_config
         )
 
-    if risk_over and not efficiency_good:
-        prefer_dca_over_sell = bool(
-            ips_config.get("rules", {}).get("prefer_dca_over_sell", True)
-        )
-        if (
-            prefer_dca_over_sell
-            and thesis_status != "broken"
-            and gap < 0
-            and dca_enabled
-        ):
-            action = _action_result(
-                "decrease_dca",
-                [
-                    "risk_over",
-                    "efficiency_low",
-                    "negative_gap",
-                    "thesis_not_broken",
-                    "prefer_dca_over_sell",
-                    *data_reasons,
-                ],
-                ips_config,
-                decision_context,
-            )
-            return apply_contextual_ips_overlay(
-                action, row, allocation_status, decision_context, ips_config
-            )
-        if _sell_gate_allows(row, allocation_status):
-            reason_codes = ["risk_over", "efficiency_low", "sell_gate_passed", *data_reasons]
-            if thesis_status == "broken":
-                reason_codes.append("thesis_broken")
-            else:
-                reason_codes.append("thesis_not_broken")
-            action = _action_result(
-                "consider_rebalance_sell",
-                reason_codes,
-                ips_config,
-                decision_context,
-            )
-            return apply_contextual_ips_overlay(
-                action, row, allocation_status, decision_context, ips_config
-            )
-        if gap < 0 and dca_enabled:
-            action = _action_result(
-                "decrease_dca",
-                [
-                    "risk_over",
-                    "efficiency_low",
-                    "negative_gap",
-                    "thesis_not_broken",
-                    "sell_gate_blocked",
-                    *data_reasons,
-                ],
-                ips_config,
-                decision_context,
-            )
-            return apply_contextual_ips_overlay(
-                action, row, allocation_status, decision_context, ips_config
-            )
+    if gap < 0 and dca_enabled:
         action = _action_result(
-            "review_thesis",
-            ["risk_over", "efficiency_low", "thesis_not_broken", "sell_gate_blocked", *data_reasons],
+            "decrease_dca",
+            [*base_reasons, "negative_gap", "thesis_not_broken", "prefer_dca_over_sell"],
             ips_config,
             decision_context,
-            blocked_reason="매도 게이트 조건을 충족하지 못했습니다.",
+            decision_summary="IPS 부적합 초과 정기매수 감액 후보",
         )
         return apply_contextual_ips_overlay(
             action, row, allocation_status, decision_context, ips_config
         )
 
-    action = _action_result("review_thesis", ["unclassified"], ips_config, decision_context)
+    if group == "core" and gap > 0 and dca_enabled and correction_context and ips_score >= 45:
+        action = _action_result(
+            "increase_dca",
+            [
+                *base_reasons,
+                "positive_gap",
+                "correction_core_reinforcement",
+            ],
+            ips_config,
+            decision_context,
+            decision_summary="하락장 코어 정기매수 증액 후보",
+            risk_notes=[
+                "IPS 적합도는 낮지만 하락장 코어 보강 원칙과 목표 부족 상태를 함께 반영합니다."
+            ],
+            next_step="다음 정기매수에서 부족한 코어 자산의 배분을 소폭 늘리고 다음 점검에서 재확인합니다.",
+        )
+        return apply_contextual_ips_overlay(
+            action, row, allocation_status, decision_context, ips_config
+        )
+
+    reason_codes = [*base_reasons]
+    if gap > 0:
+        reason_codes.append("positive_gap")
+        if group == "satellite":
+            reason_codes.append("satellite_correction_requires_review")
+    elif gap < 0:
+        reason_codes.extend(["negative_gap", "sell_gate_blocked"])
+    action = _action_result(
+        "review_thesis",
+        reason_codes,
+        ips_config,
+        decision_context,
+        decision_summary="IPS 부적합 투자 논리 점검",
+        blocked_reason="IPS 적합도가 낮아 실행보다 투자 논리 점검이 우선입니다.",
+    )
     return apply_contextual_ips_overlay(
         action, row, allocation_status, decision_context, ips_config
     )

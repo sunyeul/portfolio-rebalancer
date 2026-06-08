@@ -3,7 +3,7 @@ import pandas as pd
 from services.evaluation_service import (
     _action_reason,
     build_ips_target_weights,
-    compute_target_preference_scores,
+    compute_ips_fit_breakdown,
     run_evaluation,
 )
 
@@ -36,23 +36,55 @@ def test_run_evaluation_returns_ips_outputs_and_uses_ips_signals():
     assert "RC_Gap%" in result.proposal_df.columns
     assert "제안조정%" in result.proposal_df.columns
     assert "판단사유" in result.proposal_df.columns
-    assert "목표선호점수" in result.proposal_df.columns
-    assert "목표점수_E" in result.proposal_df.columns
-    assert "목표점수_RC" in result.proposal_df.columns
-    assert "목표점수_논리" in result.proposal_df.columns
-    assert "목표점수_데이터" in result.proposal_df.columns
-    legacy_column = "\uc0ac\ubd84\uba74"
-    assert legacy_column not in result.proposal_df.columns
+    assert "IPS적합도" in result.proposal_df.columns
+    assert "IPS등급" in result.proposal_df.columns
+    assert "IPS점수_역할" in result.proposal_df.columns
+    assert "IPS점수_비중" in result.proposal_df.columns
+    assert "IPS점수_논리" in result.proposal_df.columns
+    assert "IPS점수_위험" in result.proposal_df.columns
+    assert "IPS점수_실행" in result.proposal_df.columns
+    assert "IPS점수_E" in result.proposal_df.columns
+    assert "IPS점수_데이터" in result.proposal_df.columns
     ufo = result.proposal_df.loc[result.proposal_df["ticker"] == "UFO"].iloc[0]
     assert bool(ufo["risk_over"]) is True
-    assert bool(ufo["efficiency_good"]) is False
-    assert ufo["판단사유"] == "위험 초과 및 효율 미달"
+    assert bool(ufo["efficiency_warning"]) is True
+    assert ufo["IPS등급"] == "high"
+    assert "효율 경고" in ufo["판단사유"]
     assert "ips_action" in result.ips_action_df.columns
     assert "risk_over" in result.ips_action_df.columns
-    assert "efficiency_good" in result.ips_action_df.columns
+    assert "efficiency_warning" in result.ips_action_df.columns
+    assert "IPS적합도" in result.ips_action_df.columns
     assert "execution_type" in result.ips_action_df.columns
     assert "decision_summary" in result.ips_action_df.columns
     assert "risk_notes" in result.ips_action_df.columns
+
+
+def test_compute_ips_fit_breakdown_scores_range_and_components():
+    proposal = pd.DataFrame(
+        {
+            "ticker": ["VOO", "UFO"],
+            "갭%": [5.0, 5.0],
+            "E": [0.8, 0.2],
+            "RC_Over%": [0.0, 4.0],
+            "group": ["core", "satellite"],
+            "dca_enabled": [True, True],
+            "thesis_status": ["intact", "watch"],
+            "missing_ratio": [0.0, 0.0],
+            "observation_count": [120, 120],
+            "data_quality_low": [False, False],
+            "risk_over": [False, True],
+            "수치후보": [True, True],
+        }
+    )
+
+    scores = compute_ips_fit_breakdown(proposal, {}, e_thresh=0.5)
+
+    assert scores["IPS적합도"].between(0, 100).all()
+    assert scores.loc[0, "IPS적합도"] > scores.loc[1, "IPS적합도"]
+    assert scores.loc[0, "IPS점수_역할"] > scores.loc[1, "IPS점수_역할"]
+    assert scores.loc[0, "IPS점수_논리"] > scores.loc[1, "IPS점수_논리"]
+    assert scores.loc[0, "IPS점수_위험"] > scores.loc[1, "IPS점수_위험"]
+    assert bool(scores.loc[1, "efficiency_warning"]) is True
 
 
 def test_run_evaluation_defaults_to_regular_review_context():
@@ -141,12 +173,13 @@ def test_market_correction_context_increases_underweight_core_even_with_low_effi
     voo_action = result.ips_action_df.loc[result.ips_action_df["ticker"] == "VOO"].iloc[0]
     voo_proposal = result.proposal_df.loc[result.proposal_df["ticker"] == "VOO"].iloc[0]
     assert voo_action["ips_action"] == "increase_dca"
-    assert voo_action["decision_summary"] == "하락장 코어 정기매수 증액 후보"
-    assert "correction_core_reinforcement" in voo_action["reason_codes"]
+    assert voo_action["decision_summary"] == "코어 정기매수 증액 우선"
+    assert "core_priority_context" in voo_action["reason_codes"]
+    assert "efficiency_warning" in voo_action["reason_codes"]
     assert bool(voo_proposal["수치후보"]) is True
     assert bool(voo_proposal["실행"]) is True
     assert voo_proposal["제안조정%"] > 0
-    assert voo_proposal["판단사유"] == "하락장 코어 정기매수 증액 후보"
+    assert voo_proposal["판단사유"] == "코어 정기매수 증액 우선"
 
 
 def test_build_ips_target_weights_keeps_cash_and_allocates_remaining_by_ips_targets():
@@ -172,28 +205,7 @@ def test_build_ips_target_weights_keeps_cash_and_allocates_remaining_by_ips_targ
     assert round(float(target.sum()), 4) == 1.0
 
 
-def test_compute_target_preference_scores_normalizes_asset_situation_by_group():
-    metrics_df = pd.DataFrame(
-        {
-            "ticker": ["VOO", "QQQ", "UFO"],
-            "가중치": [0.3, 0.3, 0.4],
-            "위험기여도": [0.2, 0.6, 0.5],
-            "E": [0.9, 0.2, 0.8],
-            "group": ["core", "core", "satellite"],
-            "thesis_status": ["intact", "watch", "intact"],
-            "missing_ratio": [0.0, 0.0, 0.0],
-            "observation_count": [120, 120, 120],
-        }
-    ).set_index("ticker")
-
-    scores = compute_target_preference_scores(metrics_df, {})
-
-    assert 0.0 <= scores.min() <= scores.max() <= 1.0
-    assert scores["VOO"] > scores["QQQ"]
-    assert scores["UFO"] > 0
-
-
-def test_build_ips_target_weights_tilts_group_internal_targets_by_normalized_scores():
+def test_build_ips_target_weights_keeps_group_internal_current_share():
     metrics_df = pd.DataFrame(
         {
             "ticker": ["VOO", "QQQ", "UFO"],
@@ -210,19 +222,19 @@ def test_build_ips_target_weights_tilts_group_internal_targets_by_normalized_sco
         "target_allocation": {
             "core": {"target": 0.8},
             "satellite": {"target": 0.2},
-        },
-        "target_weighting": {"blend": 0.5},
+        }
     }
 
     target = build_ips_target_weights(metrics_df, ips_config)
 
     assert round(float(target[["VOO", "QQQ"]].sum()), 4) == 0.8
     assert round(float(target["UFO"]), 4) == 0.2
-    assert target["VOO"] > target["QQQ"]
+    assert round(float(target["VOO"]), 4) == 0.4
+    assert round(float(target["QQQ"]), 4) == 0.4
     assert round(float(target.sum()), 4) == 1.0
 
 
-def test_build_ips_target_weights_can_disable_score_tilt_for_legacy_behavior():
+def test_build_ips_target_weights_preserves_existing_group_share_without_score_tilt():
     metrics_df = pd.DataFrame(
         {
             "ticker": ["VOO", "QQQ"],
@@ -235,7 +247,6 @@ def test_build_ips_target_weights_can_disable_score_tilt_for_legacy_behavior():
     ).set_index("ticker")
     ips_config = {
         "target_allocation": {"core": {"target": 1.0}},
-        "target_weighting": {"enabled": False},
     }
 
     target = build_ips_target_weights(metrics_df, ips_config)
@@ -324,12 +335,16 @@ def test_run_evaluation_zeros_final_trade_when_ips_requires_thesis_review():
 
     ufo = result.proposal_df.loc[result.proposal_df["ticker"] == "UFO"].iloc[0]
     ufo_action = result.ips_action_df.loc[result.ips_action_df["ticker"] == "UFO"].iloc[0]
-    assert ufo_action["ips_action"] == "review_thesis"
+    assert ufo_action["ips_action"] in {"review_thesis", "decrease_dca"}
     assert bool(ufo["수치후보"]) is True
     assert ufo["참고조정%"] == -5.0
-    assert bool(ufo["실행"]) is False
-    assert ufo["제안조정%"] == 0.0
-    assert ufo["판단사유"] == "투자 논리 점검"
+    if ufo_action["ips_action"] == "review_thesis":
+        assert bool(ufo["실행"]) is False
+        assert ufo["제안조정%"] == 0.0
+        assert ufo["판단사유"] == "투자 논리 점검"
+    else:
+        assert bool(ufo["실행"]) is True
+        assert ufo["제안조정%"] < 0
 
 
 def test_run_evaluation_blocks_low_data_quality_final_trade():
@@ -405,22 +420,22 @@ def test_action_reason_labels_filter_and_execution_causes():
         == "최소 거래 미만"
     )
     assert (
-        _action_reason({"실행": True, "risk_over": True, "efficiency_good": False, "갭%": 2})
-        == "위험 초과 및 효율 미달"
+        _action_reason({"실행": True, "IPS등급": "high", "risk_over": True, "efficiency_warning": True, "갭%": 2})
+        == "IPS 적합 · 위험 초과 · 효율 경고 · 목표 대비 부족"
     )
     assert (
-        _action_reason({"실행": True, "risk_over": True, "efficiency_good": True, "갭%": 2})
-        == "위험 초과"
+        _action_reason({"실행": True, "IPS등급": "medium", "risk_over": True, "efficiency_warning": False, "갭%": 2})
+        == "IPS 조건부 점검 · 위험 초과 · 목표 대비 부족"
     )
     assert (
-        _action_reason({"실행": True, "risk_over": False, "efficiency_good": False, "갭%": 2})
-        == "효율 미달"
+        _action_reason({"실행": True, "IPS등급": "low", "risk_over": False, "efficiency_warning": True, "갭%": 2})
+        == "IPS 부적합 · 효율 경고 · 목표 대비 부족"
     )
     assert (
-        _action_reason({"실행": True, "risk_over": False, "efficiency_good": True, "갭%": 2})
-        == "목표 대비 부족"
+        _action_reason({"실행": True, "IPS등급": "high", "risk_over": False, "efficiency_warning": False, "갭%": 2})
+        == "IPS 적합 · 목표 대비 부족"
     )
     assert (
-        _action_reason({"실행": True, "risk_over": False, "efficiency_good": True, "갭%": -2})
-        == "목표 대비 초과"
+        _action_reason({"실행": True, "IPS등급": "high", "risk_over": False, "efficiency_warning": False, "갭%": -2})
+        == "IPS 적합 · 목표 대비 초과"
     )

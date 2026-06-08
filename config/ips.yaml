@@ -23,16 +23,26 @@ rules:
   prefer_dca_over_sell: true
   min_trade_pct: 0.01
 
-target_weighting:
+ips_fit_scoring:
   enabled: true
-  blend: 0.35
+  bands:
+    high: 70
+    medium: 50
   weights:
-    efficiency: 0.50
-    risk: 0.30
-    thesis: 0.15
-    data_quality: 0.05
-  thesis_multiplier:
+    role: 20
+    allocation: 25
+    thesis: 20
+    risk: 15
+    action: 10
+    efficiency: 5
+    data_quality: 5
+  thesis_score:
     intact: 1.0
-    watch: 0.7
-    unknown: 0.8
-    broken: 0.2
+    watch: 0.65
+    unknown: 0.5
+    broken: 0.0
+  role_score:
+    core: 1.0
+    satellite: 0.85
+    cash: 0.7
+    unclassified: 0.0

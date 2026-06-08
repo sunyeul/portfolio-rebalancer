@@ -19,20 +19,29 @@ from utils.ips import (
 )
 
 
-TARGET_SCORING_DEFAULTS = {
+IPS_FIT_SCORING_DEFAULTS = {
     "enabled": True,
-    "blend": 0.35,
+    "bands": {"high": 70.0, "medium": 50.0},
     "weights": {
-        "efficiency": 0.50,
-        "risk": 0.30,
-        "thesis": 0.15,
-        "data_quality": 0.05,
+        "role": 20.0,
+        "allocation": 25.0,
+        "thesis": 20.0,
+        "risk": 15.0,
+        "action": 10.0,
+        "efficiency": 5.0,
+        "data_quality": 5.0,
     },
-    "thesis_multiplier": {
+    "thesis_score": {
         "intact": 1.0,
-        "watch": 0.7,
-        "unknown": 0.8,
-        "broken": 0.2,
+        "watch": 0.65,
+        "unknown": 0.5,
+        "broken": 0.0,
+    },
+    "role_score": {
+        "core": 1.0,
+        "satellite": 0.85,
+        "cash": 0.7,
+        "unclassified": 0.0,
     },
 }
 
@@ -62,127 +71,139 @@ class EvaluationError(Exception):
     pass
 
 
-def _target_scoring_config(ips_config: dict) -> dict:
-    cfg = TARGET_SCORING_DEFAULTS.copy()
-    cfg["weights"] = TARGET_SCORING_DEFAULTS["weights"].copy()
-    cfg["thesis_multiplier"] = TARGET_SCORING_DEFAULTS["thesis_multiplier"].copy()
+def _ips_fit_scoring_config(ips_config: dict) -> dict:
+    cfg = IPS_FIT_SCORING_DEFAULTS.copy()
+    cfg["bands"] = IPS_FIT_SCORING_DEFAULTS["bands"].copy()
+    cfg["weights"] = IPS_FIT_SCORING_DEFAULTS["weights"].copy()
+    cfg["thesis_score"] = IPS_FIT_SCORING_DEFAULTS["thesis_score"].copy()
+    cfg["role_score"] = IPS_FIT_SCORING_DEFAULTS["role_score"].copy()
 
-    user_cfg = ips_config.get("target_weighting", {})
-    cfg.update({key: value for key, value in user_cfg.items() if key not in {"weights", "thesis_multiplier"}})
+    user_cfg = ips_config.get("ips_fit_scoring", {})
+    cfg.update(
+        {
+            key: value
+            for key, value in user_cfg.items()
+            if key not in {"bands", "weights", "thesis_score", "role_score"}
+        }
+    )
+    cfg["bands"].update(user_cfg.get("bands", {}))
     cfg["weights"].update(user_cfg.get("weights", {}))
-    cfg["thesis_multiplier"].update(user_cfg.get("thesis_multiplier", {}))
-    cfg["blend"] = min(1.0, max(0.0, float(cfg.get("blend", 0.35))))
+    cfg["thesis_score"].update(user_cfg.get("thesis_score", {}))
+    cfg["role_score"].update(user_cfg.get("role_score", {}))
     return cfg
 
 
-def _neutral_score(index: pd.Index) -> pd.Series:
-    return pd.Series(0.5, index=index, dtype=float)
-
-
-def _minmax_score(values: pd.Series, *, higher_is_better: bool) -> pd.Series:
-    numeric = pd.to_numeric(values, errors="coerce")
-    if numeric.notna().sum() < 2:
-        return _neutral_score(values.index)
-
-    min_value = float(numeric.min())
-    max_value = float(numeric.max())
-    if max_value == min_value:
-        return _neutral_score(values.index)
-
-    normalized = (numeric - min_value) / (max_value - min_value)
-    if not higher_is_better:
-        normalized = 1.0 - normalized
-    return normalized.fillna(0.5).clip(lower=0.0, upper=1.0)
-
-
-def compute_target_preference_breakdown(
-    metrics_df: pd.DataFrame, ips_config: dict
+def compute_ips_fit_breakdown(
+    proposal_df: pd.DataFrame,
+    ips_config: dict,
+    e_thresh: float,
 ) -> pd.DataFrame:
-    """자산별 목표 비중 선호 점수와 구성 점수를 계산합니다."""
-    cfg = _target_scoring_config(ips_config)
-    weights = cfg["weights"]
-    df = metrics_df.copy()
-    group_series = (
-        df.get("group", pd.Series(DEFAULT_GROUP, index=df.index))
+    """IPS 정성 의도를 0~100 적합도와 구성 점수로 변환합니다."""
+    cfg = _ips_fit_scoring_config(ips_config)
+    weights = {
+        key: max(0.0, float(value)) for key, value in cfg.get("weights", {}).items()
+    }
+    total_weight = sum(weights.values())
+    if total_weight <= 0:
+        total_weight = 1.0
+
+    df = proposal_df.copy()
+    index = df.index
+    group = (
+        df.get("group", pd.Series(DEFAULT_GROUP, index=index))
         .fillna(DEFAULT_GROUP)
         .map(fixed_group)
     )
+    gap_pct = pd.to_numeric(df.get("갭%", pd.Series(0.0, index=index)), errors="coerce").fillna(0.0)
+    risk_over = df.get("risk_over", pd.Series(False, index=index)).fillna(False).astype(bool)
+    rc_over_pct = pd.to_numeric(
+        df.get("RC_Over%", pd.Series(0.0, index=index)), errors="coerce"
+    ).fillna(0.0)
+    dca_enabled = df.get("dca_enabled", pd.Series(True, index=index)).fillna(True).astype(bool)
+    thesis_status = (
+        df.get("thesis_status", pd.Series("unknown", index=index))
+        .fillna("unknown")
+        .astype(str)
+        .str.lower()
+    )
+    numeric_candidate = (
+        df.get("수치후보", pd.Series(False, index=index)).fillna(False).astype(bool)
+    )
+    efficiency = pd.to_numeric(df.get("E", pd.Series(0.5, index=index)), errors="coerce").fillna(0.5)
+    missing_ratio = pd.to_numeric(
+        df.get("missing_ratio", pd.Series(0.0, index=index)), errors="coerce"
+    ).fillna(0.0)
+    observations = pd.to_numeric(
+        df.get("observation_count", pd.Series(9999, index=index)), errors="coerce"
+    ).fillna(9999)
+    data_quality_low = (
+        df.get("data_quality_low", pd.Series(False, index=index)).fillna(False).astype(bool)
+    )
 
-    total_weight = sum(max(0.0, float(value)) for value in weights.values())
-    columns = [
-        "target_score_efficiency",
-        "target_score_risk",
-        "target_score_thesis",
-        "target_score_data_quality",
-        "target_preference_score",
-    ]
-    if total_weight <= 0:
-        return pd.DataFrame(
-            {column: _neutral_score(df.index) for column in columns},
-            index=df.index,
-        )
+    role_score = group.map(
+        lambda value: float(cfg["role_score"].get(value, cfg["role_score"].get("unclassified", 0.0)))
+    )
 
-    result = pd.DataFrame(index=df.index)
-    thesis_map = cfg["thesis_multiplier"]
+    allocation_score = pd.Series(0.65, index=index, dtype=float)
+    allocation_score.loc[(group == "core") & (gap_pct > 0)] = 1.0
+    allocation_score.loc[(group == "satellite") & (gap_pct > 0)] = 0.6
+    allocation_score.loc[gap_pct < 0] = 0.75
+    allocation_score.loc[(gap_pct < 0) & risk_over] = 0.9
+    allocation_score.loc[gap_pct.abs() < 1.0] = 0.7
+    allocation_score.loc[group == "cash"] = 0.6
+    allocation_score.loc[group == "unclassified"] = 0.0
 
-    for _, group_index in group_series.groupby(group_series).groups.items():
-        group_df = df.loc[group_index]
+    thesis_score = thesis_status.map(
+        lambda value: float(cfg["thesis_score"].get(value, cfg["thesis_score"].get("unknown", 0.5)))
+    )
 
-        efficiency = group_df.get("E", pd.Series(index=group_index, dtype=float))
-        efficiency_score = _minmax_score(efficiency, higher_is_better=True)
+    risk_score = (1.0 - (rc_over_pct / 10.0)).clip(lower=0.2, upper=1.0)
+    risk_score.loc[~risk_over] = 1.0
 
-        risk = group_df.get("위험기여도", pd.Series(index=group_index, dtype=float))
-        risk_score = _minmax_score(risk, higher_is_better=False)
+    action_score = pd.Series(0.6, index=index, dtype=float)
+    action_score.loc[numeric_candidate & dca_enabled] = 1.0
+    action_score.loc[numeric_candidate & (~dca_enabled)] = 0.25
+    action_score.loc[(gap_pct > 0) & (group == "satellite")] *= 0.75
+    action_score.loc[group.isin(["cash", "unclassified"])] = 0.2
 
-        thesis = (
-            group_df.get("thesis_status", pd.Series("unknown", index=group_index))
-            .fillna("unknown")
-            .astype(str)
-            .str.lower()
-            .map(
-                lambda value: float(
-                    thesis_map.get(value, thesis_map.get("unknown", 0.8))
-                )
-            )
-        )
-        thesis_score = thesis.clip(lower=0.0, upper=1.0)
+    efficiency_score = efficiency.clip(lower=0.0, upper=1.0)
+    data_quality_score = ((1.0 - missing_ratio).clip(lower=0.0, upper=1.0)) * (
+        (observations / 60.0).clip(lower=0.0, upper=1.0)
+    )
+    data_quality_score.loc[data_quality_low] = data_quality_score.loc[data_quality_low].clip(upper=0.35)
 
-        missing_ratio = pd.to_numeric(
-            group_df.get("missing_ratio", pd.Series(0.0, index=group_index)),
-            errors="coerce",
-        ).fillna(0.0)
-        observations = pd.to_numeric(
-            group_df.get("observation_count", pd.Series(9999, index=group_index)),
-            errors="coerce",
-        ).fillna(9999)
-        data_quality = ((1.0 - missing_ratio).clip(lower=0.0, upper=1.0)) * (
-            (observations / 60.0).clip(lower=0.0, upper=1.0)
-        )
-        data_quality_score = data_quality.clip(lower=0.0, upper=1.0)
+    components = {
+        "IPS점수_역할": role_score.clip(lower=0.0, upper=1.0),
+        "IPS점수_비중": allocation_score.clip(lower=0.0, upper=1.0),
+        "IPS점수_논리": thesis_score.clip(lower=0.0, upper=1.0),
+        "IPS점수_위험": risk_score.clip(lower=0.0, upper=1.0),
+        "IPS점수_실행": action_score.clip(lower=0.0, upper=1.0),
+        "IPS점수_E": efficiency_score.clip(lower=0.0, upper=1.0),
+        "IPS점수_데이터": data_quality_score.clip(lower=0.0, upper=1.0),
+    }
+    result = pd.DataFrame(components, index=index)
+    weighted = (
+        result["IPS점수_역할"] * weights.get("role", 0.0)
+        + result["IPS점수_비중"] * weights.get("allocation", 0.0)
+        + result["IPS점수_논리"] * weights.get("thesis", 0.0)
+        + result["IPS점수_위험"] * weights.get("risk", 0.0)
+        + result["IPS점수_실행"] * weights.get("action", 0.0)
+        + result["IPS점수_E"] * weights.get("efficiency", 0.0)
+        + result["IPS점수_데이터"] * weights.get("data_quality", 0.0)
+    )
+    result["IPS적합도"] = ((weighted / total_weight) * 100.0).clip(lower=0.0, upper=100.0)
 
-        weighted_score = (
-            efficiency_score * float(weights.get("efficiency", 0.0))
-            + risk_score * float(weights.get("risk", 0.0))
-            + thesis_score * float(weights.get("thesis", 0.0))
-            + data_quality_score * float(weights.get("data_quality", 0.0))
-        )
+    high = float(cfg.get("bands", {}).get("high", 70.0))
+    medium = float(cfg.get("bands", {}).get("medium", 50.0))
+    result["IPS등급"] = "low"
+    result.loc[result["IPS적합도"] >= medium, "IPS등급"] = "medium"
+    result.loc[result["IPS적합도"] >= high, "IPS등급"] = "high"
+    result["efficiency_warning"] = efficiency < float(e_thresh)
 
-        result.loc[group_index, "target_score_efficiency"] = efficiency_score
-        result.loc[group_index, "target_score_risk"] = risk_score
-        result.loc[group_index, "target_score_thesis"] = thesis_score
-        result.loc[group_index, "target_score_data_quality"] = data_quality_score
-        result.loc[group_index, "target_preference_score"] = (
-            weighted_score / total_weight
-        ).clip(lower=0.05, upper=1.0)
-
-    return result[columns].astype(float)
-
-
-def compute_target_preference_scores(metrics_df: pd.DataFrame, ips_config: dict) -> pd.Series:
-    """자산별 상황을 0~1 선호 점수로 정규화합니다."""
-    return compute_target_preference_breakdown(metrics_df, ips_config)[
-        "target_preference_score"
-    ]
+    score_columns = [column for column in result.columns if column.startswith("IPS점수_")]
+    result[score_columns] = result[score_columns].round(3)
+    result["IPS적합도"] = result["IPS적합도"].round(1)
+    return result
 
 
 def build_ips_target_weights(metrics_df: pd.DataFrame, ips_config: dict) -> pd.Series:
@@ -226,23 +247,7 @@ def build_ips_target_weights(metrics_df: pd.DataFrame, ips_config: dict) -> pd.S
                 dtype=float,
             )
 
-        scoring_cfg = _target_scoring_config(ips_config)
-        if scoring_cfg.get("enabled", True) and int(group_mask.sum()) > 1:
-            preference = compute_target_preference_scores(
-                metrics_df, ips_config
-            ).reindex(current_in_group.index)
-            preference_total = float(preference.sum())
-            preference_spread = float(preference.max() - preference.min())
-            if preference_total > 0 and preference_spread > 1e-9:
-                score_share = preference / preference_total
-                blend = float(scoring_cfg.get("blend", 0.35))
-                target_share = (current_share * (1.0 - blend)) + (score_share * blend)
-            else:
-                target_share = current_share
-        else:
-            target_share = current_share
-
-        target[group_mask] = target_share * group_target
+        target[group_mask] = current_share * group_target
 
     if target.sum() > 0:
         target = target / target.sum()
@@ -266,22 +271,28 @@ def _action_reason(row: pd.Series | dict) -> str:
             return "최소 거래 미만"
         return "보류"
 
-    risk_over = bool(row.get("risk_over", False))
-    efficiency_good = bool(row.get("efficiency_good", False))
-    gap_pct = float(row.get("갭%", 0) or 0)
-
-    if risk_over and not efficiency_good:
-        reason = "위험 초과 및 효율 미달"
-    elif risk_over:
-        reason = "위험 초과"
-    elif not efficiency_good:
-        reason = "효율 미달"
-    elif gap_pct > 0:
-        reason = "목표 대비 부족"
-    elif gap_pct < 0:
-        reason = "목표 대비 초과"
+    ips_band = str(row.get("IPS등급", "") or "")
+    if ips_band == "high":
+        reason = "IPS 적합"
+    elif ips_band == "medium":
+        reason = "IPS 조건부 점검"
+    elif ips_band == "low":
+        reason = "IPS 부적합"
     else:
         reason = "실행 후보"
+
+    risk_over = bool(row.get("risk_over", False))
+    efficiency_warning = bool(row.get("efficiency_warning", False))
+    gap_pct = float(row.get("갭%", 0) or 0)
+
+    if risk_over:
+        reason += " · 위험 초과"
+    if efficiency_warning:
+        reason += " · 효율 경고"
+    if gap_pct > 0:
+        reason += " · 목표 대비 부족"
+    elif gap_pct < 0:
+        reason += " · 목표 대비 초과"
     if bool(row.get("data_quality_low", False)):
         reason += " · 데이터 신뢰도 낮음"
     return reason
@@ -316,6 +327,11 @@ def _apply_ips_execution_gate(
                 gated.at[idx, "판단사유"] = action.get(
                     "decision_summary",
                     "하락장 코어 정기매수 증액 후보",
+                )
+            elif "core_priority_context" in reason_codes:
+                gated.at[idx, "판단사유"] = action.get(
+                    "decision_summary",
+                    "코어 정기매수 증액 우선",
                 )
             else:
                 gated.at[idx, "판단사유"] = _action_reason(gated.loc[idx])
@@ -409,7 +425,6 @@ def run_evaluation(
         tgt = pd.Series(target_weights, index=mdf.index).fillna(0)
     else:
         tgt = target_weights.reindex(mdf.index).fillna(0)
-    target_preference = compute_target_preference_breakdown(mdf, ips_config_snapshot)
 
     # RC 타깃 계산: 공분산 행렬 기반 기하학적 계산 또는 단순 비중 기반
     # AIDEV-NOTE: geometric-rc-target; 공분산 행렬을 고려한 기하학적 RC_Target 계산
@@ -422,18 +437,18 @@ def run_evaluation(
             # 계산 실패 시 폴백: 단순 비중 기반
             rc_target = tgt.fillna(0)
     else:
-        # 공분산 행렬이 없으면 단순 비중 기반 (하위 호환성)
+        # 공분산 행렬이 없으면 단순 비중 기반 RC 목표를 사용합니다.
         rc_target = tgt.fillna(0)
     mdf["RC_Target"] = rc_target
     rc_gap = mdf["위험기여도"] - mdf["RC_Target"]
     mdf["RC_Over"] = rc_gap.clip(lower=0)
 
-    # E를 효율 판단과 정기매수 우선순위에 모두 사용
+    # E는 효율 보조 신호로 유지하고, 최종 판단은 IPS 적합도가 주도합니다.
     mdf["효율E"] = mdf["E"]
 
     rc_over_pct = mdf["RC_Over"] * 100  # 백분율로 표시
     mdf["risk_over"] = rc_over_pct > rc_over_thresh_pct
-    mdf["efficiency_good"] = mdf["효율E"] >= e_thresh
+    mdf["efficiency_warning"] = mdf["효율E"] < e_thresh
 
     # 갭 분석
     current_w = mdf["가중치"]
@@ -450,15 +465,6 @@ def run_evaluation(
             "RC_Over%": rc_over_pct.round(2).values,
             "RC_Target%": (rc_target * 100).round(2).values,
             "return_total%": (mdf["return_total"] * 100).round(2).values,
-            "목표선호점수": target_preference["target_preference_score"]
-            .round(3)
-            .values,
-            "목표점수_E": target_preference["target_score_efficiency"].round(3).values,
-            "목표점수_RC": target_preference["target_score_risk"].round(3).values,
-            "목표점수_논리": target_preference["target_score_thesis"].round(3).values,
-            "목표점수_데이터": target_preference["target_score_data_quality"]
-            .round(3)
-            .values,
             "group": mdf["group"].values,
             "dca_enabled": mdf["dca_enabled"].values,
             "thesis_status": mdf["thesis_status"].values,
@@ -466,7 +472,7 @@ def run_evaluation(
             "observation_count": mdf["observation_count"].values,
             "data_quality_low": mdf["data_quality_low"].values,
             "risk_over": mdf["risk_over"].values,
-            "efficiency_good": mdf["efficiency_good"].values,
+            "efficiency_warning": mdf["efficiency_warning"].values,
         }
     )
 
@@ -494,14 +500,17 @@ def run_evaluation(
     proposal["실행"] = should_trade.values
     proposal["제안조정%"] = 0.0
     proposal["참고조정%"] = 0.0
+    ips_fit = compute_ips_fit_breakdown(proposal, ips_config_snapshot, e_thresh)
+    proposal = proposal.drop(columns=["efficiency_warning"], errors="ignore")
+    proposal = pd.concat([proposal, ips_fit], axis=1)
     proposal["판단사유"] = proposal.apply(_action_reason, axis=1)
 
     # 실행 규칙: 우선순위 정의
     sell_list = proposal[(proposal["갭%"] < 0) & proposal["실행"]].copy()
-    sell_list = sell_list.sort_values(["현재%", "RC_Over%"], ascending=[False, False])
+    sell_list = sell_list.sort_values(["IPS적합도", "RC_Over%"], ascending=[True, False])
 
     buy_list = proposal[(proposal["갭%"] > 0) & proposal["실행"]].copy()
-    buy_list = buy_list.sort_values(["갭%", "E"], ascending=[False, False])
+    buy_list = buy_list.sort_values(["IPS적합도", "갭%"], ascending=[False, False])
 
     # AIDEV-NOTE: constrained-scaling; 현금 중립성과 RC 상한을 동시에 만족하는 반복적 스케일링
     # 제약 조건을 고려한 주문 조정
@@ -557,7 +566,7 @@ def run_evaluation(
                 adjusted_gap = adjusted_orders[ticker] * 100.0
                 sell_list.at[idx, "제안조정%"] = round(adjusted_gap, 2)
     else:
-        # 공분산 행렬이 없거나 실행 대상이 없으면 단순 스케일링 (하위 호환성)
+        # 공분산 행렬이 없거나 실행 대상이 없으면 갭 기준으로 단순 스케일링합니다.
         total_sell = sell_list["갭%"].abs().sum() if len(sell_list) > 0 else 0
         total_buy_before_scale = buy_list["갭%"].sum() if len(buy_list) > 0 else 0
 
@@ -600,9 +609,9 @@ def run_evaluation(
     )
 
     sell_list = proposal[(proposal["갭%"] < 0) & proposal["실행"]].copy()
-    sell_list = sell_list.sort_values(["현재%", "RC_Over%"], ascending=[False, False])
+    sell_list = sell_list.sort_values(["IPS적합도", "RC_Over%"], ascending=[True, False])
     buy_list = proposal[(proposal["갭%"] > 0) & proposal["실행"]].copy()
-    buy_list = buy_list.sort_values(["갭%", "E"], ascending=[False, False])
+    buy_list = buy_list.sort_values(["IPS적합도", "갭%"], ascending=[False, False])
     fine_tune = proposal[
         (proposal["실행"]) & (proposal["갭%"].abs() <= 1.0)
     ].copy()
