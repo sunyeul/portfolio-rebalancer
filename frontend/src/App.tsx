@@ -105,6 +105,7 @@ const backtestStrategyOptions: Array<{ value: BacktestStrategy; label: string; d
   { value: 'return_chasing_reference', label: '수익률 중심 참고', description: '최근 수익률을 우선한 비교용 정책이며 IPS 적합성 판단의 반례로 봅니다.' }
 ];
 type AppView = 'workbench' | 'settings';
+type EvaluationTab = 'summary' | 'logic' | 'scores';
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
@@ -149,6 +150,12 @@ function valueFromRecord(row: Record<string, unknown>, key: string) {
 function textFromRecord(row: Record<string, unknown>, key: string) {
   const value = row[key];
   return typeof value === 'string' ? value : 'unknown';
+}
+
+function listTextFromRecord(row: Record<string, unknown>, key: string) {
+  const value = row[key];
+  if (Array.isArray(value)) return value.map(String).join(', ');
+  return typeof value === 'string' ? value : '';
 }
 
 function nullableNumberColumn<T>(
@@ -212,6 +219,7 @@ export function App() {
   const [portfolio, setPortfolio] = useState<AssetRow[]>([]);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [evaluation, setEvaluation] = useState<EvaluationResponse | null>(null);
+  const [evaluationTab, setEvaluationTab] = useState<EvaluationTab>('summary');
   const [counterfactualScenario, setCounterfactualScenario] = useState<CounterfactualScenario>('core_reinforcement');
   const [counterfactual, setCounterfactual] = useState<CounterfactualResponse | null>(null);
   const [backtestStrategies, setBacktestStrategies] = useState<BacktestStrategy[]>([
@@ -562,14 +570,49 @@ export function App() {
     []
   );
 
-  const actionColumns = useMemo<ColumnDef<Record<string, unknown>>[]>(
+  const actionSummaryColumns = useMemo<ColumnDef<Record<string, unknown>>[]>(
     () => [
       { accessorKey: 'ticker', header: '티커' },
-      { accessorKey: 'IPS적합도', header: 'IPS 적합도' },
-      { accessorKey: 'IPS등급', header: 'IPS 등급' },
-      { accessorKey: 'action_label', header: '액션' },
-      { accessorKey: 'decision_summary', header: '판단 요약' },
-      { accessorKey: 'next_step', header: '다음 행동' }
+      {
+        id: 'recommended_action',
+        header: '권장 조치',
+        cell: ({ row }) => (
+          <div className="max-w-[520px] whitespace-normal">
+            <div className="font-bold text-slate-900">{textFromRecord(row.original, 'action_label')}</div>
+            <div className="mt-1 text-slate-700">{textFromRecord(row.original, 'next_step')}</div>
+            <div className="mt-1 text-xs font-semibold text-slate-500">{textFromRecord(row.original, 'decision_summary')}</div>
+          </div>
+        )
+      },
+      { accessorKey: '실행', header: '최종실행', cell: ({ row }) => (row.original['실행'] ? '실행' : '보류') },
+      { accessorKey: '제안조정%', header: '최종조정', cell: ({ row }) => pct(valueFromRecord(row.original, '제안조정%'), false) }
+    ],
+    []
+  );
+
+  const logicColumns = useMemo<ColumnDef<Record<string, unknown>>[]>(
+    () => [
+      { accessorKey: 'ticker', header: '티커' },
+      { accessorKey: 'reason_codes_text', header: '규칙 코드' },
+      { id: 'risk_notes', header: '위험 메모', cell: ({ row }) => listTextFromRecord(row.original, 'risk_notes') || 'N/A' },
+      { accessorKey: 'blocked_reason', header: '차단 사유', cell: ({ row }) => textFromRecord(row.original, 'blocked_reason') === 'unknown' ? 'N/A' : textFromRecord(row.original, 'blocked_reason') }
+    ],
+    []
+  );
+
+  const scoreColumns = useMemo<ColumnDef<ProposalRow>[]>(
+    () => [
+      { accessorKey: 'ticker', header: '티커' },
+      { accessorKey: 'ips_fit_score', header: 'IPS 적합도', cell: ({ row }) => num(row.original.ips_fit_score) },
+      { accessorKey: 'ips_fit_band', header: 'IPS 등급' },
+      { accessorKey: 'ips_score_role', header: '역할', cell: ({ row }) => num(row.original.ips_score_role) },
+      { accessorKey: 'ips_score_allocation', header: '비중', cell: ({ row }) => num(row.original.ips_score_allocation) },
+      { accessorKey: 'ips_score_thesis', header: '논리', cell: ({ row }) => num(row.original.ips_score_thesis) },
+      { accessorKey: 'ips_score_risk', header: '위험', cell: ({ row }) => num(row.original.ips_score_risk) },
+      { accessorKey: 'ips_score_action', header: '실행', cell: ({ row }) => num(row.original.ips_score_action) },
+      { accessorKey: 'ips_score_efficiency', header: 'E', cell: ({ row }) => num(row.original.ips_score_efficiency) },
+      { accessorKey: 'ips_score_data_quality', header: '데이터', cell: ({ row }) => num(row.original.ips_score_data_quality) },
+      { accessorKey: 'efficiency_warning', header: '효율 경고', cell: ({ row }) => (row.original.efficiency_warning ? '경고' : '정상') }
     ],
     []
   );
@@ -1423,20 +1466,43 @@ export function App() {
                     riskBudgetData={riskBudgetData}
                   />
                 )}
-                <div className="mt-4">
-                  <DataTable data={evaluation?.ips_actions ?? []} columns={actionColumns} emptyLabel="평가 결과가 아직 없습니다." />
-                </div>
                 {evaluation && (
-                  <div className="mt-6">
-                    <h4 className="mb-3 text-sm font-bold text-slate-700">수치 제안</h4>
-                    <DataTable data={evaluation.proposal} columns={proposalColumns} emptyLabel="수치 제안이 없습니다." />
+                  <div className="mt-5">
+                    <div className="inline-flex flex-wrap rounded-lg border border-slate-200 bg-slate-50 p-1">
+                      {[
+                        { value: 'summary', label: '액션 요약' },
+                        { value: 'logic', label: '로직 확인' },
+                        { value: 'scores', label: '점수 구성' }
+                      ].map((tab) => (
+                        <button
+                          key={tab.value}
+                          type="button"
+                          className={cx(
+                            'rounded-md px-3 py-2 text-sm font-bold transition',
+                            evaluationTab === tab.value
+                              ? 'bg-white text-blue-800 shadow-sm'
+                              : 'text-slate-600 hover:text-slate-950'
+                          )}
+                          onClick={() => setEvaluationTab(tab.value as EvaluationTab)}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+                    {evaluationTab === 'summary' && (
+                      <DataTable data={evaluation.ips_actions} columns={actionSummaryColumns} emptyLabel="액션 요약이 없습니다." />
+                    )}
+                    {evaluationTab === 'logic' && (
+                      <DataTable data={evaluation.ips_actions} columns={logicColumns} emptyLabel="로직 정보가 없습니다." />
+                    )}
+                    {evaluationTab === 'scores' && (
+                      <DataTable data={evaluation.proposal} columns={scoreColumns} emptyLabel="점수 구성이 없습니다." />
+                    )}
                   </div>
                 )}
-                {evaluation && (
-                  <div className="mt-4 flex flex-wrap gap-3">
-                    <a className="download-link" href={csvDownloadUrl('proposal')}><Download className="h-4 w-4" /> 제안 CSV</a>
-                    <a className="download-link" href={csvDownloadUrl('ips_actions')}><Download className="h-4 w-4" /> IPS CSV</a>
-                    <a className="download-link" href={csvDownloadUrl('group_summary')}><Download className="h-4 w-4" /> 그룹 CSV</a>
+                {!evaluation && (
+                  <div className="mt-4">
+                    <DataTable data={[]} columns={proposalColumns} emptyLabel="평가 결과가 아직 없습니다." />
                   </div>
                 )}
               </section>
