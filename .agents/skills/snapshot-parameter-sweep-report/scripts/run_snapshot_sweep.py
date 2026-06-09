@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import json
 import shutil
@@ -115,6 +116,40 @@ def safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def safe_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"true", "1", "yes", "y"}
+
+
+def clean_text(value: Any, default: str = "-") -> str:
+    if value in (None, ""):
+        return default
+    text = str(value).strip()
+    return text if text else default
+
+
+def listish_text(value: Any) -> str:
+    if value in (None, ""):
+        return "-"
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value) if value else "-"
+    text = str(value).strip()
+    if not text or text == "[]":
+        return "-"
+    try:
+        parsed = ast.literal_eval(text)
+    except (SyntaxError, ValueError):
+        return text
+    if isinstance(parsed, list):
+        return ", ".join(str(item) for item in parsed) if parsed else "-"
+    return text
+
+
+def md_cell(value: Any) -> str:
+    return clean_text(value).replace("|", "\\|").replace("\n", " ")
 
 
 def action_tickers(rows: list[dict[str, Any]], limit: int = 8) -> str:
@@ -272,44 +307,31 @@ def extra_candidates(source: dict[str, Any], baseline: dict[str, Any]) -> list[s
     return sorted(set(source["recommended_names"]) - base)
 
 
-def action_from_row(row: dict[str, str], frequency: int, scenario_count: int) -> str:
-    group = row.get("group", "")
-    reason = row.get("action_reason", "")
-    efficiency = safe_float(row.get("efficiency_score"))
-    data_low = row.get("data_quality_low") == "True"
-    dca = row.get("dca_enabled") == "True"
-    risk_over = row.get("risk_over") == "True"
-    gap = safe_float(row.get("gap_pct"))
-    below_min_trade = row.get("below_min_trade") == "True"
-
-    if data_low:
-        return "데이터 신뢰도 확인 전까지 액션 보류. 가격 기간과 누락률을 먼저 점검합니다."
-    if group == "core" and gap > 0 and not below_min_trade and efficiency >= 0.5:
-        return "목표 대비 부족하고 효율 조건도 양호합니다. 즉시 일괄매수보다 다음 정기매수 배분 증액 후보로 봅니다."
-    if group == "core" and gap > 0 and below_min_trade:
-        return "목표 대비 부족하지만 조정 폭이 작습니다. 현재는 유지·관찰하고 정기매수 축에서 자연스럽게 보강합니다."
-    if group == "core" and gap > 0:
-        return "코어 부족분입니다. 효율이 낮거나 중복 노출이 있으므로 역할을 확인한 뒤 정기매수로 보강합니다."
-    if group == "satellite" and risk_over and efficiency < 0.35:
-        return "위성 초과 위험과 낮은 효율이 겹칩니다. 추가 매수는 피하고, 논리 훼손/단순화 필요가 확인될 때만 예외적 매도를 검토합니다."
-    if group == "satellite" and risk_over and dca:
-        return "위험기여도가 반복적으로 높습니다. 정기매수는 중단 또는 축소하고, 목표 비중 복귀는 시간을 두고 관리합니다."
-    if group == "satellite" and risk_over:
-        return "추가 매수 없이 관찰합니다. 위성 비중, 중복 노출, 장기 보유 가능성을 재점검합니다."
-    if frequency >= max(3, scenario_count // 2):
-        return "여러 파라미터에서 반복 신호가 있습니다. 매매보다 정기매수 조정과 투자 논리 점검을 우선합니다."
-    if "히스테리시스" in reason:
-        return "조정 폭이 작아 현재는 유지·관찰이면 충분합니다."
-    return "현재는 보유 관찰 중심입니다. 다음 정기 리뷰에서 신호 지속 여부를 확인합니다."
+def fallback_action_label(row: dict[str, str]) -> str:
+    if safe_bool(row.get("data_quality_low")):
+        return "행동 보류"
+    return clean_text(row.get("action_reason"), "유지·관찰")
 
 
-def build_action_rows(output_dir: Path, summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def build_baseline_report_rows(output_dir: Path, summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     _, _, counts = repeated_names(summaries)
     baseline_dir = output_dir / "artifacts" / "baseline_12m_regular"
     proposal_rows = read_csv_rows(baseline_dir / "proposal.csv")
+    action_rows = {
+        row.get("ticker", ""): row
+        for row in read_csv_rows(baseline_dir / "ips_actions.csv")
+        if row.get("ticker")
+    }
     rows = []
     for row in proposal_rows:
         ticker = row["ticker"]
+        action = action_rows.get(ticker, {})
+        action_label = clean_text(action.get("action_label"), fallback_action_label(row))
+        decision_summary = clean_text(action.get("decision_summary"), clean_text(row.get("action_reason")))
+        next_step = clean_text(action.get("next_step"), "다음 점검에서 신호 지속 여부를 확인합니다.")
+        blocked_reason = clean_text(action.get("blocked_reason"))
+        if blocked_reason == "unknown":
+            blocked_reason = "-"
         rows.append(
             {
                 "ticker": ticker,
@@ -317,26 +339,51 @@ def build_action_rows(output_dir: Path, summaries: list[dict[str, Any]]) -> list
                 "current": safe_float(row.get("current_weight_pct")),
                 "target": safe_float(row.get("target_weight_pct")),
                 "gap": safe_float(row.get("gap_pct")),
+                "should_execute": safe_bool(row.get("should_execute")),
+                "suggested_trade_pct": safe_float(row.get("suggested_trade_pct")),
                 "efficiency": safe_float(row.get("efficiency_score")),
                 "rc_over": safe_float(row.get("rc_over_pct")),
                 "frequency": counts.get(ticker, 0),
                 "reason": row.get("action_reason", ""),
-                "action": action_from_row(row, counts.get(ticker, 0), len(summaries)),
+                "action_label": action_label,
+                "decision_summary": decision_summary,
+                "next_step": next_step,
+                "reason_codes_text": clean_text(action.get("reason_codes_text")),
+                "risk_notes": listish_text(action.get("risk_notes")),
+                "blocked_reason": blocked_reason,
+                "ips_fit_score": safe_float(row.get("ips_fit_score")),
+                "ips_fit_band": clean_text(row.get("ips_fit_band")),
+                "ips_score_role": safe_float(row.get("ips_score_role")),
+                "ips_score_allocation": safe_float(row.get("ips_score_allocation")),
+                "ips_score_thesis": safe_float(row.get("ips_score_thesis")),
+                "ips_score_risk": safe_float(row.get("ips_score_risk")),
+                "ips_score_action": safe_float(row.get("ips_score_action")),
+                "ips_score_efficiency": safe_float(row.get("ips_score_efficiency")),
+                "ips_score_data_quality": safe_float(row.get("ips_score_data_quality")),
+                "efficiency_warning": safe_bool(row.get("efficiency_warning")),
             }
         )
     rows.sort(key=lambda row: (-row["frequency"], row["group"], row["ticker"]))
     return rows
 
 
-def one_glance_sentence(summaries: list[dict[str, Any]], action_rows: list[dict[str, Any]]) -> str:
+def one_glance_sentence(summaries: list[dict[str, Any]], baseline_rows: list[dict[str, Any]]) -> str:
     frequent, _, _ = repeated_names(summaries)
-    increase = [row["ticker"] for row in action_rows if row["group"] == "core" and row["gap"] > 0 and row["frequency"] > 0]
+    increase = [
+        row["ticker"]
+        for row in baseline_rows
+        if row["frequency"] > 0 and row["action_label"] == "정기매수 증액 후보"
+    ]
     reduce_or_review = [
         row["ticker"]
-        for row in action_rows
-        if row["group"] == "satellite" and row["frequency"] > 0
+        for row in baseline_rows
+        if row["frequency"] > 0 and row["action_label"] in {"정기매수 감액/중단 후보", "투자 논리 점검", "예외적 리밸런싱 매도 검토"}
     ]
-    data_holds = [row["ticker"] for row in action_rows if "데이터 신뢰도" in row["action"]]
+    data_holds = [
+        row["ticker"]
+        for row in baseline_rows
+        if row["action_label"] == "행동 보류" or "데이터 신뢰도" in row["blocked_reason"]
+    ]
     parts = [
         f"이 스냅샷은 성과 지표보다 반복 후보({', '.join(frequent) if frequent else '없음'})와 위험 집중을 우선 점검해야 합니다.",
         f"코어 부족은 {', '.join(increase) if increase else '해당 없음'} 중심의 정기매수 조정으로 다루고, 위성은 {', '.join(reduce_or_review) if reduce_or_review else '해당 없음'} 중심으로 신규 매수 축소와 투자 논리 점검이 우선입니다.",
@@ -345,6 +392,20 @@ def one_glance_sentence(summaries: list[dict[str, Any]], action_rows: list[dict[
         parts.append(f"{', '.join(data_holds)}는 데이터 신뢰도 확인 전까지 판단을 보류합니다.")
     parts.append("수치 신호는 즉시 매매 지시가 아니라 정기매수 배분과 리뷰 우선순위를 정하는 입력으로 해석합니다.")
     return " ".join(parts)
+
+
+def tickers_by_action(
+    rows: list[dict[str, Any]],
+    labels: set[str],
+    *,
+    should_execute: bool | None = None,
+) -> list[str]:
+    return [
+        row["ticker"]
+        for row in rows
+        if row["action_label"] in labels
+        and (should_execute is None or row["should_execute"] == should_execute)
+    ]
 
 
 def write_summary(output_dir: Path, summaries: list[dict[str, Any]]) -> None:
@@ -390,7 +451,7 @@ def write_english_report(output_dir: Path, snapshot: dict[str, Any], summaries: 
 def write_korean_report(output_dir: Path, snapshot: dict[str, Any], summaries: list[dict[str, Any]]) -> Path:
     baseline = summaries[0]
     frequent, stable, _ = repeated_names(summaries)
-    action_rows = build_action_rows(output_dir, summaries)
+    baseline_rows = build_baseline_report_rows(output_dir, summaries)
     six_month = next((item for item in summaries if item["id"] == "period_6m"), None)
     ytd = next((item for item in summaries if item["id"] == "period_ytd"), None)
     max_period = next((item for item in summaries if item["id"] == "period_max"), None)
@@ -483,33 +544,71 @@ def write_korean_report(output_dir: Path, snapshot: dict[str, Any], summaries: l
     lines.extend(
         [
             "",
-            "## 종목별 평가 및 추천 액션",
+            "## 종목별 실행 계획",
             "",
-            "| 종목 | 그룹 | 현재/목표 | 갭 | 효율 | RC 초과 | 후보 빈도 | 기본 사유 | 추천 액션 |",
-            "|---|---|---:|---:|---:|---:|---:|---|---|",
+            "| 종목 | 그룹 | 현재/목표 | 갭 | 최종실행 | 최종조정 | 후보 빈도 | 권장 조치 | 판단 요약 | 다음 단계 |",
+            "|---|---|---:|---:|---|---:|---:|---|---|---|",
         ]
     )
-    for row in action_rows:
+    for row in baseline_rows:
         lines.append(
-            f"| {row['ticker']} | {row['group']} | {row['current']:.2f}% / {row['target']:.2f}% | "
-            f"{row['gap']:+.2f}% | {row['efficiency']:.2f} | {row['rc_over']:.2f}% | "
-            f"{row['frequency']}/{len(summaries)} | {row['reason']} | {row['action']} |"
+            f"| {md_cell(row['ticker'])} | {md_cell(row['group'])} | {row['current']:.2f}% / {row['target']:.2f}% | "
+            f"{row['gap']:+.2f}% | {'실행' if row['should_execute'] else '보류'} | {row['suggested_trade_pct']:+.2f}% | "
+            f"{row['frequency']}/{len(summaries)} | {md_cell(row['action_label'])} | {md_cell(row['decision_summary'])} | {md_cell(row['next_step'])} |"
         )
 
-    core_increase = [row["ticker"] for row in action_rows if row["group"] == "core" and row["gap"] > 0 and row["frequency"] > 0]
-    satellite_reduce = [row["ticker"] for row in action_rows if row["group"] == "satellite" and row["frequency"] > 0 and "위험" in row["reason"]]
-    observe = [row["ticker"] for row in action_rows if row["frequency"] == 0 and "데이터 신뢰도" not in row["action"]]
-    data_hold = [row["ticker"] for row in action_rows if "데이터 신뢰도" in row["action"]]
+    lines.extend(
+        [
+            "",
+            "## 점수 구성 요약",
+            "",
+            "| 종목 | IPS 적합도 | IPS 등급 | 역할 | 비중 | 논리 | 위험 | 실행 | E | 데이터 | 효율 경고 |",
+            "|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---|",
+        ]
+    )
+    for row in baseline_rows:
+        lines.append(
+            f"| {md_cell(row['ticker'])} | {row['ips_fit_score']:.1f} | {md_cell(row['ips_fit_band'])} | "
+            f"{row['ips_score_role']:.2f} | {row['ips_score_allocation']:.2f} | {row['ips_score_thesis']:.2f} | "
+            f"{row['ips_score_risk']:.2f} | {row['ips_score_action']:.2f} | {row['ips_score_efficiency']:.2f} | "
+            f"{row['ips_score_data_quality']:.2f} | {'경고' if row['efficiency_warning'] else '정상'} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## 로직 확인 요약",
+            "",
+            "| 종목 | 규칙 코드 | 위험 메모 | 차단 사유 |",
+            "|---|---|---|---|",
+        ]
+    )
+    for row in baseline_rows:
+        lines.append(
+            f"| {md_cell(row['ticker'])} | {md_cell(row['reason_codes_text'])} | {md_cell(row['risk_notes'])} | {md_cell(row['blocked_reason'])} |"
+        )
+
+    core_increase = tickers_by_action(baseline_rows, {"정기매수 증액 후보"}, should_execute=True)
+    dca_reduce = tickers_by_action(baseline_rows, {"정기매수 감액/중단 후보"}, should_execute=True)
+    thesis_review = tickers_by_action(baseline_rows, {"투자 논리 점검"})
+    observe = tickers_by_action(baseline_rows, {"유지·관찰"})
+    data_hold = tickers_by_action(baseline_rows, {"행동 보류"})
+    exceptional = tickers_by_action(
+        baseline_rows,
+        {"예외적 즉시매수 검토", "예외적 리밸런싱 매도 검토"},
+        should_execute=True,
+    )
     lines.extend(
         [
             "",
             "## 액션 우선순위",
             "",
             f"1. 정기매수 증액 우선: {', '.join(core_increase) if core_increase else '해당 없음'}",
-            f"2. 신규 매수 축소·중단 우선: {', '.join(satellite_reduce) if satellite_reduce else '해당 없음'}",
-            "3. 낮은 효율과 위험 초과가 겹친 위성 자산은 투자 논리 훼손, 중복, 단순화 필요 여부를 확인합니다.",
-            f"4. 관찰 중심: {', '.join(observe) if observe else '해당 없음'}",
-            f"5. 데이터 확인 전 보류: {', '.join(data_hold) if data_hold else '해당 없음'}",
+            f"2. 정기매수 감액·중단 우선: {', '.join(dca_reduce) if dca_reduce else '해당 없음'}",
+            f"3. 투자 논리 점검: {', '.join(thesis_review) if thesis_review else '해당 없음'}",
+            f"4. 예외적 즉시매수/매도 검토: {', '.join(exceptional) if exceptional else '해당 없음'}",
+            f"5. 관찰 중심: {', '.join(observe) if observe else '해당 없음'}",
+            f"6. 데이터 확인 전 보류: {', '.join(data_hold) if data_hold else '해당 없음'}",
             "",
             "## IPS 해석",
             "",
@@ -520,7 +619,7 @@ def write_korean_report(output_dir: Path, snapshot: dict[str, Any], summaries: l
             "",
             "## 한눈에 읽기용 문장",
             "",
-            one_glance_sentence(summaries, action_rows),
+            one_glance_sentence(summaries, baseline_rows),
         ]
     )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")

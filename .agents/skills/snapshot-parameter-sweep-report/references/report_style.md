@@ -10,10 +10,12 @@ Korean reports should use these sections in this order:
 4. 시나리오별 조정 후보
 5. 위험 집중도
 6. 데이터 품질
-7. 종목별 평가 및 추천 액션
-8. 액션 우선순위
-9. IPS 해석
-10. 한눈에 읽기용 문장
+7. 종목별 실행 계획
+8. 점수 구성 요약
+9. 로직 확인 요약
+10. 액션 우선순위
+11. IPS 해석
+12. 한눈에 읽기용 문장
 
 ## Interpretation Rules
 
@@ -23,6 +25,7 @@ Korean reports should use these sections in this order:
 - Low-quality data means hold, observe, or verify data. Do not convert unreliable rows into buy/sell recommendations.
 - Drawdown contexts should reinforce core-first regular purchase behavior, not broad dip-buying.
 - If a ticker appears frequently across scenarios, call it a persistent review signal, not an automatic trade.
+- For baseline action language, prefer `ips_actions.csv` fields (`action_label`, `decision_summary`, `next_step`, `reason_codes_text`, `risk_notes`, `blocked_reason`) over script-authored action paraphrases.
 
 ## One-Glance Sentence
 
