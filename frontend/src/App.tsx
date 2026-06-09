@@ -50,6 +50,7 @@ import {
   type EvaluationResponse,
   type IpsRule,
   type MetricRow,
+  type PlaybookRecommendation,
   type ProposalRow,
   type SnapshotLoadResponse,
   type SnapshotSummary,
@@ -106,7 +107,7 @@ const backtestStrategyOptions: Array<{ value: BacktestStrategy; label: string; d
   { value: 'return_chasing_reference', label: '수익률 중심 참고', description: '최근 수익률을 우선한 비교용 정책이며 IPS 적합성 판단의 반례로 봅니다.' }
 ];
 type AppView = 'workbench' | 'settings';
-type EvaluationTab = 'summary' | 'logic' | 'scores';
+type EvaluationTab = 'playbook' | 'summary' | 'logic' | 'scores';
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
@@ -122,6 +123,11 @@ function optionLabel(options: ConfigOption[], value: string | null | undefined) 
 function groupLabel(value: string | null | undefined) {
   const option = fixedGroupOptions.find((item) => item.value === value);
   return option?.label ?? '미분류';
+}
+
+function decisionContextLabel(value: string | null | undefined) {
+  const option = decisionContextOptions.find((item) => item.value === value);
+  return option?.label ?? '일반 점검';
 }
 
 function pct(value: number | null | undefined, fromUnit = true) {
@@ -184,6 +190,73 @@ function shortDate(value: string | null | undefined) {
   });
 }
 
+function confidenceLabel(value: PlaybookRecommendation['confidence']) {
+  if (value === 'high') return '높음';
+  if (value === 'medium') return '보통';
+  return '낮음';
+}
+
+function PlaybookPanel({ playbook }: { playbook?: PlaybookRecommendation | null }) {
+  if (!playbook) {
+    return (
+      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm font-semibold text-slate-600">
+        플레이북 결과가 없습니다.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-cyan-800" />
+            <h4 className="text-base font-bold text-slate-950">추천 플레이북: {playbook.label}</h4>
+            <span className="rounded-md border border-cyan-200 bg-white px-2 py-1 text-xs font-bold text-cyan-800">
+              확신 {confidenceLabel(playbook.confidence)}
+            </span>
+          </div>
+          {playbook.is_manual_override && (
+            <p className="mt-2 text-sm font-semibold text-cyan-900">
+              현재 평가는 {decisionContextLabel(playbook.manual_context)} 기준이며, 추천 플레이북은 참고용입니다.
+            </p>
+          )}
+        </div>
+        <div className="rounded-md border border-cyan-200 bg-white px-3 py-2 text-sm font-bold text-slate-700">
+          수동 모드: {decisionContextLabel(playbook.manual_context)}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div>
+          <h5 className="text-sm font-bold text-slate-800">추천 근거</h5>
+          <ul className="mt-2 grid gap-2 text-sm text-slate-700">
+            {playbook.reasons.map((reason) => (
+              <li key={reason} className="flex gap-2">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-700" />
+                <span>{reason}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <h5 className="text-sm font-bold text-slate-800">우선 절차</h5>
+          <ol className="mt-2 grid gap-2 text-sm text-slate-700">
+            {playbook.steps.map((step, index) => (
+              <li key={step} className="flex gap-2">
+                <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-cyan-700 text-xs font-bold text-white">
+                  {index + 1}
+                </span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function rowsFromAssets(assets: AssetRow[]): PortfolioRowInput[] {
   return assets.map((asset) => ({
     ticker: asset.ticker,
@@ -220,7 +293,7 @@ export function App() {
   const [portfolio, setPortfolio] = useState<AssetRow[]>([]);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [evaluation, setEvaluation] = useState<EvaluationResponse | null>(null);
-  const [evaluationTab, setEvaluationTab] = useState<EvaluationTab>('summary');
+  const [evaluationTab, setEvaluationTab] = useState<EvaluationTab>('playbook');
   const [counterfactualScenario, setCounterfactualScenario] = useState<CounterfactualScenario>('core_reinforcement');
   const [counterfactual, setCounterfactual] = useState<CounterfactualResponse | null>(null);
   const [backtestStrategies, setBacktestStrategies] = useState<BacktestStrategy[]>([
@@ -298,6 +371,7 @@ export function App() {
     setPortfolio(currentStateQuery.data.portfolio.assets);
     setAnalysis(currentStateQuery.data.analysis);
     setEvaluation(currentStateQuery.data.evaluation);
+    if (currentStateQuery.data.evaluation) setEvaluationTab('playbook');
     setCounterfactual(null);
     setBacktest(null);
   }, [currentStateQuery.data]);
@@ -336,6 +410,7 @@ export function App() {
     setPortfolio(data.portfolio.assets);
     setAnalysis(data.analysis);
     setEvaluation(data.evaluation);
+    if (data.evaluation) setEvaluationTab('playbook');
     setCounterfactual(null);
     setBacktest(null);
     setSelectedPortfolioId(data.snapshot.portfolio_id);
@@ -388,6 +463,7 @@ export function App() {
     mutationFn: runEvaluation,
     onSuccess: async (data) => {
       setEvaluation(data);
+      setEvaluationTab('playbook');
       setCounterfactual(null);
       setBacktest(null);
       await persistCurrentState();
@@ -1517,6 +1593,7 @@ export function App() {
                   <div className="mt-5">
                     <div className="inline-flex flex-wrap rounded-lg border border-slate-200 bg-slate-50 p-1">
                       {[
+                        { value: 'playbook', label: '플레이북' },
                         { value: 'summary', label: '액션 요약' },
                         { value: 'logic', label: '로직 확인' },
                         { value: 'scores', label: '점수 구성' }
@@ -1536,8 +1613,21 @@ export function App() {
                         </button>
                       ))}
                     </div>
+                    {evaluationTab === 'playbook' && (
+                      <div className="mt-4">
+                        <PlaybookPanel playbook={evaluation.playbook} />
+                      </div>
+                    )}
                     {evaluationTab === 'summary' && (
-                      <DataTable data={evaluation.ips_actions} columns={actionSummaryColumns} emptyLabel="액션 요약이 없습니다." />
+                      <>
+                        <DataTable data={evaluation.ips_actions} columns={actionSummaryColumns} emptyLabel="액션 요약이 없습니다." />
+                        <EvaluationCharts
+                          actionData={actionChartData}
+                          efficiencyRiskData={efficiencyRiskData}
+                          groupAllocationData={groupAllocationData}
+                          riskBudgetData={riskBudgetData}
+                        />
+                      </>
                     )}
                     {evaluationTab === 'logic' && (
                       <DataTable data={evaluation.ips_actions} columns={logicColumns} emptyLabel="로직 정보가 없습니다." />
@@ -1546,14 +1636,6 @@ export function App() {
                       <DataTable data={evaluation.proposal} columns={scoreColumns} emptyLabel="점수 구성이 없습니다." />
                     )}
                   </div>
-                )}
-                {evaluation && (
-                  <EvaluationCharts
-                    actionData={actionChartData}
-                    efficiencyRiskData={efficiencyRiskData}
-                    groupAllocationData={groupAllocationData}
-                    riskBudgetData={riskBudgetData}
-                  />
                 )}
                 {!evaluation && (
                   <div className="mt-4">

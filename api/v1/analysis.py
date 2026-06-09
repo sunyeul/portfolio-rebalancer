@@ -18,6 +18,7 @@ EVALUATION_SESSION_KEYS = (
     "group_summary_df",
     "rc_violations",
     "ips_config_snapshot",
+    "playbook",
     "evaluation_settings",
 )
 

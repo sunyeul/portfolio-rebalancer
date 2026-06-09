@@ -61,6 +61,7 @@ class EvaluationResult(NamedTuple):
     fine_tune_list: pd.DataFrame
     rc_violations: pd.DataFrame
     ips_config_snapshot: dict | None = None
+    playbook: dict | None = None
 
 
 class EvaluationError(Exception):
@@ -202,6 +203,176 @@ def compute_ips_fit_breakdown(
     result[score_columns] = result[score_columns].round(3)
     result["IPS적합도"] = result["IPS적합도"].round(1)
     return result
+
+
+PLAYBOOK_LABELS = {
+    "regular_review": "일반 점검",
+    "market_correction": "시장 조정 대응",
+    "sharp_drop_review": "급락 후 추매 검토",
+    "rebalance_review": "비중 리밸런싱 점검",
+}
+
+PLAYBOOK_STEPS = {
+    "regular_review": [
+        "데이터 품질과 분류가 충분한지 먼저 확인합니다.",
+        "코어/위성 목표 비중에서 벗어난 자산을 점검합니다.",
+        "정기매수 증액, 감액, 보류 중 정책에 맞는 다음 행동만 남깁니다.",
+    ],
+    "market_correction": [
+        "코어 비중이 IPS 목표보다 낮은지 확인합니다.",
+        "코어 자산은 투자 논리가 유지되는 범위에서 정기매수 배분을 늘립니다.",
+        "위성 자산은 가격 하락보다 thesis와 장기 보유 가능성을 먼저 점검합니다.",
+        "즉시매수는 정기매수 조정으로 부족할 때만 예외적으로 검토합니다.",
+    ],
+    "sharp_drop_review": [
+        "급락 자체를 단독 매수 사유로 보지 않습니다.",
+        "위성 자산은 thesis 훼손, 변동성, 관리 부담을 먼저 확인합니다.",
+        "코어 부족분은 즉시매수보다 정기매수 조정으로 대응 가능한지 점검합니다.",
+        "판단 근거가 약하면 보류하거나 다음 리뷰로 넘깁니다.",
+    ],
+    "rebalance_review": [
+        "초과 비중과 위험기여도 초과 자산을 먼저 확인합니다.",
+        "매도보다 신규 정기매수 감액 또는 중단으로 해결 가능한지 점검합니다.",
+        "매도 검토는 thesis 훼손, 과도한 집중, 포트폴리오 단순화 필요가 있을 때만 남깁니다.",
+    ],
+}
+
+
+def _playbook_result(
+    code: str,
+    confidence: str,
+    reasons: list[str],
+    manual_context: str,
+) -> dict:
+    unique_reasons = list(dict.fromkeys(reasons))[:4]
+    return {
+        "code": code,
+        "label": PLAYBOOK_LABELS[code],
+        "confidence": confidence,
+        "reasons": unique_reasons,
+        "steps": PLAYBOOK_STEPS[code][:5],
+        "manual_context": manual_context,
+        "is_manual_override": code != manual_context,
+    }
+
+
+def recommend_playbook(
+    proposal_df: pd.DataFrame,
+    ips_action_df: pd.DataFrame,
+    group_summary_df: pd.DataFrame,
+    allocation_status: dict,
+    decision_context: str = "regular_review",
+) -> dict:
+    """현재 평가 결과를 사람이 읽기 쉬운 IPS 플레이북으로 분류합니다."""
+    context = decision_context if decision_context in PLAYBOOK_LABELS else "regular_review"
+    proposal = proposal_df.copy()
+    actions = ips_action_df.copy()
+    groups = group_summary_df.copy()
+
+    data_quality_low = bool(
+        actions.get("data_quality_low", pd.Series(False, index=actions.index))
+        .fillna(False)
+        .astype(bool)
+        .any()
+    )
+    unclassified_count = int(
+        (actions.get("group", pd.Series("", index=actions.index)).fillna("") == "unclassified").sum()
+    )
+    unknown_count = int(
+        (actions.get("thesis_status", pd.Series("", index=actions.index)).fillna("") == "unknown").sum()
+    )
+    if data_quality_low or unclassified_count > 0 or unknown_count >= max(1, len(actions) // 2):
+        reasons = []
+        if data_quality_low:
+            reasons.append("일부 자산의 데이터 품질이 낮아 강한 행동 판단보다 기본 점검이 먼저입니다.")
+        if unclassified_count > 0:
+            reasons.append("미분류 자산이 있어 비중 조정 전에 역할 확인이 필요합니다.")
+        if unknown_count > 0:
+            reasons.append("투자 논리가 미정인 자산이 있어 thesis 확인이 우선입니다.")
+        return _playbook_result("regular_review", "high", reasons, context)
+
+    if context == "sharp_drop_review":
+        return _playbook_result(
+            "sharp_drop_review",
+            "high",
+            [
+                "사용자가 급락 후 추매 검토 모드를 선택했습니다.",
+                "단기 급락은 단독 매수 사유가 아니므로 논리와 정기매수 가능성을 먼저 확인합니다.",
+            ],
+            context,
+        )
+
+    satellite = proposal.get("group", pd.Series("", index=proposal.index)).fillna("") == "satellite"
+    return_total_pct = pd.to_numeric(
+        proposal.get("return_total%", pd.Series(0.0, index=proposal.index)),
+        errors="coerce",
+    ).fillna(0.0)
+    if bool((satellite & (return_total_pct <= -15.0)).any()):
+        return _playbook_result(
+            "sharp_drop_review",
+            "medium",
+            [
+                "위성 자산 중 손실 폭이 큰 후보가 있어 급락 대응 프레임이 필요합니다.",
+                "위성 자산은 추가 매수보다 thesis와 장기 보유 가능성 확인이 먼저입니다.",
+            ],
+            context,
+        )
+
+    core_under = allocation_status.get("core_status") in {"under_min", "under_target"}
+    satellite_buy_candidate = bool(
+        (
+            satellite
+            & (pd.to_numeric(proposal.get("갭%", pd.Series(0.0, index=proposal.index)), errors="coerce").fillna(0.0) > 0)
+            & proposal.get("수치후보", pd.Series(False, index=proposal.index)).fillna(False).astype(bool)
+        ).any()
+    )
+    correction_signal = bool((return_total_pct < 0).any()) or context == "market_correction"
+    if core_under and (satellite_buy_candidate or correction_signal):
+        reasons = ["코어 비중이 IPS 목표보다 낮아 기본 시장 노출 보강이 우선입니다."]
+        if satellite_buy_candidate:
+            reasons.append("위성 증액 후보가 있어 코어 우선 원칙으로 한 번 걸러야 합니다.")
+        if correction_signal:
+            reasons.append("하락 또는 조정 신호가 있어 정기매수 조정 중심으로 대응합니다.")
+        return _playbook_result("market_correction", "high", reasons, context)
+
+    action_codes = actions.get("ips_action", pd.Series("", index=actions.index)).fillna("")
+    rebalance_action_count = int(action_codes.isin(["rebalance_sell_review", "reduce_or_pause_dca"]).sum())
+    risk_over_count = int(
+        actions.get("risk_over", pd.Series(False, index=actions.index))
+        .fillna(False)
+        .astype(bool)
+        .sum()
+    )
+    negative_gap_count = int(
+        (pd.to_numeric(proposal.get("갭%", pd.Series(0.0, index=proposal.index)), errors="coerce").fillna(0.0) < 0).sum()
+    )
+    satellite_over = (
+        allocation_status.get("satellite_status") == "over_max"
+        or bool(
+            (
+                (groups.get("group", pd.Series("", index=groups.index)).fillna("") == "satellite")
+                & (pd.to_numeric(groups.get("weight", pd.Series(0.0, index=groups.index)), errors="coerce").fillna(0.0) > 0.30)
+            ).any()
+        )
+    )
+    if satellite_over or rebalance_action_count >= 2 or risk_over_count > 0 or negative_gap_count >= 2:
+        reasons = []
+        if satellite_over:
+            reasons.append("위성 비중이 IPS 상한을 넘거나 상한에 가까워졌습니다.")
+        if rebalance_action_count > 0:
+            reasons.append("정기매수 감액 또는 리밸런싱 검토 대상이 있습니다.")
+        if risk_over_count > 0:
+            reasons.append("위험기여도 초과 자산이 있어 위험 점검이 필요합니다.")
+        if negative_gap_count > 0:
+            reasons.append("목표보다 높은 비중의 자산이 여럿 있습니다.")
+        return _playbook_result("rebalance_review", "medium", reasons, context)
+
+    return _playbook_result(
+        "regular_review",
+        "medium",
+        ["강한 조정, 급락, 리밸런싱 신호가 두드러지지 않아 일반 점검으로 충분합니다."],
+        context,
+    )
 
 
 def build_ips_target_weights(metrics_df: pd.DataFrame, ips_config: dict) -> pd.Series:
@@ -635,6 +806,13 @@ def run_evaluation(
                 }
             )
     rc_violations_df = pd.DataFrame(violations) if violations else pd.DataFrame()
+    playbook = recommend_playbook(
+        proposal_df=proposal,
+        ips_action_df=ips_action_df,
+        group_summary_df=group_summary_df,
+        allocation_status=allocation_status,
+        decision_context=decision_context,
+    )
 
     return EvaluationResult(
         proposal_df=proposal,
@@ -645,4 +823,5 @@ def run_evaluation(
         fine_tune_list=fine_tune,
         rc_violations=rc_violations_df,
         ips_config_snapshot=ips_config_snapshot,
+        playbook=playbook,
     )

@@ -82,6 +82,17 @@ export type EvaluationResponse = {
   fine_tune_list: ProposalRow[];
   rc_violations: Array<Record<string, unknown>>;
   ips_config_snapshot?: Record<string, unknown> | null;
+  playbook?: PlaybookRecommendation | null;
+};
+
+export type PlaybookRecommendation = {
+  code: DecisionContext;
+  label: string;
+  confidence: 'high' | 'medium' | 'low';
+  reasons: string[];
+  steps: string[];
+  manual_context: DecisionContext;
+  is_manual_override: boolean;
 };
 
 export type CounterfactualScenario =

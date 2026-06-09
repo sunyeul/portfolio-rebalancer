@@ -95,6 +95,7 @@ def _state_payload(session_state: dict[str, Any]) -> tuple[dict[str, Any], dict[
             "group_summary_df": session_state.get("group_summary_df") or [],
             "rc_violations": session_state.get("rc_violations") or [],
             "ips_config_snapshot": session_state.get("ips_config_snapshot"),
+            "playbook": session_state.get("playbook"),
         }
 
     return session_state, analysis_payload, evaluation_payload
@@ -569,9 +570,10 @@ def _insert_evaluation(
             rc_over_thresh_pct,
             e_thresh,
             target_weights_json,
-            ips_config_snapshot_json
+            ips_config_snapshot_json,
+            playbook_json
         )
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
             snapshot_id,
@@ -579,6 +581,7 @@ def _insert_evaluation(
             settings.get("e_thresh"),
             _json_dump(settings.get("target_weights")),
             _json_dump(session_data.get("ips_config_snapshot")),
+            _json_dump(session_data.get("playbook")),
         ),
     )
     evaluation_run_id = int(cursor.lastrowid)
@@ -847,6 +850,7 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
                 "ips_config_snapshot": _json_load(
                     evaluation_run["ips_config_snapshot_json"], None
                 ),
+                "playbook": _json_load(evaluation_run["playbook_json"], None),
             }
         )
         evaluation_payload = {
@@ -855,6 +859,7 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
             "group_summary_df": session_state["group_summary_df"],
             "rc_violations": session_state["rc_violations"],
             "ips_config_snapshot": session_state["ips_config_snapshot"],
+            "playbook": session_state["playbook"],
         }
 
     return {

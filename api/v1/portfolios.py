@@ -52,6 +52,7 @@ SESSION_KEYS = [
     "rc_violations",
     "evaluation_settings",
     "ips_config_snapshot",
+    "playbook",
 ]
 
 
@@ -368,6 +369,7 @@ def _state_response(state: dict) -> dict:
                 RC_VIOLATION_COLUMNS,
             ),
             "ips_config_snapshot": state["evaluation"].get("ips_config_snapshot"),
+            "playbook": state["evaluation"].get("playbook"),
         }
 
     return response
@@ -431,6 +433,7 @@ def _snapshot_response(snapshot: dict) -> dict:
                 RC_VIOLATION_COLUMNS,
             ),
             "ips_config_snapshot": snapshot["evaluation"].get("ips_config_snapshot"),
+            "playbook": snapshot["evaluation"].get("playbook"),
         }
 
     return response

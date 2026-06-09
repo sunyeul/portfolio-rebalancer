@@ -457,6 +457,7 @@ def evaluate(
                 "decision_context": decision_context.value,
             },
             "ips_config_snapshot": evaluation.ips_config_snapshot,
+            "playbook": evaluation.playbook,
         }
 
         target_portfolio_id = save_to_portfolio_id
@@ -509,6 +510,7 @@ def evaluate(
                     "group_summary": group_summary,
                     "rc_violations": rc_violations,
                     "ips_config_snapshot": evaluation.ips_config_snapshot,
+                    "playbook": evaluation.playbook,
                 },
                 "simulation": simulation,
                 "agent_summary": {

@@ -495,6 +495,15 @@ def test_evaluation_api_and_download(monkeypatch):
             buy_list=pd.DataFrame(),
             fine_tune_list=pd.DataFrame(),
             rc_violations=pd.DataFrame(),
+            playbook={
+                "code": "regular_review",
+                "label": "일반 점검",
+                "confidence": "medium",
+                "reasons": ["기본 점검입니다."],
+                "steps": ["데이터 품질을 확인합니다."],
+                "manual_context": "market_correction",
+                "is_manual_override": True,
+            },
         )
 
     monkeypatch.setattr("api.v1.analysis.run_analysis", fake_run_analysis)
@@ -507,12 +516,17 @@ def test_evaluation_api_and_download(monkeypatch):
     )
     assert response.status_code == 200
     assert captured_evaluation_kwargs["decision_context"] == "market_correction"
-    proposal_row = response.json()["proposal"][0]
+    payload = response.json()
+    proposal_row = payload["proposal"][0]
     assert proposal_row["current_weight_pct"] == 100.0
     assert proposal_row["rc_gap_pct"] == 0.0
     assert proposal_row["suggested_trade_pct"] == 0.0
     assert proposal_row["action_reason"] == "히스테리시스 범위 및 최소 거래 미만"
     assert "adjusted_gap_pct" not in proposal_row
+    assert payload["playbook"]["code"] == "regular_review"
+    assert payload["playbook"]["label"] == "일반 점검"
+    assert payload["playbook"]["reasons"] == ["기본 점검입니다."]
+    assert payload["playbook"]["steps"] == ["데이터 품질을 확인합니다."]
 
     csv_response = client.get("/api/v1/evaluation/download-csv?type=proposal")
     assert csv_response.status_code == 200

@@ -603,6 +603,15 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
             ips_config_snapshot={
                 "target_allocation": {"core": {"target": 0.8}},
             },
+            playbook={
+                "code": "regular_review",
+                "label": "일반 점검",
+                "confidence": "medium",
+                "reasons": ["저장된 플레이북입니다."],
+                "steps": ["정기 점검을 진행합니다."],
+                "manual_context": "regular_review",
+                "is_manual_override": False,
+            },
         )
 
     monkeypatch.setattr("api.v1.analysis.run_analysis", fake_run_analysis)
@@ -627,6 +636,8 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
     assert proposal_row["action_reason"] == "히스테리시스 범위 및 최소 거래 미만"
     assert "adjusted_gap_pct" not in proposal_row
     assert payload["evaluation"]["ips_config_snapshot"]["target_allocation"]["core"]["target"] == 0.8
+    assert payload["evaluation"]["playbook"]["code"] == "regular_review"
+    assert payload["evaluation"]["playbook"]["reasons"] == ["저장된 플레이북입니다."]
 
     csv_response = load_client.get("/api/v1/evaluation/download-csv?type=proposal")
     assert csv_response.status_code == 200

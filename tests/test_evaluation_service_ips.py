@@ -112,6 +112,97 @@ def test_run_evaluation_defaults_to_regular_review_context():
     action = result.ips_action_df.iloc[0]
     assert action["decision_context"] == "regular_review"
     assert result.ips_config_snapshot["decision_context"] == "regular_review"
+    assert result.playbook["code"] == "regular_review"
+    assert result.playbook["manual_context"] == "regular_review"
+
+
+def test_playbook_recommends_market_correction_for_underweight_core_and_satellite_candidate():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "UFO"],
+            "가중치": [0.6, 0.4],
+            "위험기여도": [0.2, 0.8],
+            "E": [0.8, 0.8],
+            "return_total": [-0.05, 0.1],
+            "group": ["core", "satellite"],
+            "dca_enabled": [True, True],
+            "thesis_status": ["intact", "intact"],
+            "missing_ratio": [0.0, 0.0],
+            "observation_count": [120, 120],
+        }
+    ).set_index("ticker")
+
+    result = run_evaluation(
+        metrics_df,
+        {"VOO": 0.75, "UFO": 0.25},
+        rc_over_thresh_pct=100.0,
+        e_thresh=0.5,
+        decision_context="regular_review",
+    )
+
+    assert result.playbook["code"] == "market_correction"
+    assert result.playbook["confidence"] == "high"
+    assert result.playbook["is_manual_override"] is True
+    assert len(result.playbook["reasons"]) <= 4
+    assert len(result.playbook["steps"]) <= 5
+
+
+def test_playbook_recommends_rebalance_review_for_risk_or_overweight_pressure():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "UFO", "CALM"],
+            "가중치": [0.45, 0.40, 0.15],
+            "위험기여도": [0.3, 0.6, 0.1],
+            "E": [0.7, 0.8, 0.7],
+            "return_total": [0.1, 0.3, 0.1],
+            "group": ["core", "satellite", "satellite"],
+            "dca_enabled": [True, True, True],
+            "thesis_status": ["intact", "intact", "intact"],
+            "missing_ratio": [0.0, 0.0, 0.0],
+            "observation_count": [120, 120, 120],
+        }
+    ).set_index("ticker")
+
+    result = run_evaluation(
+        metrics_df,
+        {"VOO": 0.70, "UFO": 0.20, "CALM": 0.10},
+        rc_over_thresh_pct=1.0,
+        e_thresh=0.5,
+        decision_context="regular_review",
+    )
+
+    assert result.playbook["code"] == "rebalance_review"
+    assert result.playbook["confidence"] == "medium"
+    assert any("위험" in reason or "위성" in reason for reason in result.playbook["reasons"])
+
+
+def test_playbook_respects_manual_sharp_drop_review_context():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO"],
+            "가중치": [1.0],
+            "위험기여도": [0.5],
+            "E": [0.8],
+            "return_total": [0.1],
+            "group": ["core"],
+            "dca_enabled": [True],
+            "thesis_status": ["intact"],
+            "missing_ratio": [0.0],
+            "observation_count": [120],
+        }
+    ).set_index("ticker")
+
+    result = run_evaluation(
+        metrics_df,
+        None,
+        rc_over_thresh_pct=100.0,
+        e_thresh=0.5,
+        decision_context="sharp_drop_review",
+    )
+
+    assert result.playbook["code"] == "sharp_drop_review"
+    assert result.playbook["manual_context"] == "sharp_drop_review"
+    assert result.playbook["is_manual_override"] is False
 
 
 def test_market_correction_context_downgrades_satellite_buy_and_blocks_final_trade():

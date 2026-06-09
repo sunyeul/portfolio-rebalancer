@@ -153,6 +153,7 @@ def initialize_database() -> None:
                 e_thresh REAL,
                 target_weights_json TEXT,
                 ips_config_snapshot_json TEXT,
+                playbook_json TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -213,6 +214,7 @@ def initialize_database() -> None:
             """
         )
         _ensure_column(conn, "evaluation_runs", "ips_config_snapshot_json", "TEXT")
+        _ensure_column(conn, "evaluation_runs", "playbook_json", "TEXT")
         _ensure_target_allocation_table(conn)
         _seed_lookup(conn, "thesis_statuses", THESIS_STATUS_SEEDS)
         _seed_target_allocations(conn)
