@@ -22,13 +22,13 @@ TARGET_ALLOCATION_SEEDS = [
 ]
 
 ACTION_PRIORITY_SEEDS = [
-    ("increase_dca", "정기매수 증액 후보", 1),
-    ("decrease_dca", "정기매수 감액/중단 후보", 2),
-    ("review_thesis", "투자 논리 점검", 3),
-    ("exceptional_buy_review", "예외적 즉시매수 검토", 4),
-    ("consider_rebalance_sell", "예외적 리밸런싱 매도 검토", 5),
-    ("hold_observe", "유지·관찰", 6),
-    ("block_action", "행동 보류", 7),
+    ("block_action", "행동 보류", 1),
+    ("rebalance_sell_review", "리밸런싱 매도 검토", 2),
+    ("risk_control_review", "위험 관리 점검", 3),
+    ("review_before_action", "실행 전 점검", 4),
+    ("reduce_or_pause_dca", "정기매수 축소·중단 후보", 5),
+    ("increase_dca", "정기매수 증액 후보", 6),
+    ("hold_observe", "유지·관찰", 7),
 ]
 
 IPS_RULE_SEEDS = [
@@ -284,12 +284,21 @@ def _seed_target_allocations(conn: sqlite3.Connection) -> None:
 
 
 def _seed_action_priorities(conn: sqlite3.Connection) -> None:
+    active_codes = [action_code for action_code, _, _ in ACTION_PRIORITY_SEEDS]
+    placeholders = ",".join("?" for _ in active_codes)
+    conn.execute(
+        f"DELETE FROM ips_action_priorities WHERE action_code NOT IN ({placeholders})",
+        active_codes,
+    )
     for action_code, label, priority in ACTION_PRIORITY_SEEDS:
         conn.execute(
             """
             INSERT INTO ips_action_priorities (action_code, label, priority, is_active)
             VALUES (?, ?, ?, 1)
-            ON CONFLICT(action_code) DO NOTHING
+            ON CONFLICT(action_code) DO UPDATE SET
+                label = excluded.label,
+                priority = excluded.priority,
+                is_active = 1
             """,
             (action_code, label, priority),
         )

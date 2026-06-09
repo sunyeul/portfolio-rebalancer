@@ -47,8 +47,6 @@ IPS_FIT_SCORING_DEFAULTS = {
 
 FINAL_EXECUTABLE_ACTIONS = {
     "increase_dca",
-    "decrease_dca",
-    "consider_rebalance_sell",
 }
 
 
@@ -321,10 +319,7 @@ def _apply_ips_execution_gate(
         gap_pct = float(row.get("갭%", 0) or 0)
         numeric_candidate = bool(row.get("수치후보", row.get("실행", False)))
 
-        sign_allowed = (
-            (ips_action == "increase_dca" and gap_pct > 0)
-            or (ips_action in {"decrease_dca", "consider_rebalance_sell"} and gap_pct < 0)
-        )
+        sign_allowed = ips_action == "increase_dca" and gap_pct > 0
         final_execute = numeric_candidate and ips_action in FINAL_EXECUTABLE_ACTIONS and sign_allowed
 
         if final_execute:

@@ -94,7 +94,7 @@ def _fake_evaluation(*args, **kwargs):
     return EvaluationResult(
         proposal_df=proposal_df,
         ips_action_df=pd.DataFrame(
-            {"ticker": ["VOO", "QQQ"], "ips_action": ["increase_dca", "review_thesis"]}
+            {"ticker": ["VOO", "QQQ"], "ips_action": ["increase_dca", "review_before_action"]}
         ),
         group_summary_df=pd.DataFrame(
             {"group": ["core"], "weight": [0.4], "risk_contribution": [0.4]}

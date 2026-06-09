@@ -28,6 +28,15 @@ def test_config_options_and_ips_are_seeded_from_defaults(monkeypatch, tmp_path):
 
     ips = client.get("/api/v1/config/ips").json()
     assert ips["ips_config"]["target_allocation"]["core"]["target"] == 0.8
+    assert list(ips["ips_config"]["action_priority"]) == [
+        "block_action",
+        "rebalance_sell_review",
+        "risk_control_review",
+        "review_before_action",
+        "reduce_or_pause_dca",
+        "increase_dca",
+        "hold_observe",
+    ]
 
 
 def test_app_defined_config_values_are_read_only(monkeypatch, tmp_path):

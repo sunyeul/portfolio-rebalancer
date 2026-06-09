@@ -49,7 +49,7 @@ def test_run_evaluation_returns_ips_outputs_and_uses_ips_signals():
     assert bool(ufo["risk_over"]) is True
     assert bool(ufo["efficiency_warning"]) is True
     assert ufo["IPS등급"] == "high"
-    assert "효율 점수 미달" in ufo["판단사유"]
+    assert ufo["판단사유"] == "리밸런싱 매도 검토"
     assert "ips_action" in result.ips_action_df.columns
     assert "risk_over" in result.ips_action_df.columns
     assert "efficiency_warning" in result.ips_action_df.columns
@@ -137,13 +137,13 @@ def test_market_correction_context_downgrades_satellite_buy_and_blocks_final_tra
 
     ufo_action = result.ips_action_df.loc[result.ips_action_df["ticker"] == "UFO"].iloc[0]
     ufo_proposal = result.proposal_df.loc[result.proposal_df["ticker"] == "UFO"].iloc[0]
-    assert ufo_action["ips_action"] == "review_thesis"
+    assert ufo_action["ips_action"] == "review_before_action"
     assert ufo_action["execution_type"] == "review_required"
     assert ufo_action["decision_summary"] == "하락장 위성 자산은 증액 전 수익률과 변동성을 점검합니다."
     assert bool(ufo_proposal["수치후보"]) is True
     assert bool(ufo_proposal["실행"]) is False
     assert ufo_proposal["제안조정%"] == 0.0
-    assert ufo_proposal["판단사유"] == "투자 논리 점검"
+    assert ufo_proposal["판단사유"] == "실행 전 점검"
 
 
 def test_market_correction_context_increases_underweight_core_even_with_low_efficiency():
@@ -173,13 +173,59 @@ def test_market_correction_context_increases_underweight_core_even_with_low_effi
     voo_action = result.ips_action_df.loc[result.ips_action_df["ticker"] == "VOO"].iloc[0]
     voo_proposal = result.proposal_df.loc[result.proposal_df["ticker"] == "VOO"].iloc[0]
     assert voo_action["ips_action"] == "increase_dca"
-    assert voo_action["decision_summary"] == "목표보다 낮은 코어 비중을 정기매수로 보강합니다."
+    assert voo_action["decision_summary"] == "하락장에는 목표보다 낮은 코어 비중을 정기매수로 보강합니다."
     assert "core_priority_context" in voo_action["reason_codes"]
     assert "efficiency_warning" in voo_action["reason_codes"]
     assert bool(voo_proposal["수치후보"]) is True
     assert bool(voo_proposal["실행"]) is True
     assert voo_proposal["제안조정%"] > 0
-    assert voo_proposal["판단사유"] == "목표보다 낮은 코어 비중을 정기매수로 보강합니다."
+    assert voo_proposal["판단사유"] == "하락장에는 목표보다 낮은 코어 비중을 정기매수로 보강합니다."
+
+
+def test_virtual_scenario_keeps_valid_buy_but_blocks_hot_satellite_and_sell_shortcut():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "HOT", "CALM", "CASH"],
+            "가중치": [0.45, 0.05, 0.10, 0.40],
+            "위험기여도": [0.30, 0.03, 0.04, 0.0],
+            "E": [0.82, 0.88, 0.75, 0.0],
+            "샤프": [1.7, 1.6, 1.4, 0.0],
+            "IR": [0.8, 0.5, 0.4, 0.0],
+            "변동성": [0.12, 0.18, 0.12, 0.0],
+            "최대낙폭": [-0.06, -0.08, -0.05, 0.0],
+            "베타": [1.0, 1.1, 1.0, 0.0],
+            "return_total": [0.12, 0.85, 0.08, 0.0],
+            "group": ["core", "satellite", "satellite", "cash"],
+            "dca_enabled": [True, True, True, False],
+            "thesis_status": ["intact", "watch", "intact", "intact"],
+            "missing_ratio": [0.0, 0.0, 0.0, 0.0],
+            "observation_count": [120, 120, 120, 120],
+        }
+    ).set_index("ticker")
+
+    result = run_evaluation(
+        metrics_df,
+        {"VOO": 0.55, "HOT": 0.10, "CALM": 0.05, "CASH": 0.30},
+        rc_over_thresh_pct=100.0,
+        e_thresh=0.5,
+    )
+
+    actions = result.ips_action_df.set_index("ticker")
+    proposal = result.proposal_df.set_index("ticker")
+
+    assert actions.loc["VOO", "ips_action"] == "increase_dca"
+    assert bool(proposal.loc["VOO", "실행"]) is True
+    assert proposal.loc["VOO", "제안조정%"] > 0
+
+    assert actions.loc["HOT", "ips_action"] == "review_before_action"
+    assert "momentum_too_hot" in actions.loc["HOT", "reason_codes"]
+    assert bool(proposal.loc["HOT", "실행"]) is False
+    assert proposal.loc["HOT", "제안조정%"] == 0.0
+
+    assert actions.loc["CALM", "ips_action"] == "reduce_or_pause_dca"
+    assert "sell_gate_passed" not in actions.loc["CALM", "reason_codes"]
+    assert bool(proposal.loc["CALM", "실행"]) is False
+    assert proposal.loc["CALM", "제안조정%"] == 0.0
 
 
 def test_build_ips_target_weights_keeps_cash_and_allocates_remaining_by_ips_targets():
@@ -307,9 +353,9 @@ def test_run_evaluation_uses_auto_targets_when_explicit_targets_are_absent():
     assert voo["갭%"] == 20.0
     assert ufo["갭%"] == -20.0
     assert bool(voo["실행"]) is True
-    assert bool(ufo["실행"]) is True
+    assert bool(ufo["실행"]) is False
     assert voo["제안조정%"] == 20.0
-    assert ufo["제안조정%"] == -20.0
+    assert ufo["제안조정%"] == 0.0
 
 
 def test_run_evaluation_zeros_final_trade_when_ips_requires_thesis_review():
@@ -335,16 +381,20 @@ def test_run_evaluation_zeros_final_trade_when_ips_requires_thesis_review():
 
     ufo = result.proposal_df.loc[result.proposal_df["ticker"] == "UFO"].iloc[0]
     ufo_action = result.ips_action_df.loc[result.ips_action_df["ticker"] == "UFO"].iloc[0]
-    assert ufo_action["ips_action"] in {"review_thesis", "decrease_dca"}
+    assert ufo_action["ips_action"] in {
+        "review_before_action",
+        "reduce_or_pause_dca",
+        "risk_control_review",
+    }
     assert bool(ufo["수치후보"]) is True
     assert ufo["참고조정%"] == -5.0
-    if ufo_action["ips_action"] == "review_thesis":
-        assert bool(ufo["실행"]) is False
-        assert ufo["제안조정%"] == 0.0
-        assert ufo["판단사유"] == "투자 논리 점검"
-    else:
-        assert bool(ufo["실행"]) is True
-        assert ufo["제안조정%"] < 0
+    assert bool(ufo["실행"]) is False
+    assert ufo["제안조정%"] == 0.0
+    assert ufo["판단사유"] in {
+        "실행 전 점검",
+        "정기매수 축소·중단 후보",
+        "위험 관리 점검",
+    }
 
 
 def test_run_evaluation_blocks_low_data_quality_final_trade():
