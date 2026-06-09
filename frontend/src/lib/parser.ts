@@ -70,7 +70,10 @@ function booleanValue(value: unknown) {
 
 function looksLikeTicker(value: unknown) {
   const text = String(value ?? '').trim();
-  return /^[A-Za-z0-9.-]{1,15}$/.test(text) && /[A-Za-z]/.test(text);
+  return (
+    /^[A-Za-z0-9.-]{1,15}$/.test(text) &&
+    (/[A-Za-z]/.test(text) || /^\d{7,8}(\.JP)?$/i.test(text))
+  );
 }
 
 function parseFreeLine(line: string): PortfolioRowInput | null {
