@@ -4,6 +4,7 @@ import {
   AlertCircle,
   BarChart3,
   CheckCircle2,
+  Copy,
   Database,
   Download,
   Edit3,
@@ -235,6 +236,7 @@ export function App() {
   const [editingSnapshotName, setEditingSnapshotName] = useState('');
   const [editingSnapshotNote, setEditingSnapshotNote] = useState('');
   const [editingSnapshotRows, setEditingSnapshotRows] = useState<PortfolioRowInput[]>([]);
+  const [copyingSnapshotId, setCopyingSnapshotId] = useState<number | null>(null);
   const [deletingSnapshotId, setDeletingSnapshotId] = useState<number | null>(null);
   const [appliedRowsSignature, setAppliedRowsSignature] = useState(() => rowsSignature(parsePortfolioText(sampleText)));
   const [targetAllocationRows, setTargetAllocationRows] = useState<TargetAllocation[]>([]);
@@ -438,6 +440,32 @@ export function App() {
     }
   });
 
+  const copySnapshotMutation = useMutation({
+    mutationFn: async (sourceSnapshot: SnapshotSummary) => {
+      if (selectedPortfolioId === null) throw new Error('저장할 포트폴리오를 선택해주세요.');
+      const name = snapshotName.trim() || `${sourceSnapshot.name} 복사본`;
+      const data = await saveSnapshot(selectedPortfolioId, {
+        name,
+        source_snapshot_id: sourceSnapshot.id
+      });
+      return getSnapshot(data.snapshot.id);
+    },
+    onSuccess: async (data) => {
+      setSnapshotName('');
+      setEditingSnapshotId(data.snapshot.id);
+      setEditingSnapshotName(data.snapshot.name);
+      setEditingSnapshotNote(data.snapshot.note);
+      setEditingSnapshotRows(rowsFromAssets(data.portfolio.assets));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['portfolios'] }),
+        queryClient.invalidateQueries({ queryKey: ['portfolio-snapshots', selectedPortfolioId] })
+      ]);
+    },
+    onSettled: () => {
+      setCopyingSnapshotId(null);
+    }
+  });
+
   const updateSnapshotMutation = useMutation({
     mutationFn: ({
       snapshotId,
@@ -520,6 +548,7 @@ export function App() {
   const snapshotActionPending =
     editSnapshotMutation.isPending ||
     loadSnapshotMutation.isPending ||
+    copySnapshotMutation.isPending ||
     updateSnapshotMutation.isPending ||
     deleteSnapshotMutation.isPending;
 
@@ -751,6 +780,11 @@ export function App() {
 
   function startEditingSnapshot(snapshot: SnapshotSummary) {
     editSnapshotMutation.mutate(snapshot.id);
+  }
+
+  function copySnapshotForEditing(snapshot: SnapshotSummary) {
+    setCopyingSnapshotId(snapshot.id);
+    copySnapshotMutation.mutate(snapshot);
   }
 
   function cancelEditingSnapshot() {
@@ -1016,6 +1050,15 @@ export function App() {
                       <button
                         type="button"
                         className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-blue-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                        title="스냅샷 복사"
+                        disabled={snapshotActionPending}
+                        onClick={() => copySnapshotForEditing(snapshot)}
+                      >
+                        {copyingSnapshotId === snapshot.id ? <Loader2 className="spin h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      </button>
+                      <button
+                        type="button"
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-blue-700 disabled:cursor-not-allowed disabled:text-slate-300"
                         title="스냅샷 편집"
                         disabled={snapshotActionPending}
                         onClick={() => startEditingSnapshot(snapshot)}
@@ -1044,6 +1087,7 @@ export function App() {
                   saveSnapshotMutation.error ??
                   editSnapshotMutation.error ??
                   loadSnapshotMutation.error ??
+                  copySnapshotMutation.error ??
                   updateSnapshotMutation.error ??
                   deleteSnapshotMutation.error
                 }

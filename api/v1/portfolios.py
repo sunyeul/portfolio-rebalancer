@@ -78,6 +78,7 @@ class SnapshotCreateRequest(BaseModel):
     name: str = ""
     note: str = ""
     rows: list[SnapshotPortfolioRowIn] | None = None
+    source_snapshot_id: int | None = None
 
 
 class SnapshotUpdateRequest(BaseModel):
@@ -159,6 +160,7 @@ async def create_saved_snapshot(
     """Persist the current session state as a named portfolio snapshot."""
     session_id = request.state.session_id
     session_data = _session_data(session_id)
+    should_save_current_state = True
     if payload.rows is not None:
         try:
             assets, _warnings = parse_manual_edit_to_assets(
@@ -173,6 +175,18 @@ async def create_saved_snapshot(
         for key in SESSION_KEYS:
             if key != "asset_df":
                 session_manager.delete(session_id, key)
+    elif payload.source_snapshot_id is not None:
+        source_snapshot = get_snapshot(payload.source_snapshot_id)
+        if source_snapshot is None:
+            raise HTTPException(status_code=404, detail="스냅샷을 찾을 수 없습니다.")
+        if source_snapshot["summary"]["portfolio_id"] != portfolio_id:
+            raise HTTPException(
+                status_code=400,
+                detail="같은 포트폴리오의 스냅샷만 복사할 수 있습니다.",
+            )
+        session_data = {key: None for key in SESSION_KEYS}
+        session_data["asset_df"] = source_snapshot["session_state"].get("asset_df") or []
+        should_save_current_state = False
     elif not session_data.get("asset_df"):
         current_state = get_current_state(portfolio_id)
         if current_state is not None:
@@ -184,7 +198,8 @@ async def create_saved_snapshot(
             payload.note,
             session_data,
         )
-        save_current_state(portfolio_id, session_data)
+        if should_save_current_state:
+            save_current_state(portfolio_id, session_data)
         return {"snapshot": snapshot}
     except StorageError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

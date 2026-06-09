@@ -370,7 +370,7 @@ export function listSnapshots(portfolioId: number) {
 
 export function saveSnapshot(
   portfolioId: number,
-  payload: { name?: string; note?: string; rows?: PortfolioRowInput[] }
+  payload: { name?: string; note?: string; rows?: PortfolioRowInput[]; source_snapshot_id?: number }
 ) {
   return requestJson<{ snapshot: SnapshotSummary }>(`/api/v1/portfolios/${portfolioId}/snapshots`, {
     method: 'POST',

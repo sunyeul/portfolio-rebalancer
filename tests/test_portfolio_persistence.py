@@ -379,6 +379,143 @@ def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp
     ]
 
 
+def test_snapshot_copy_uses_positions_only_and_opens_as_input(monkeypatch, tmp_path):
+    client = _client_with_db(monkeypatch, tmp_path)
+    portfolio_id = client.post(
+        "/api/v1/portfolios",
+        json={"name": "복사 테스트"},
+    ).json()["portfolio"]["id"]
+    other_portfolio_id = client.post(
+        "/api/v1/portfolios",
+        json={"name": "다른 계좌"},
+    ).json()["portfolio"]["id"]
+    client.post(
+        "/api/v1/portfolio/manual",
+        json={
+            "rows": [
+                {
+                    "ticker": "VOO",
+                    "allocation": 70,
+                    "return_total": 12,
+                    "group": "core",
+                    "dca_enabled": True,
+                    "thesis_status": "intact",
+                },
+                {
+                    "ticker": "UFO",
+                    "allocation": 30,
+                    "group": "satellite",
+                    "dca_enabled": False,
+                    "thesis_status": "watch",
+                },
+            ]
+        },
+    )
+
+    def fake_run_analysis(*args, **kwargs):
+        returns = pd.DataFrame({"VOO": [0.1], "UFO": [0.2]})
+        metrics_df = pd.DataFrame(
+            {
+                "ticker": ["VOO", "UFO"],
+                "CAGR": [0.1, 0.2],
+                "변동성": [0.2, 0.4],
+                "샤프": [1.0, 1.1],
+                "최대낙폭": [-0.1, -0.2],
+                "IR": [0.5, 0.6],
+                "베타": [1.0, 1.2],
+                "알파": [0.0, 0.1],
+                "data_start": ["2026-06-01", "2026-06-01"],
+                "data_end": ["2026-06-04", "2026-06-04"],
+                "observation_count": [4, 4],
+                "missing_ratio": [0.0, 0.0],
+                "위험기여도": [0.7, 0.3],
+                "수익기여도": [0.1, 0.2],
+                "가중치": [0.7, 0.3],
+                "E": [0.7, 0.6],
+                "return_total": [0.12, 0.18],
+                "group": ["core", "satellite"],
+                "dca_enabled": [True, False],
+                "thesis_status": ["intact", "watch"],
+            }
+        ).set_index("ticker")
+        return AnalysisResult(
+            prices=pd.DataFrame({"VOO": [1.0, 1.1], "UFO": [1.0, 1.2]}),
+            returns=returns,
+            returns_smooth=returns,
+            weights_no_bench=pd.Series({"VOO": 0.7, "UFO": 0.3}),
+            metrics_df=metrics_df,
+            port_nav=pd.Series([1.0, 1.1]),
+            bench_nav=None,
+            portfolio_metrics={"cagr": 0.1, "volatility": 0.2, "sharpe": 1.0},
+            benchmark_metrics=None,
+            missing_tickers=[],
+        )
+
+    monkeypatch.setattr("api.v1.analysis.run_analysis", fake_run_analysis)
+    assert client.post("/api/v1/analysis/run", json={"bench": "SPY"}).status_code == 200
+    source_id = client.post(
+        f"/api/v1/portfolios/{portfolio_id}/snapshots",
+        json={"name": "원본"},
+    ).json()["snapshot"]["id"]
+
+    copy_response = client.post(
+        f"/api/v1/portfolios/{portfolio_id}/snapshots",
+        json={"name": "원본 복사본", "source_snapshot_id": source_id},
+    )
+    assert copy_response.status_code == 200
+    copied_snapshot = copy_response.json()["snapshot"]
+    assert copied_snapshot["name"] == "원본 복사본"
+    assert copied_snapshot["position_count"] == 2
+    assert copied_snapshot["has_analysis"] is False
+    assert copied_snapshot["has_evaluation"] is False
+
+    current_state_response = client.get(f"/api/v1/portfolios/{portfolio_id}/current-state")
+    assert current_state_response.status_code == 200
+    assert current_state_response.json()["analysis"]["metrics"][0]["ticker"] == "VOO"
+
+    load_response = client.post(
+        f"/api/v1/portfolios/snapshots/{copied_snapshot['id']}/load"
+    )
+    assert load_response.status_code == 200
+    payload = load_response.json()
+    assert payload["analysis"] is None
+    assert payload["evaluation"] is None
+    assert payload["portfolio"]["assets"] == [
+        {
+            "ticker": "UFO",
+            "allocation": 30.0,
+            "return_total": None,
+            "group": "satellite",
+            "dca_enabled": False,
+            "thesis_status": "watch",
+            "weight": 0.3,
+        },
+        {
+            "ticker": "VOO",
+            "allocation": 70.0,
+            "return_total": 0.12,
+            "group": "core",
+            "dca_enabled": True,
+            "thesis_status": "intact",
+            "weight": 0.7,
+        },
+    ]
+
+    missing_response = client.post(
+        f"/api/v1/portfolios/{portfolio_id}/snapshots",
+        json={"name": "없는 복사", "source_snapshot_id": 999999},
+    )
+    assert missing_response.status_code == 404
+    assert missing_response.json()["detail"] == "스냅샷을 찾을 수 없습니다."
+
+    foreign_response = client.post(
+        f"/api/v1/portfolios/{other_portfolio_id}/snapshots",
+        json={"name": "다른 계좌 복사", "source_snapshot_id": source_id},
+    )
+    assert foreign_response.status_code == 400
+    assert foreign_response.json()["detail"] == "같은 포트폴리오의 스냅샷만 복사할 수 있습니다."
+
+
 def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
     client = _client_with_db(monkeypatch, tmp_path)
     portfolio_id = client.post(
