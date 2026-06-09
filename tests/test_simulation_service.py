@@ -1,9 +1,12 @@
 import pandas as pd
 
 from services.simulation_service import (
+    _prepare_metrics,
+    _scenario_target_weights,
     run_counterfactual_simulation,
     run_ips_backtest,
 )
+from utils.ips_config import load_ips_config
 from utils.metrics import annualize_cov
 
 
@@ -125,6 +128,57 @@ def test_core_reinforcement_reports_core_gap_direction_and_warnings():
     assert result["deltas"]["groups"]["core"]["delta_pct"] >= -0.01
     assert any("데이터 품질 경고" in warning for warning in result["warnings"])
     assert any("투자 논리 점검" in warning for warning in result["warnings"])
+
+
+def test_core_reinforcement_does_not_reduce_already_high_core_weight():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "QQQ", "UFO"],
+            "가중치": [0.70, 0.23, 0.07],
+            "위험기여도": [0.45, 0.25, 0.30],
+            "E": [0.8, 0.7, 0.65],
+            "return_total": [0.1, 0.08, 0.2],
+            "group": ["core", "core", "satellite"],
+            "dca_enabled": [True, True, True],
+            "thesis_status": ["intact", "intact", "watch"],
+            "missing_ratio": [0.0, 0.0, 0.0],
+            "observation_count": [120, 120, 120],
+        }
+    ).set_index("ticker")
+
+    result = run_counterfactual_simulation(
+        metrics_df,
+        "core_reinforcement",
+        rc_over_thresh_pct=100.0,
+        e_thresh=0.5,
+    )
+
+    assert result["deltas"]["groups"]["core"]["delta_pct"] >= -0.01
+    assert result["scenario"]["group_weights"]["core"] >= result["baseline"]["group_weights"]["core"] - 0.0001
+
+
+def test_core_reinforcement_target_does_not_lower_current_core_weight():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "QQQ", "UFO"],
+            "가중치": [0.70, 0.23, 0.07],
+            "위험기여도": [0.45, 0.25, 0.30],
+            "E": [0.8, 0.7, 0.65],
+            "return_total": [0.1, 0.08, 0.2],
+            "group": ["core", "core", "satellite"],
+            "dca_enabled": [True, True, True],
+            "thesis_status": ["intact", "intact", "watch"],
+            "missing_ratio": [0.0, 0.0, 0.0],
+            "observation_count": [120, 120, 120],
+        }
+    ).set_index("ticker")
+
+    prepared = _prepare_metrics(metrics_df)
+    target = _scenario_target_weights(prepared, "core_reinforcement", load_ips_config())
+    current_core = float(prepared.loc[prepared["group"] == "core", "가중치"].sum())
+    target_core = float(target.loc[prepared["group"] == "core"].sum())
+
+    assert target_core >= current_core
 
 
 def test_ips_backtest_returns_ips_and_performance_metrics_without_nan():

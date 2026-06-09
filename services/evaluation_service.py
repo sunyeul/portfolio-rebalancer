@@ -324,7 +324,7 @@ def _apply_ips_execution_gate(
 
         if final_execute:
             gated.at[idx, "실행"] = True
-            gated.at[idx, "제안조정%"] = row["참고조정%"]
+            gated.at[idx, "제안조정%"] = round(gap_pct, 2)
             reason_codes = action.get("reason_codes", []) if action is not None else []
             if "correction_core_reinforcement" in reason_codes:
                 gated.at[idx, "판단사유"] = action.get(

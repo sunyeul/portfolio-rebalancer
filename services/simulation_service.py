@@ -158,7 +158,8 @@ def _scenario_target_weights(
         core_target = float(core_cfg.get("max", core_cfg.get("target", 0.8)))
         cash_weight = float(current[group == "cash"].sum())
         adjustable = max(0.0, 1.0 - cash_weight)
-        desired_core = min(adjustable, core_target * adjustable)
+        current_core_total = float(current[group == "core"].sum())
+        desired_core = min(adjustable, max(current_core_total, core_target * adjustable))
         core_mask = group == "core"
         satellite_mask = group == "satellite"
         if core_mask.any():

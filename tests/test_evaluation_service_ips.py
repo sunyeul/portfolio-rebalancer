@@ -1,6 +1,7 @@
 import pandas as pd
 
 from services.evaluation_service import (
+    _apply_ips_execution_gate,
     _action_reason,
     build_ips_target_weights,
     compute_ips_fit_breakdown,
@@ -226,6 +227,35 @@ def test_virtual_scenario_keeps_valid_buy_but_blocks_hot_satellite_and_sell_shor
     assert "sell_gate_passed" not in actions.loc["CALM", "reason_codes"]
     assert bool(proposal.loc["CALM", "실행"]) is False
     assert proposal.loc["CALM", "제안조정%"] == 0.0
+
+
+def test_execution_gate_uses_final_positive_gap_not_pre_gate_constrained_reference():
+    proposal = pd.DataFrame(
+        {
+            "ticker": ["QQQ", "MU"],
+            "갭%": [6.17, -7.09],
+            "수치후보": [True, True],
+            "실행": [True, True],
+            "참고조정%": [0.01, -7.09],
+            "제안조정%": [0.01, -7.09],
+            "판단사유": ["", ""],
+        }
+    )
+    ips_actions = pd.DataFrame(
+        {
+            "ticker": ["QQQ", "MU"],
+            "ips_action": ["increase_dca", "rebalance_sell_review"],
+            "action_label": ["정기매수 증액 후보", "리밸런싱 매도 검토"],
+            "reason_codes": [[], ["sell_gate_passed"]],
+        }
+    )
+
+    gated = _apply_ips_execution_gate(proposal, ips_actions).set_index("ticker")
+
+    assert bool(gated.loc["QQQ", "실행"]) is True
+    assert gated.loc["QQQ", "제안조정%"] == 6.17
+    assert bool(gated.loc["MU", "실행"]) is False
+    assert gated.loc["MU", "제안조정%"] == 0.0
 
 
 def test_build_ips_target_weights_keeps_cash_and_allocates_remaining_by_ips_targets():
