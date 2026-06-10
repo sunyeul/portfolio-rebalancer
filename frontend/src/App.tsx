@@ -20,12 +20,13 @@ import {
   Trash2,
   X
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Legend,
   ReferenceLine,
   ResponsiveContainer,
@@ -916,32 +917,6 @@ export function App() {
     weight: Number(((row.weight ?? 0) * 100).toFixed(2)),
     risk: Number(((row.risk_contribution ?? 0) * 100).toFixed(2))
   })) ?? [];
-  const riskBudgetData = evaluation?.proposal.map((row) => ({
-    ticker: row.ticker,
-    risk: Number((row.rc_target_pct + row.rc_gap_pct).toFixed(2)),
-    target: Number(row.rc_target_pct.toFixed(2))
-  })) ?? [];
-  const actionChartData = evaluation?.proposal.map((row) => ({
-    ticker: row.ticker,
-    suggestedTrade: Number(row.suggested_trade_pct.toFixed(2))
-  })) ?? [];
-  const efficiencyRiskData = evaluation?.proposal.map((row) => ({
-    ticker: row.ticker,
-    efficiency: Number((row.efficiency_score ?? 0).toFixed(2)),
-    rcGap: Number(row.rc_gap_pct.toFixed(2))
-  })) ?? [];
-  const groupAllocationData = evaluation?.group_summary.length
-    ? [
-        evaluation.group_summary.reduce<Record<string, string | number>>(
-          (acc, row) => {
-            const group = textFromRecord(row, 'group');
-            acc[groupLabel(group)] = Number((valueFromRecord(row, 'weight') * 100).toFixed(2));
-            return acc;
-          },
-          { label: '비중' }
-        )
-      ]
-    : [];
   const selectedCounterfactualOption =
     counterfactualScenarioOptions.find((option) => option.value === counterfactualScenario) ??
     counterfactualScenarioOptions[0];
@@ -1621,12 +1596,7 @@ export function App() {
                     {evaluationTab === 'summary' && (
                       <>
                         <DataTable data={evaluation.ips_actions} columns={actionSummaryColumns} emptyLabel="액션 요약이 없습니다." />
-                        <EvaluationCharts
-                          actionData={actionChartData}
-                          efficiencyRiskData={efficiencyRiskData}
-                          groupAllocationData={groupAllocationData}
-                          riskBudgetData={riskBudgetData}
-                        />
+                        <EvaluationCharts evaluation={evaluation} />
                       </>
                     )}
                     {evaluationTab === 'logic' && (
@@ -2006,57 +1976,311 @@ function ChartBlock({ data }: { data: Array<{ ticker: string; weight: number; ri
   );
 }
 
-function EvaluationCharts({
-  actionData,
-  efficiencyRiskData,
-  groupAllocationData,
-  riskBudgetData
-}: {
-  actionData: Array<{ ticker: string; suggestedTrade: number }>;
-  efficiencyRiskData: Array<{ ticker: string; efficiency: number; rcGap: number }>;
-  groupAllocationData: Array<Record<string, string | number>>;
-  riskBudgetData: Array<{ ticker: string; risk: number; target: number }>;
-}) {
-  const groupKeys = groupAllocationData.length
-    ? Object.keys(groupAllocationData[0]).filter((key) => key !== 'label')
-    : [];
+const actionFamilyLabels: Record<string, string> = {
+  buy_adjustment: '정기매수 조정',
+  hold: '유지·관찰',
+  thesis_review: '실행 전 검토',
+  risk_review: '위험 점검',
+  sell_review: '리밸런싱 검토',
+  blocked: '판단 보류'
+};
+
+const actionFamilyColors: Record<string, string> = {
+  buy_adjustment: '#1d4ed8',
+  hold: '#0f766e',
+  thesis_review: '#7c3aed',
+  risk_review: '#dc2626',
+  sell_review: '#ca8a04',
+  blocked: '#64748b',
+  unknown: '#94a3b8'
+};
+
+type TooltipPayload<T> = Array<{ payload?: T }>;
+
+type ActionDistributionPoint = {
+  family: string;
+  familyLabel: string;
+  count: number;
+  totalWeightPct: number;
+  actionLabels: string[];
+};
+
+type GroupBandPoint = {
+  group: string;
+  groupLabel: string;
+  current: number;
+  min: number | null;
+  target: number | null;
+  max: number | null;
+};
+
+type RiskBudgetPoint = {
+  ticker: string;
+  currentRc: number;
+  targetRc: number;
+  riskOver: boolean;
+  ipsAction: string;
+  actionLabel: string;
+};
+
+type EfficiencyRiskPoint = {
+  ticker: string;
+  efficiency: number;
+  rcGap: number;
+  family: string;
+  familyLabel: string;
+  actionLabel: string;
+  ipsFit: number | null;
+  decisionSummary: string;
+};
+
+function tooltipFrame(children: ReactNode) {
+  return (
+    <div className="max-w-[280px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-lg">
+      {children}
+    </div>
+  );
+}
+
+function firstTooltipPayload<T>(payload?: TooltipPayload<T>) {
+  return payload?.[0]?.payload;
+}
+
+function recordByTicker(rows: Array<Record<string, unknown>>) {
+  return rows.reduce<Record<string, Record<string, unknown>>>((acc, row) => {
+    const ticker = textFromRecord(row, 'ticker');
+    if (ticker !== 'unknown') acc[ticker] = row;
+    return acc;
+  }, {});
+}
+
+function recordFromConfig(config: Record<string, unknown> | null | undefined, key: string) {
+  const value = config?.[key];
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function numberFromConfig(config: Record<string, unknown>, key: string) {
+  const value = config[key];
+  return typeof value === 'number' && Number.isFinite(value) ? Number((value * 100).toFixed(2)) : null;
+}
+
+function actionFamilyLabel(value: string) {
+  return actionFamilyLabels[value] ?? '기타 검토';
+}
+
+function actionFamilyColor(value: string) {
+  return actionFamilyColors[value] ?? actionFamilyColors.unknown;
+}
+
+function ActionDistributionTooltip({ active, payload }: { active?: boolean; payload?: TooltipPayload<ActionDistributionPoint> }) {
+  if (!active) return null;
+  const point = firstTooltipPayload(payload);
+  if (!point) return null;
+
+  return tooltipFrame(
+    <>
+      <div className="font-bold text-slate-900">{point.familyLabel}</div>
+      <div className="mt-1">종목 수: {point.count}개</div>
+      <div>현재 비중 합: {pct(point.totalWeightPct, false)}</div>
+      <div className="mt-1 text-slate-500">판단 라벨: {point.actionLabels.join(', ')}</div>
+    </>
+  );
+}
+
+function GroupBandTooltip({ active, payload }: { active?: boolean; payload?: TooltipPayload<GroupBandPoint> }) {
+  if (!active) return null;
+  const point = firstTooltipPayload(payload);
+  if (!point) return null;
+
+  return tooltipFrame(
+    <>
+      <div className="font-bold text-slate-900">{point.groupLabel} 비중 근거</div>
+      <div className="mt-1">현재 비중: {pct(point.current, false)}</div>
+      <div>IPS Min: {point.min === null ? 'N/A' : pct(point.min, false)}</div>
+      <div>IPS Target: {point.target === null ? 'N/A' : pct(point.target, false)}</div>
+      <div>IPS Max: {point.max === null ? 'N/A' : pct(point.max, false)}</div>
+    </>
+  );
+}
+
+function RiskBudgetTooltip({ active, payload }: { active?: boolean; payload?: TooltipPayload<RiskBudgetPoint> }) {
+  if (!active) return null;
+  const point = firstTooltipPayload(payload);
+  if (!point) return null;
+
+  return tooltipFrame(
+    <>
+      <div className="font-bold text-slate-900">{point.ticker} 위험 점검</div>
+      <div className="mt-1">Current RC: {pct(point.currentRc, false)}</div>
+      <div>RC Target: {pct(point.targetRc, false)}</div>
+      <div>risk_over: {point.riskOver ? '점검 필요' : '기준 내'}</div>
+      <div className="mt-1 text-slate-500">IPS 판단: {point.actionLabel || point.ipsAction}</div>
+    </>
+  );
+}
+
+function EfficiencyRiskTooltip({ active, payload }: { active?: boolean; payload?: TooltipPayload<EfficiencyRiskPoint> }) {
+  if (!active) return null;
+  const point = firstTooltipPayload(payload);
+  if (!point) return null;
+
+  return tooltipFrame(
+    <>
+      <div className="font-bold text-slate-900">{point.ticker} 판단 위치</div>
+      <div className="mt-1">액션: {point.actionLabel}</div>
+      <div>구분: {point.familyLabel}</div>
+      <div>IPS 적합도: {point.ipsFit === null ? 'N/A' : num(point.ipsFit)}</div>
+      <div className="mt-1 text-slate-500">{point.decisionSummary}</div>
+    </>
+  );
+}
+
+function EvaluationCharts({ evaluation }: { evaluation: EvaluationResponse }) {
+  const actionByTicker = recordByTicker(evaluation.ips_actions);
+  const proposalByTicker = evaluation.proposal.reduce<Record<string, ProposalRow>>((acc, row) => {
+    acc[row.ticker] = row;
+    return acc;
+  }, {});
+
+  const actionDistributionData = Object.values(
+    evaluation.ips_actions.reduce<Record<string, ActionDistributionPoint>>((acc, row) => {
+      const ticker = textFromRecord(row, 'ticker');
+      const proposal = proposalByTicker[ticker];
+      const family = textFromRecord(row, 'action_family');
+      const normalizedFamily = family === 'unknown' ? 'unknown' : family;
+      const actionLabel = textFromRecord(row, 'action_label');
+      const currentWeight = proposal?.current_weight_pct ?? valueFromRecord(row, '현재%');
+
+      if (!acc[normalizedFamily]) {
+        acc[normalizedFamily] = {
+          family: normalizedFamily,
+          familyLabel: actionFamilyLabel(normalizedFamily),
+          count: 0,
+          totalWeightPct: 0,
+          actionLabels: []
+        };
+      }
+
+      acc[normalizedFamily].count += 1;
+      acc[normalizedFamily].totalWeightPct = Number((acc[normalizedFamily].totalWeightPct + currentWeight).toFixed(2));
+      if (actionLabel !== 'unknown' && !acc[normalizedFamily].actionLabels.includes(actionLabel)) {
+        acc[normalizedFamily].actionLabels.push(actionLabel);
+      }
+      return acc;
+    }, {})
+  );
+
+  const targetAllocation = recordFromConfig(evaluation.ips_config_snapshot, 'target_allocation');
+  const groupRows = evaluation.group_summary.reduce<Record<string, Record<string, unknown>>>((acc, row) => {
+    acc[textFromRecord(row, 'group')] = row;
+    return acc;
+  }, {});
+  const groupBandData = ['core', 'satellite', 'cash'].map((group) => {
+    const groupConfig = recordFromConfig(targetAllocation, group);
+    return {
+      group,
+      groupLabel: groupLabel(group),
+      current: Number((valueFromRecord(groupRows[group] ?? {}, 'weight') * 100).toFixed(2)),
+      min: numberFromConfig(groupConfig, 'min'),
+      target: numberFromConfig(groupConfig, 'target'),
+      max: numberFromConfig(groupConfig, 'max')
+    };
+  });
+
+  const riskBudgetData = evaluation.proposal.map((row) => {
+    const action = actionByTicker[row.ticker] ?? {};
+    return {
+      ticker: row.ticker,
+      currentRc: Number((row.rc_target_pct + row.rc_gap_pct).toFixed(2)),
+      targetRc: Number(row.rc_target_pct.toFixed(2)),
+      riskOver: row.risk_over,
+      ipsAction: textFromRecord(action, 'ips_action'),
+      actionLabel: textFromRecord(action, 'action_label')
+    };
+  });
+
+  const efficiencyRiskData = evaluation.proposal.map((row) => {
+    const action = actionByTicker[row.ticker] ?? {};
+    const family = textFromRecord(action, 'action_family');
+    const normalizedFamily = family === 'unknown' ? 'unknown' : family;
+    return {
+      ticker: row.ticker,
+      efficiency: Number((row.efficiency_score ?? 0).toFixed(2)),
+      rcGap: Number(row.rc_gap_pct.toFixed(2)),
+      family: normalizedFamily,
+      familyLabel: actionFamilyLabel(normalizedFamily),
+      actionLabel: textFromRecord(action, 'action_label'),
+      ipsFit: row.ips_fit_score,
+      decisionSummary: textFromRecord(action, 'decision_summary')
+    };
+  });
+  const efficiencyRiskFamilies = Array.from(new Set(efficiencyRiskData.map((row) => row.family)));
 
   return (
     <div className="mt-5 grid gap-4 xl:grid-cols-2">
-      {riskBudgetData.length ? (
+      {actionDistributionData.length ? (
         <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 p-3">
           <div className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-600">
-            <BarChart3 className="h-4 w-4 text-blue-700" />
-            위험 예산
+            <RefreshCcw className="h-4 w-4 text-blue-700" />
+            액션 분포 판단 근거
           </div>
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={riskBudgetData}>
+            <BarChart data={actionDistributionData}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="ticker" />
-              <YAxis />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="risk" fill="#1d4ed8" name="위험기여도 %" />
-              <Bar dataKey="target" fill="#0f766e" name="RC Target %" />
+              <XAxis dataKey="familyLabel" interval={0} tick={{ fontSize: 11 }} />
+              <YAxis allowDecimals={false} />
+              <Tooltip content={<ActionDistributionTooltip />} />
+              <Bar dataKey="count" name="종목 수">
+                {actionDistributionData.map((row) => (
+                  <Cell fill={actionFamilyColor(row.family)} key={row.family} />
+                ))}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
       ) : null}
 
-      {actionData.length ? (
+      {groupBandData.length ? (
         <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 p-3">
           <div className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-600">
-            <RefreshCcw className="h-4 w-4 text-blue-700" />
-            리밸런싱 액션
+            <ShieldCheck className="h-4 w-4 text-blue-700" />
+            그룹 비중 vs IPS 밴드
           </div>
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={actionData}>
+            <BarChart data={groupBandData} layout="vertical" margin={{ left: 10 }}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="ticker" />
+              <XAxis type="number" domain={[0, 100]} tickFormatter={(value) => `${value}%`} />
+              <YAxis dataKey="groupLabel" type="category" width={56} />
+              <Tooltip content={<GroupBandTooltip />} />
+              <Legend />
+              <Bar dataKey="current" fill="#1d4ed8" name="현재 비중 %" />
+              <Bar dataKey="min" fill="#94a3b8" name="IPS Min %" />
+              <Bar dataKey="target" fill="#0f766e" name="IPS Target %" />
+              <Bar dataKey="max" fill="#cbd5e1" name="IPS Max %" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      ) : null}
+
+      {riskBudgetData.length ? (
+        <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-600">
+            <BarChart3 className="h-4 w-4 text-blue-700" />
+            위험 예산 점검 근거
+          </div>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={riskBudgetData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="ticker" interval={0} tick={{ fontSize: 11 }} />
               <YAxis />
-              <Tooltip />
-              <ReferenceLine y={0} stroke="#64748b" />
-              <Bar dataKey="suggestedTrade" fill="#7c3aed" name="제안조정 %p" />
+              <Tooltip content={<RiskBudgetTooltip />} />
+              <Legend />
+              <Bar dataKey="currentRc" name="Current RC %">
+                {riskBudgetData.map((row) => (
+                  <Cell fill={row.riskOver ? '#dc2626' : '#1d4ed8'} key={row.ticker} />
+                ))}
+              </Bar>
+              <Bar dataKey="targetRc" fill="#0f766e" name="RC Target %" />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -2066,44 +2290,26 @@ function EvaluationCharts({
         <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 p-3">
           <div className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-600">
             <LineChart className="h-4 w-4 text-blue-700" />
-            E vs RC Gap
+            효율-위험 액션 맵
           </div>
           <ResponsiveContainer width="100%" height={240}>
             <ScatterChart>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="efficiency" name="E" type="number" domain={[0, 1]} />
-              <YAxis dataKey="rcGap" name="RC Gap" type="number" />
-              <Tooltip cursor={{ strokeDasharray: '3 3' }} />
-              <ReferenceLine y={0} stroke="#64748b" />
-              <Scatter data={efficiencyRiskData} fill="#0f766e" name="자산" />
-            </ScatterChart>
-          </ResponsiveContainer>
-        </div>
-      ) : null}
-
-      {groupAllocationData.length && groupKeys.length ? (
-        <div className="h-72 rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <div className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-600">
-            <ShieldCheck className="h-4 w-4 text-blue-700" />
-            그룹 비중
-          </div>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={groupAllocationData} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" />
-              <YAxis dataKey="label" type="category" />
-              <Tooltip />
+              <XAxis dataKey="efficiency" name="E" type="number" domain={[0, 1]} tick={{ fontSize: 11 }} />
+              <YAxis dataKey="rcGap" name="RC Gap" type="number" tick={{ fontSize: 11 }} />
+              <Tooltip content={<EfficiencyRiskTooltip />} cursor={{ strokeDasharray: '3 3' }} />
               <Legend />
-              {groupKeys.map((key, index) => (
-                <Bar
-                  dataKey={key}
-                  fill={['#1d4ed8', '#0f766e', '#7c3aed', '#ca8a04', '#64748b'][index % 5]}
-                  key={key}
-                  name={`${key} %`}
-                  stackId="group"
+              <ReferenceLine x={0.5} stroke="#94a3b8" strokeDasharray="4 4" />
+              <ReferenceLine y={0} stroke="#64748b" />
+              {efficiencyRiskFamilies.map((family) => (
+                <Scatter
+                  data={efficiencyRiskData.filter((row) => row.family === family)}
+                  fill={actionFamilyColor(family)}
+                  key={family}
+                  name={actionFamilyLabel(family)}
                 />
               ))}
-            </BarChart>
+            </ScatterChart>
           </ResponsiveContainer>
         </div>
       ) : null}
