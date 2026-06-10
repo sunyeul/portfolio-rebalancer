@@ -109,6 +109,35 @@ const backtestStrategyOptions: Array<{ value: BacktestStrategy; label: string; d
 ];
 type AppView = 'workbench' | 'settings';
 type EvaluationTab = 'playbook' | 'summary' | 'logic' | 'scores';
+type ReliabilityStatus = 'ready' | 'warn' | 'hold';
+type ReliabilityRowStatus = 'failed' | 'insufficient' | 'risk_attention' | 'normal';
+type ReliabilityRow = {
+  ticker: string;
+  weightPct: number | null;
+  riskContributionPct: number | null;
+  riskWeightGapPct: number | null;
+  riskWeightRatio: number | null;
+  dataStart: string | null;
+  dataEnd: string | null;
+  observationCount: number | null;
+  missingRatio: number | null;
+  status: ReliabilityRowStatus;
+};
+type ReliabilitySummary = {
+  status: ReliabilityStatus;
+  failedCount: number;
+  problemAssetCount: number;
+  highMissingRatioCount: number;
+  lowObservationCount: number;
+  riskOverCount: number;
+  lowQualityWeightPct: number;
+  warningLines: string[];
+};
+
+const DATA_QUALITY_MISSING_RATIO_THRESHOLD = 0.2;
+const DATA_QUALITY_OBSERVATION_THRESHOLD = 60;
+const RISK_WEIGHT_GAP_WARN_PCT = 1;
+const LOW_QUALITY_WEIGHT_HOLD_PCT = 20;
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
@@ -660,6 +689,26 @@ export function App() {
     []
   );
 
+  const reliabilityColumns = useMemo<ColumnDef<ReliabilityRow>[]>(
+    () => [
+      { accessorKey: 'ticker', header: '티커' },
+      nullableNumberColumn('weightPct', '비중', (row) => row.weightPct, (value) => pct(value, false)),
+      nullableNumberColumn('riskContributionPct', '위험기여도', (row) => row.riskContributionPct, (value) => pct(value, false)),
+      nullableNumberColumn('riskWeightGapPct', '위험-비중', (row) => row.riskWeightGapPct, (value) => signedPct(value, false)),
+      nullableNumberColumn('riskWeightRatio', '위험/비중', (row) => row.riskWeightRatio, (value) => (value === null || value === undefined ? 'N/A' : `${value.toFixed(2)}x`)),
+      { accessorKey: 'dataStart', header: '시작일', cell: ({ row }) => row.original.dataStart ?? 'N/A' },
+      { accessorKey: 'dataEnd', header: '종료일', cell: ({ row }) => row.original.dataEnd ?? 'N/A' },
+      nullableNumberColumn('observationCount', '관측수', (row) => row.observationCount, (value) => (value === null || value === undefined ? 'N/A' : String(value))),
+      nullableNumberColumn('missingRatio', '결측률', (row) => row.missingRatio, pct),
+      {
+        accessorKey: 'status',
+        header: '상태',
+        cell: ({ row }) => <ReliabilityStatusBadge status={row.original.status} />
+      }
+    ],
+    []
+  );
+
   const proposalColumns = useMemo<ColumnDef<ProposalRow>[]>(
     () => [
       { accessorKey: 'ticker', header: '티커' },
@@ -912,11 +961,103 @@ export function App() {
     );
   }
 
-  const chartData = analysis?.metrics.map((row) => ({
-    ticker: row.ticker,
-    weight: Number(((row.weight ?? 0) * 100).toFixed(2)),
-    risk: Number(((row.risk_contribution ?? 0) * 100).toFixed(2))
-  })) ?? [];
+  const reliabilityRows = useMemo<ReliabilityRow[]>(() => {
+    if (!analysis) return [];
+    const metricRows = analysis.metrics.map((row) => {
+      const weightPct = Number(((row.weight ?? 0) * 100).toFixed(2));
+      const riskContributionPct =
+        row.risk_contribution === null || row.risk_contribution === undefined
+          ? null
+          : Number((row.risk_contribution * 100).toFixed(2));
+      const riskWeightGapPct =
+        riskContributionPct === null ? null : Number((riskContributionPct - weightPct).toFixed(2));
+      const riskWeightRatio =
+        riskContributionPct === null || weightPct <= 0
+          ? null
+          : Number((riskContributionPct / weightPct).toFixed(2));
+      const dataInsufficient =
+        (row.missing_ratio ?? 0) > DATA_QUALITY_MISSING_RATIO_THRESHOLD ||
+        (row.observation_count ?? Number.POSITIVE_INFINITY) < DATA_QUALITY_OBSERVATION_THRESHOLD;
+      const riskAttention = (riskWeightGapPct ?? 0) > RISK_WEIGHT_GAP_WARN_PCT;
+
+      return {
+        ticker: row.ticker,
+        weightPct,
+        riskContributionPct,
+        riskWeightGapPct,
+        riskWeightRatio,
+        dataStart: row.data_start,
+        dataEnd: row.data_end,
+        observationCount: row.observation_count,
+        missingRatio: row.missing_ratio,
+        status: dataInsufficient ? 'insufficient' : riskAttention ? 'risk_attention' : 'normal'
+      } satisfies ReliabilityRow;
+    });
+    const knownTickers = new Set(metricRows.map((row) => row.ticker));
+    const failedRows = analysis.missing_tickers
+      .filter((ticker) => !knownTickers.has(ticker))
+      .map((ticker) => ({
+        ticker,
+        weightPct: null,
+        riskContributionPct: null,
+        riskWeightGapPct: null,
+        riskWeightRatio: null,
+        dataStart: null,
+        dataEnd: null,
+        observationCount: null,
+        missingRatio: null,
+        status: 'failed' as const
+      }));
+    return [...failedRows, ...metricRows];
+  }, [analysis]);
+
+  const reliabilitySummary = useMemo<ReliabilitySummary | null>(() => {
+    if (!analysis) return null;
+    const failedCount = analysis.missing_tickers.length;
+    const qualityWarningRows = reliabilityRows.filter((row) => row.status === 'insufficient');
+    const highMissingRatioRows = reliabilityRows.filter(
+      (row) => (row.missingRatio ?? 0) > DATA_QUALITY_MISSING_RATIO_THRESHOLD
+    );
+    const lowObservationRows = reliabilityRows.filter(
+      (row) => row.observationCount !== null && row.observationCount < DATA_QUALITY_OBSERVATION_THRESHOLD
+    );
+    const riskOverRows = reliabilityRows.filter(
+      (row) => (row.riskWeightGapPct ?? 0) > RISK_WEIGHT_GAP_WARN_PCT
+    );
+    const problemTickers = new Set([
+      ...analysis.missing_tickers,
+      ...highMissingRatioRows.map((row) => row.ticker),
+      ...lowObservationRows.map((row) => row.ticker),
+      ...riskOverRows.map((row) => row.ticker)
+    ]);
+    const lowQualityWeightPct = Number(
+      qualityWarningRows.reduce((sum, row) => sum + (row.weightPct ?? 0), 0).toFixed(2)
+    );
+    const shouldHold = failedCount > 0 || lowQualityWeightPct >= LOW_QUALITY_WEIGHT_HOLD_PCT;
+    const shouldWarn = shouldHold || qualityWarningRows.length > 0 || riskOverRows.length > 0;
+    const warningLines = [
+      failedCount ? `조회 실패 티커 ${failedCount}개: ${analysis.missing_tickers.join(', ')}` : '',
+      highMissingRatioRows.length ? `결측률 20% 초과 ${highMissingRatioRows.length}건` : '',
+      lowObservationRows.length ? `관측수 60 미만 ${lowObservationRows.length}건` : '',
+      riskOverRows.length ? `비중 대비 위험기여도 초과 ${riskOverRows.length}건` : '',
+      lowQualityWeightPct >= LOW_QUALITY_WEIGHT_HOLD_PCT
+        ? `저품질 종목 비중 합 ${pct(lowQualityWeightPct, false)}`
+        : ''
+    ].filter(Boolean);
+
+    return {
+      status: shouldHold ? 'hold' : shouldWarn ? 'warn' : 'ready',
+      failedCount,
+      problemAssetCount: problemTickers.size,
+      highMissingRatioCount: highMissingRatioRows.length,
+      lowObservationCount: lowObservationRows.length,
+      riskOverCount: riskOverRows.length,
+      lowQualityWeightPct,
+      warningLines
+    };
+  }, [analysis, reliabilityRows]);
+
+  const reliabilityChartData = reliabilityRows.filter((row) => row.status !== 'failed');
   const selectedCounterfactualOption =
     counterfactualScenarioOptions.find((option) => option.value === counterfactualScenario) ??
     counterfactualScenarioOptions[0];
@@ -1391,7 +1532,7 @@ export function App() {
                   <div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-100 text-sm font-bold text-violet-800">3</div>
                   <h3 className="text-xl font-semibold text-slate-950">데이터 조회 & 보강</h3>
                 </div>
-                <p className="mt-2 text-sm text-slate-500">기본 루틴값으로 지표를 갱신합니다. 기간, RF, 벤치마크는 필요할 때만 조정합니다.</p>
+                <p className="mt-2 text-sm text-slate-500">조회된 가격 데이터의 품질과 비중 대비 위험 편중을 먼저 확인합니다.</p>
               </div>
               <div className="run-controls analysis-controls">
                 <label className="control-field">
@@ -1430,16 +1571,28 @@ export function App() {
             <ErrorLine error={analysisMutation.error} />
             {analysis && (
               <>
-                <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {reliabilitySummary && <ReliabilityGatePanel summary={reliabilitySummary} />}
+                <ReliabilityRiskChart data={reliabilityChartData} />
+              </>
+            )}
+            <DataTable data={reliabilityRows} columns={reliabilityColumns} emptyLabel="신뢰성 점검 결과가 아직 없습니다." />
+            {analysis && reliabilitySummary?.warningLines.length ? (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                평가 실행 전 확인: {reliabilitySummary.warningLines.join(' · ')}
+              </div>
+            ) : null}
+            {analysis?.metrics.length ? (
+              <details className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <summary className="cursor-pointer text-sm font-bold text-slate-700">상세 성과 지표 보기</summary>
+                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <MetricCard label="포트폴리오 CAGR" value={analysis.portfolio_metrics.cagr} />
                   <MetricCard label="포트폴리오 변동성" value={analysis.portfolio_metrics.volatility} />
                   <MetricCard label="포트폴리오 샤프" value={analysis.portfolio_metrics.sharpe} format="number" />
                   <MetricCard label="벤치마크 샤프" value={analysis.benchmark_metrics?.sharpe} format="number" />
                 </div>
-                <ChartBlock data={chartData} />
-              </>
-            )}
-            <DataTable data={analysis?.metrics ?? []} columns={metricColumns} emptyLabel="분석 결과가 아직 없습니다." />
+                <DataTable data={analysis.metrics} columns={metricColumns} emptyLabel="상세 지표가 없습니다." />
+              </details>
+            ) : null}
             {analysis?.metrics.length ? (
               <a className="download-link" href={csvDownloadUrl('metrics')}>
                 <Download className="h-4 w-4" /> 메트릭 CSV
@@ -1953,23 +2106,139 @@ function ErrorLine({ error }: { error: Error | null }) {
   );
 }
 
-function ChartBlock({ data }: { data: Array<{ ticker: string; weight: number; risk: number }> }) {
+function reliabilityStatusLabel(status: ReliabilityStatus) {
+  if (status === 'ready') return '분석 가능';
+  if (status === 'warn') return '주의 필요';
+  return '평가 보류 권장';
+}
+
+function reliabilityRowStatusLabel(status: ReliabilityRowStatus) {
+  if (status === 'failed') return '실패';
+  if (status === 'insufficient') return '부족';
+  if (status === 'risk_attention') return '위험주의';
+  return '정상';
+}
+
+function ReliabilityStatusBadge({ status }: { status: ReliabilityRowStatus }) {
+  const className =
+    status === 'failed'
+      ? 'border-red-200 bg-red-50 text-red-700'
+      : status === 'insufficient'
+        ? 'border-amber-200 bg-amber-50 text-amber-700'
+        : status === 'risk_attention'
+          ? 'border-orange-200 bg-orange-50 text-orange-700'
+          : 'border-emerald-200 bg-emerald-50 text-emerald-700';
+
+  return (
+    <span className={cx('inline-flex rounded-md border px-2 py-1 text-xs font-bold', className)}>
+      {reliabilityRowStatusLabel(status)}
+    </span>
+  );
+}
+
+function ReliabilityGatePanel({ summary }: { summary: ReliabilitySummary }) {
+  const panelClass =
+    summary.status === 'hold'
+      ? 'border-red-200 bg-red-50'
+      : summary.status === 'warn'
+        ? 'border-amber-200 bg-amber-50'
+        : 'border-emerald-200 bg-emerald-50';
+  const iconClass =
+    summary.status === 'hold'
+      ? 'text-red-700'
+      : summary.status === 'warn'
+        ? 'text-amber-700'
+        : 'text-emerald-700';
+  const titleClass =
+    summary.status === 'hold'
+      ? 'text-red-900'
+      : summary.status === 'warn'
+        ? 'text-amber-900'
+        : 'text-emerald-900';
+
+  return (
+    <div className={cx('mt-5 rounded-lg border p-4', panelClass)}>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            {summary.status === 'ready' ? (
+              <CheckCircle2 className={cx('h-5 w-5', iconClass)} />
+            ) : (
+              <AlertCircle className={cx('h-5 w-5', iconClass)} />
+            )}
+            <h4 className={cx('text-lg font-bold', titleClass)}>{reliabilityStatusLabel(summary.status)}</h4>
+          </div>
+          <p className="mt-2 text-sm font-semibold text-slate-700">
+            {summary.status === 'ready'
+              ? '조회된 데이터가 신뢰성 기준을 통과했습니다.'
+              : 'IPS 평가 전에 아래 경고 종목과 위험 편중을 확인하세요.'}
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 rounded-lg border border-white/70 bg-white/70 p-3 sm:grid-cols-4">
+          <SummaryStat label="문제 종목" value={`${summary.problemAssetCount}개`} tone={summary.problemAssetCount ? 'warn' : 'default'} />
+          <SummaryStat label="결측률 초과" value={`${summary.highMissingRatioCount}건`} tone={summary.highMissingRatioCount ? 'warn' : 'default'} />
+          <SummaryStat label="관측수 부족" value={`${summary.lowObservationCount}건`} tone={summary.lowObservationCount ? 'warn' : 'default'} />
+          <SummaryStat label="위험 초과" value={`${summary.riskOverCount}건`} tone={summary.riskOverCount ? 'warn' : 'default'} />
+        </div>
+      </div>
+      {summary.warningLines.length ? (
+        <div className="mt-3 text-sm font-semibold text-slate-700">
+          {summary.warningLines.join(' · ')}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ReliabilityRiskTooltip({
+  active,
+  payload
+}: {
+  active?: boolean;
+  payload?: Array<{ payload?: ReliabilityRow }>;
+}) {
+  if (!active) return null;
+  const point = payload?.[0]?.payload;
+  if (!point) return null;
+
+  return (
+    <div className="max-w-[280px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 shadow-lg">
+      <div className="font-bold text-slate-900">{point.ticker}</div>
+      <div className="mt-1">비중: {pct(point.weightPct, false)}</div>
+      <div>위험기여도: {pct(point.riskContributionPct, false)}</div>
+      <div>위험-비중: {signedPct(point.riskWeightGapPct, false)}</div>
+      <div>위험/비중: {point.riskWeightRatio === null ? 'N/A' : `${point.riskWeightRatio.toFixed(2)}x`}</div>
+      <div className="mt-1 text-slate-500">
+        결측률 {pct(point.missingRatio)} · 관측수 {point.observationCount ?? 'N/A'}
+      </div>
+    </div>
+  );
+}
+
+function ReliabilityRiskChart({ data }: { data: ReliabilityRow[] }) {
   if (!data.length) return null;
   return (
     <div className="mt-5 h-72 rounded-lg border border-slate-200 bg-slate-50 p-3">
       <div className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-600">
         <LineChart className="h-4 w-4 text-blue-700" />
-        비중 대비 위험기여도
+        비중 대비 위험기여도 점검
       </div>
       <ResponsiveContainer width="100%" height={240}>
         <BarChart data={data}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="ticker" />
           <YAxis />
-          <Tooltip />
+          <Tooltip content={<ReliabilityRiskTooltip />} />
           <Legend />
-          <Bar dataKey="weight" fill="#1d4ed8" name="비중 %" />
-          <Bar dataKey="risk" fill="#0f766e" name="위험기여도 %" />
+          <Bar dataKey="weightPct" fill="#1d4ed8" name="비중 %" />
+          <Bar dataKey="riskContributionPct" name="위험기여도 %">
+            {data.map((row) => (
+              <Cell
+                fill={(row.riskWeightGapPct ?? 0) > RISK_WEIGHT_GAP_WARN_PCT ? '#dc2626' : '#0f766e'}
+                key={row.ticker}
+              />
+            ))}
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>
