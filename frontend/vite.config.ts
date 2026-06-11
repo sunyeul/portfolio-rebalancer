@@ -9,7 +9,6 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined;
-          if (id.includes('recharts') || id.includes('d3-')) return 'charts';
           if (id.includes('@tanstack')) return 'tanstack';
           if (id.includes('lucide-react')) return 'icons';
           if (id.includes('papaparse') || id.includes('react-hook-form') || id.includes('zod')) return 'forms';
