@@ -108,9 +108,20 @@ const backtestStrategyOptions: Array<{ value: BacktestStrategy; label: string; d
   { value: 'return_chasing_reference', label: '수익률 중심 참고', description: '최근 수익률을 우선한 비교용 정책이며 IPS 적합성 판단의 반례로 봅니다.' }
 ];
 type AppView = 'workbench' | 'settings';
-type EvaluationTab = 'playbook' | 'summary' | 'logic' | 'scores';
+type EvaluationTab = 'playbook' | 'summary' | 'performance' | 'logic' | 'scores';
 type ReliabilityStatus = 'ready' | 'warn' | 'hold';
 type ReliabilityRowStatus = 'failed' | 'insufficient' | 'risk_attention' | 'normal';
+type SupportingSignalTone = 'good' | 'warn' | 'risk' | 'info' | 'neutral';
+type SupportingSignal = {
+  label: string;
+  tone: SupportingSignalTone;
+};
+type SupportingSignalSummary = {
+  efficiencyWarningCount: number;
+  riskOverCount: number;
+  strongReturnCount: number;
+  highIpsFitCount: number;
+};
 type ReliabilityRow = {
   ticker: string;
   weightPct: number | null;
@@ -138,6 +149,10 @@ const DATA_QUALITY_MISSING_RATIO_THRESHOLD = 0.2;
 const DATA_QUALITY_OBSERVATION_THRESHOLD = 60;
 const RISK_WEIGHT_GAP_WARN_PCT = 1;
 const LOW_QUALITY_WEIGHT_HOLD_PCT = 20;
+const STRONG_RETURN_PCT = 10;
+const WEAK_RETURN_PCT = -10;
+const HIGH_IPS_FIT = 70;
+const MEDIUM_IPS_FIT = 50;
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
@@ -184,6 +199,24 @@ function valueFromRecord(row: Record<string, unknown>, key: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function nullableValueFromRecord(row: Record<string, unknown>, key: string) {
+  const value = row[key];
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function booleanFromRecord(row: Record<string, unknown>, key: string) {
+  const value = row[key];
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') return ['true', '1', 'yes', 'y', 'on', '실행', '경고'].includes(value.trim().toLowerCase());
+  return false;
+}
+
 function textFromRecord(row: Record<string, unknown>, key: string) {
   const value = row[key];
   return typeof value === 'string' ? value : 'unknown';
@@ -224,6 +257,107 @@ function confidenceLabel(value: PlaybookRecommendation['confidence']) {
   if (value === 'high') return '높음';
   if (value === 'medium') return '보통';
   return '낮음';
+}
+
+function actionEfficiencyWarning(row: Record<string, unknown>, eThresh: number) {
+  const efficiency = nullableValueFromRecord(row, 'E');
+  return booleanFromRecord(row, 'efficiency_warning') || (efficiency !== null && efficiency < eThresh);
+}
+
+function actionEfficiencyScore(row: Record<string, unknown>) {
+  return nullableValueFromRecord(row, 'E') ?? nullableValueFromRecord(row, 'efficiency_score');
+}
+
+function actionReturnPct(row: Record<string, unknown>) {
+  return nullableValueFromRecord(row, 'return_total%') ?? nullableValueFromRecord(row, 'return_total_pct');
+}
+
+function actionIpsFit(row: Record<string, unknown>) {
+  return nullableValueFromRecord(row, 'IPS적합도') ?? nullableValueFromRecord(row, 'ips_fit_score');
+}
+
+function supportingSignalsFromAction(row: Record<string, unknown>, eThresh: number): SupportingSignal[] {
+  const signals: SupportingSignal[] = [];
+  const efficiency = actionEfficiencyScore(row);
+  const returnPct = actionReturnPct(row);
+  const ipsFit = actionIpsFit(row);
+  const rcOverPct = nullableValueFromRecord(row, 'RC_Over%') ?? nullableValueFromRecord(row, 'rc_over_pct');
+
+  if (booleanFromRecord(row, 'risk_over')) {
+    signals.push({ label: `위험 초과 ${signedPct(rcOverPct, false)}`, tone: 'risk' });
+  }
+  if (actionEfficiencyWarning(row, eThresh)) {
+    signals.push({ label: `효율 주의 E ${num(efficiency)}`, tone: 'warn' });
+  } else if (efficiency !== null) {
+    signals.push({ label: `E ${num(efficiency)}`, tone: 'good' });
+  }
+  if (returnPct !== null && returnPct >= STRONG_RETURN_PCT) {
+    signals.push({ label: `수익 ${signedPct(returnPct, false)}`, tone: 'good' });
+  } else if (returnPct !== null && returnPct <= WEAK_RETURN_PCT) {
+    signals.push({ label: `수익 ${signedPct(returnPct, false)}`, tone: 'risk' });
+  } else if (returnPct !== null) {
+    signals.push({ label: `수익 ${signedPct(returnPct, false)}`, tone: 'neutral' });
+  }
+  if (ipsFit !== null && ipsFit >= HIGH_IPS_FIT) {
+    signals.push({ label: `IPS ${num(ipsFit)}`, tone: 'info' });
+  } else if (ipsFit !== null && ipsFit >= MEDIUM_IPS_FIT) {
+    signals.push({ label: `IPS ${num(ipsFit)}`, tone: 'info' });
+  }
+
+  return signals.length ? signals : [{ label: '보조 중립', tone: 'neutral' }];
+}
+
+function supportingSignalSummary(evaluation: EvaluationResponse, eThresh: number): SupportingSignalSummary {
+  return evaluation.proposal.reduce<SupportingSignalSummary>(
+    (acc, row) => {
+      const efficiencyWarning =
+        row.efficiency_warning || (row.efficiency_score !== null && row.efficiency_score < eThresh);
+      if (efficiencyWarning) acc.efficiencyWarningCount += 1;
+      if (row.risk_over) acc.riskOverCount += 1;
+      if (row.return_total_pct !== null && row.return_total_pct >= STRONG_RETURN_PCT) acc.strongReturnCount += 1;
+      if (row.ips_fit_score !== null && row.ips_fit_score >= HIGH_IPS_FIT) acc.highIpsFitCount += 1;
+      return acc;
+    },
+    { efficiencyWarningCount: 0, riskOverCount: 0, strongReturnCount: 0, highIpsFitCount: 0 }
+  );
+}
+
+function supportingInterpretation(row: ProposalRow, actionRow: Record<string, unknown> | undefined, eThresh: number) {
+  const efficiencyWarning =
+    row.efficiency_warning || (row.efficiency_score !== null && row.efficiency_score < eThresh);
+  const strongReturn = row.return_total_pct !== null && row.return_total_pct >= STRONG_RETURN_PCT;
+  const weakReturn = row.return_total_pct !== null && row.return_total_pct <= WEAK_RETURN_PCT;
+  const positiveGap = row.gap_pct > 0;
+  const actionLabel = actionRow ? textFromRecord(actionRow, 'action_label') : '';
+
+  if (row.risk_over && strongReturn) return '수익률은 좋지만 위험 초과';
+  if (row.risk_over) return '위험기여도 초과로 우선 점검';
+  if (positiveGap && efficiencyWarning) return '비중 부족이나 효율 낮음';
+  if (positiveGap && !efficiencyWarning) return '비중과 효율이 함께 지지';
+  if (efficiencyWarning && actionLabel.includes('증액')) return '증액 가능하나 효율 주의';
+  if (efficiencyWarning) return '효율 낮아 우선순위 확인';
+  if (weakReturn) return '수익 부진은 논리 점검 참고';
+  if (strongReturn) return '수익 양호하나 단독 실행 신호 아님';
+  return '보조 신호 중립';
+}
+
+function SupportingSignalChip({ signal }: { signal: SupportingSignal }) {
+  const toneClass =
+    signal.tone === 'good'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+      : signal.tone === 'warn'
+        ? 'border-amber-200 bg-amber-50 text-amber-700'
+        : signal.tone === 'risk'
+          ? 'border-red-200 bg-red-50 text-red-700'
+          : signal.tone === 'info'
+            ? 'border-blue-200 bg-blue-50 text-blue-700'
+            : 'border-slate-200 bg-slate-50 text-slate-500';
+
+  return (
+    <span className={cx('inline-flex rounded-md border px-2 py-1 text-xs font-bold', toneClass)}>
+      {signal.label}
+    </span>
+  );
 }
 
 function PlaybookPanel({ playbook }: { playbook?: PlaybookRecommendation | null }) {
@@ -418,6 +552,7 @@ export function App() {
     }
   });
   const settings = watch();
+  const currentEThresh = Number.isFinite(Number(settings.eThresh)) ? Number(settings.eThresh) : 0.5;
 
   async function persistCurrentState() {
     if (selectedPortfolioId === null) return;
@@ -725,6 +860,16 @@ export function App() {
     []
   );
 
+  const evaluationActionByTicker = useMemo(
+    () => (evaluation ? recordByTicker(evaluation.ips_actions) : {}),
+    [evaluation]
+  );
+
+  const performanceSummary = useMemo(
+    () => (evaluation ? supportingSignalSummary(evaluation, currentEThresh) : null),
+    [currentEThresh, evaluation]
+  );
+
   const actionSummaryColumns = useMemo<ColumnDef<Record<string, unknown>>[]>(
     () => [
       { accessorKey: 'ticker', header: '티커' },
@@ -736,6 +881,11 @@ export function App() {
             <div className="font-bold text-slate-900">{textFromRecord(row.original, 'action_label')}</div>
             <div className="mt-1 text-slate-700">{textFromRecord(row.original, 'next_step')}</div>
             <div className="mt-1 text-xs font-semibold text-slate-500">{textFromRecord(row.original, 'decision_summary')}</div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {supportingSignalsFromAction(row.original, currentEThresh).map((signal) => (
+                <SupportingSignalChip key={`${textFromRecord(row.original, 'ticker')}-${signal.label}`} signal={signal} />
+              ))}
+            </div>
           </div>
         )
       },
@@ -745,7 +895,52 @@ export function App() {
       { accessorKey: '실행', header: '최종실행', cell: ({ row }) => (row.original['실행'] ? '실행' : '보류') },
       { accessorKey: '제안조정%', header: '최종조정', cell: ({ row }) => pct(valueFromRecord(row.original, '제안조정%'), false) }
     ],
-    []
+    [currentEThresh]
+  );
+
+  const performanceColumns = useMemo<ColumnDef<ProposalRow>[]>(
+    () => [
+      { accessorKey: 'ticker', header: '티커' },
+      {
+        id: 'action',
+        header: '액션',
+        cell: ({ row }) => {
+          const action = evaluationActionByTicker[row.original.ticker];
+          return (
+            <div className="max-w-[220px] whitespace-normal font-bold text-slate-900">
+              {action ? textFromRecord(action, 'action_label') : row.original.action_reason}
+            </div>
+          );
+        }
+      },
+      { accessorKey: 'gap_pct', header: '갭', cell: ({ row }) => signedPct(row.original.gap_pct, false) },
+      nullableNumberColumn('efficiency_score', 'E', (row) => row.efficiency_score, num),
+      nullableNumberColumn('return_total_pct', '기간 수익률', (row) => row.return_total_pct, (value) => signedPct(value, false)),
+      { accessorKey: 'ips_fit_score', header: 'IPS 적합도', cell: ({ row }) => num(row.original.ips_fit_score) },
+      {
+        id: 'risk_status',
+        header: '위험 상태',
+        cell: ({ row }) => (
+          <SupportingSignalChip
+            signal={
+              row.original.risk_over
+                ? { label: `위험 초과 ${signedPct(row.original.rc_over_pct, false)}`, tone: 'risk' }
+                : { label: `RC 편차 ${signedPct(row.original.rc_gap_pct, false)}`, tone: 'good' }
+            }
+          />
+        )
+      },
+      {
+        id: 'supporting_interpretation',
+        header: '보조 해석',
+        cell: ({ row }) => (
+          <div className="max-w-[320px] whitespace-normal text-sm font-semibold text-slate-700">
+            {supportingInterpretation(row.original, evaluationActionByTicker[row.original.ticker], currentEThresh)}
+          </div>
+        )
+      }
+    ],
+    [currentEThresh, evaluationActionByTicker]
   );
 
   const logicColumns = useMemo<ColumnDef<Record<string, unknown>>[]>(
@@ -1723,6 +1918,7 @@ export function App() {
                       {[
                         { value: 'playbook', label: '플레이북' },
                         { value: 'summary', label: '액션 요약' },
+                        { value: 'performance', label: '성과·효율' },
                         { value: 'logic', label: '로직 확인' },
                         { value: 'scores', label: '점수 구성' }
                       ].map((tab) => (
@@ -1751,6 +1947,39 @@ export function App() {
                         <DataTable data={evaluation.ips_actions} columns={actionSummaryColumns} emptyLabel="액션 요약이 없습니다." />
                         <EvaluationCharts evaluation={evaluation} />
                       </>
+                    )}
+                    {evaluationTab === 'performance' && (
+                      <div className="mt-4">
+                        {performanceSummary && (
+                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                              <span className="block text-sm font-semibold text-amber-700">효율 주의</span>
+                              <strong className="mt-2 block text-2xl font-bold text-slate-950">
+                                {performanceSummary.efficiencyWarningCount}
+                              </strong>
+                            </div>
+                            <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+                              <span className="block text-sm font-semibold text-red-700">위험 초과</span>
+                              <strong className="mt-2 block text-2xl font-bold text-slate-950">
+                                {performanceSummary.riskOverCount}
+                              </strong>
+                            </div>
+                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                              <span className="block text-sm font-semibold text-emerald-700">수익 양호</span>
+                              <strong className="mt-2 block text-2xl font-bold text-slate-950">
+                                {performanceSummary.strongReturnCount}
+                              </strong>
+                            </div>
+                            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                              <span className="block text-sm font-semibold text-blue-700">IPS 고적합</span>
+                              <strong className="mt-2 block text-2xl font-bold text-slate-950">
+                                {performanceSummary.highIpsFitCount}
+                              </strong>
+                            </div>
+                          </div>
+                        )}
+                        <DataTable data={evaluation.proposal} columns={performanceColumns} emptyLabel="성과·효율 보조 점수가 없습니다." />
+                      </div>
                     )}
                     {evaluationTab === 'logic' && (
                       <DataTable data={evaluation.ips_actions} columns={logicColumns} emptyLabel="로직 정보가 없습니다." />
