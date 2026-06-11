@@ -108,7 +108,7 @@ const backtestStrategyOptions: Array<{ value: BacktestStrategy; label: string; d
   { value: 'return_chasing_reference', label: '수익률 중심 참고', description: '최근 수익률을 우선한 비교용 정책이며 IPS 적합성 판단의 반례로 봅니다.' }
 ];
 type AppView = 'workbench' | 'settings';
-type EvaluationTab = 'playbook' | 'summary' | 'performance' | 'logic' | 'scores';
+type WorkbenchMode = 'prepare' | 'review';
 type ReliabilityStatus = 'ready' | 'warn' | 'hold';
 type ReliabilityRowStatus = 'failed' | 'insufficient' | 'risk_attention' | 'normal';
 type SupportingSignalTone = 'good' | 'warn' | 'risk' | 'info' | 'neutral';
@@ -421,6 +421,273 @@ function PlaybookPanel({ playbook }: { playbook?: PlaybookRecommendation | null 
   );
 }
 
+type HoldingsFilter = 'all' | 'core' | 'satellite' | 'execute';
+
+type HoldingOverviewRow = {
+  ticker: string;
+  group: string;
+  currentWeightPct: number;
+  targetWeightPct: number | null;
+  gapPct: number | null;
+  returnTotalPct: number | null;
+  riskContributionPct: number | null;
+  ipsFitScore: number | null;
+  actionLabel: string;
+  shouldExecute: boolean;
+  actionTone: 'execute' | 'risk' | 'hold' | 'pending';
+};
+
+function metricRowsByTicker(rows: MetricRow[]) {
+  return rows.reduce<Record<string, MetricRow>>((acc, row) => {
+    acc[row.ticker] = row;
+    return acc;
+  }, {});
+}
+
+function proposalRowsByTicker(rows: ProposalRow[]) {
+  return rows.reduce<Record<string, ProposalRow>>((acc, row) => {
+    acc[row.ticker] = row;
+    return acc;
+  }, {});
+}
+
+function holdingActionTone(
+  proposal: ProposalRow | undefined,
+  actionRow: Record<string, unknown> | undefined
+): HoldingOverviewRow['actionTone'] {
+  if (!proposal && !actionRow) return 'pending';
+  if (proposal?.should_execute || (actionRow && booleanFromRecord(actionRow, '실행'))) return 'execute';
+  if (proposal?.risk_over) return 'risk';
+  return 'hold';
+}
+
+function holdingActionLabel(
+  proposal: ProposalRow | undefined,
+  actionRow: Record<string, unknown> | undefined,
+  analysis: AnalysisResponse | null
+) {
+  if (actionRow) {
+    const label = textFromRecord(actionRow, 'action_label');
+    if (label !== 'unknown') return label;
+  }
+  if (proposal?.action_reason) return proposal.action_reason;
+  return analysis ? '평가 후 표시' : '분석 후 표시';
+}
+
+function buildHoldingOverviewRows({
+  portfolio,
+  analysis,
+  evaluation,
+  actionsByTicker
+}: {
+  portfolio: AssetRow[];
+  analysis: AnalysisResponse | null;
+  evaluation: EvaluationResponse | null;
+  actionsByTicker: Record<string, Record<string, unknown>>;
+}) {
+  const metricsByTicker = metricRowsByTicker(analysis?.metrics ?? []);
+  const proposalsByTicker = proposalRowsByTicker(evaluation?.proposal ?? []);
+  const groupOrder: Record<string, number> = { core: 0, satellite: 1, cash: 2, unclassified: 3 };
+
+  return portfolio
+    .map<HoldingOverviewRow>((asset) => {
+      const metric = metricsByTicker[asset.ticker];
+      const proposal = proposalsByTicker[asset.ticker];
+      const actionRow = actionsByTicker[asset.ticker];
+
+      return {
+        ticker: asset.ticker,
+        group: asset.group,
+        currentWeightPct: proposal?.current_weight_pct ?? Number((asset.weight * 100).toFixed(2)),
+        targetWeightPct: proposal?.target_weight_pct ?? null,
+        gapPct: proposal?.gap_pct ?? null,
+        returnTotalPct: proposal?.return_total_pct ?? (metric?.return_total === null || metric?.return_total === undefined ? null : metric.return_total * 100),
+        riskContributionPct:
+          metric?.risk_contribution === null || metric?.risk_contribution === undefined
+            ? null
+            : metric.risk_contribution * 100,
+        ipsFitScore: proposal?.ips_fit_score ?? null,
+        actionLabel: holdingActionLabel(proposal, actionRow, analysis),
+        shouldExecute: Boolean(proposal?.should_execute || (actionRow && booleanFromRecord(actionRow, '실행'))),
+        actionTone: holdingActionTone(proposal, actionRow)
+      };
+    })
+    .sort((a, b) => {
+      if (a.shouldExecute !== b.shouldExecute) return a.shouldExecute ? -1 : 1;
+      const groupDiff = (groupOrder[a.group] ?? 9) - (groupOrder[b.group] ?? 9);
+      if (groupDiff !== 0) return groupDiff;
+      return b.currentWeightPct - a.currentWeightPct;
+    });
+}
+
+function signedValueClass(value: number | null | undefined) {
+  if (value === null || value === undefined) return 'text-slate-400';
+  if (value > 0) return 'text-rose-500';
+  if (value < 0) return 'text-blue-500';
+  return 'text-slate-600';
+}
+
+function compactPct(value: number | null | undefined, signed = false) {
+  if (value === null || value === undefined) return 'N/A';
+  const sign = signed && value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(2)}%`;
+}
+
+function compactNumber(value: number | null | undefined) {
+  if (value === null || value === undefined) return 'N/A';
+  return value.toFixed(2);
+}
+
+function HoldingActionBadge({ row }: { row: HoldingOverviewRow }) {
+  const className =
+    row.actionTone === 'execute'
+      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+      : row.actionTone === 'risk'
+        ? 'bg-rose-50 text-rose-700 border-rose-200'
+        : row.actionTone === 'hold'
+          ? 'bg-blue-50 text-blue-700 border-blue-200'
+          : 'bg-slate-50 text-slate-500 border-slate-200';
+
+  return (
+    <span className={cx('inline-flex max-w-[180px] items-center rounded-full border px-2.5 py-1 text-xs font-black', className)}>
+      <span className="truncate">{row.actionLabel}</span>
+    </span>
+  );
+}
+
+function PortfolioHoldingsOverview({
+  portfolio,
+  analysis,
+  evaluation,
+  actionsByTicker
+}: {
+  portfolio: AssetRow[];
+  analysis: AnalysisResponse | null;
+  evaluation: EvaluationResponse | null;
+  actionsByTicker: Record<string, Record<string, unknown>>;
+}) {
+  const [activeFilter, setActiveFilter] = useState<HoldingsFilter>('all');
+  const rows = useMemo(
+    () => buildHoldingOverviewRows({ portfolio, analysis, evaluation, actionsByTicker }),
+    [actionsByTicker, analysis, evaluation, portfolio]
+  );
+  const totalWeightPct = portfolio.reduce((sum, asset) => sum + asset.weight * 100, 0);
+  const executeCount = rows.filter((row) => row.shouldExecute).length;
+  const visibleRows = rows.filter((row) => {
+    if (activeFilter === 'all') return true;
+    if (activeFilter === 'execute') return row.shouldExecute;
+    return row.group === activeFilter;
+  });
+  const filterOptions: Array<{ value: HoldingsFilter; label: string; count: number }> = [
+    { value: 'all', label: '전체', count: rows.length },
+    { value: 'core', label: '코어', count: rows.filter((row) => row.group === 'core').length },
+    { value: 'satellite', label: '위성', count: rows.filter((row) => row.group === 'satellite').length },
+    { value: 'execute', label: '실행 후보', count: executeCount }
+  ];
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 bg-white p-5">
+        <div className="mb-5 flex items-center gap-3">
+          <div className="grid h-8 w-8 place-items-center rounded-lg bg-blue-100 text-blue-900">
+            <ShieldCheck className="h-4 w-4" />
+          </div>
+          <div>
+            <h3 className="text-xl font-semibold text-slate-950">포트폴리오 현황 요약</h3>
+            <p className="mt-1 text-sm font-semibold text-slate-500">평가 결과를 기준으로 보유 현황과 권장 액션을 한 화면에서 확인합니다.</p>
+          </div>
+        </div>
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-sm font-black text-slate-700">
+              <ShieldCheck className="h-4 w-4 text-blue-700" />
+              내 포트폴리오
+            </div>
+            <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <strong className="text-3xl font-black leading-none text-slate-950">{compactPct(totalWeightPct)}</strong>
+              <span className="text-sm font-extrabold text-slate-500">정규화 비중</span>
+              <span className="text-sm font-extrabold text-slate-400">보유 {rows.length}개</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-start gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+            {filterOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={cx(
+                  'rounded-md px-3 py-2 text-sm font-black transition',
+                  activeFilter === option.value
+                    ? 'bg-white text-blue-800 shadow-sm'
+                    : 'text-slate-500 hover:bg-white/70 hover:text-slate-900'
+                )}
+                onClick={() => setActiveFilter(option.value)}
+              >
+                {option.label} {option.count}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {portfolio.length ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+            <thead className="bg-white">
+              <tr className="border-b border-slate-100 text-xs font-black text-slate-400">
+                <th className="px-4 py-3">종목</th>
+                <th className="px-4 py-3">그룹</th>
+                <th className="px-4 py-3 text-right">현재 비중</th>
+                <th className="px-4 py-3 text-right">목표 비중</th>
+                <th className="px-4 py-3 text-right">갭</th>
+                <th className="px-4 py-3 text-right">기간 수익률</th>
+                <th className="px-4 py-3 text-right">위험기여도</th>
+                <th className="px-4 py-3 text-right">IPS 적합도</th>
+                <th className="px-4 py-3">권장 액션</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.length ? (
+                visibleRows.map((row, index) => (
+                  <tr
+                    key={row.ticker}
+                    className={cx('border-b border-slate-100 transition hover:bg-slate-50', index % 2 === 0 ? 'bg-slate-50/60' : 'bg-white')}
+                  >
+                    <td className="whitespace-nowrap px-4 py-3 font-black text-slate-900">{row.ticker}</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-600">{groupLabel(row.group)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-bold text-slate-700">{compactPct(row.currentWeightPct)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-bold text-slate-700">{compactPct(row.targetWeightPct)}</td>
+                    <td className={cx('whitespace-nowrap px-4 py-3 text-right font-black', signedValueClass(row.gapPct))}>
+                      {compactPct(row.gapPct, true)}
+                    </td>
+                    <td className={cx('whitespace-nowrap px-4 py-3 text-right font-black', signedValueClass(row.returnTotalPct))}>
+                      {compactPct(row.returnTotalPct, true)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-bold text-slate-700">{compactPct(row.riskContributionPct)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-black text-slate-800">{compactNumber(row.ipsFitScore)}</td>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <HoldingActionBadge row={row} />
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="px-4 py-8 text-center text-sm font-semibold text-slate-500" colSpan={9}>
+                    선택한 필터에 해당하는 종목이 없습니다.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="border-t border-slate-100 bg-slate-50 px-5 py-8 text-sm font-semibold text-slate-500">
+          정규화된 포트폴리오가 아직 없습니다.
+        </div>
+      )}
+    </section>
+  );
+}
+
 function rowsFromAssets(assets: AssetRow[]): PortfolioRowInput[] {
   return assets.map((asset) => ({
     ticker: asset.ticker,
@@ -452,12 +719,12 @@ function rowsSignature(rows: PortfolioRowInput[]) {
 export function App() {
   const queryClient = useQueryClient();
   const [activeView, setActiveView] = useState<AppView>('workbench');
+  const [workbenchMode, setWorkbenchMode] = useState<WorkbenchMode>('prepare');
   const [text, setText] = useState(sampleText);
   const [rows, setRows] = useState<PortfolioRowInput[]>(() => parsePortfolioText(sampleText));
   const [portfolio, setPortfolio] = useState<AssetRow[]>([]);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [evaluation, setEvaluation] = useState<EvaluationResponse | null>(null);
-  const [evaluationTab, setEvaluationTab] = useState<EvaluationTab>('playbook');
   const [counterfactualScenario, setCounterfactualScenario] = useState<CounterfactualScenario>('core_reinforcement');
   const [counterfactual, setCounterfactual] = useState<CounterfactualResponse | null>(null);
   const [backtestStrategies, setBacktestStrategies] = useState<BacktestStrategy[]>([
@@ -535,7 +802,7 @@ export function App() {
     setPortfolio(currentStateQuery.data.portfolio.assets);
     setAnalysis(currentStateQuery.data.analysis);
     setEvaluation(currentStateQuery.data.evaluation);
-    if (currentStateQuery.data.evaluation) setEvaluationTab('playbook');
+    setWorkbenchMode(currentStateQuery.data.evaluation ? 'review' : 'prepare');
     setCounterfactual(null);
     setBacktest(null);
   }, [currentStateQuery.data]);
@@ -575,7 +842,7 @@ export function App() {
     setPortfolio(data.portfolio.assets);
     setAnalysis(data.analysis);
     setEvaluation(data.evaluation);
-    if (data.evaluation) setEvaluationTab('playbook');
+    setWorkbenchMode(data.evaluation ? 'review' : 'prepare');
     setCounterfactual(null);
     setBacktest(null);
     setSelectedPortfolioId(data.snapshot.portfolio_id);
@@ -595,6 +862,7 @@ export function App() {
       setEvaluation(null);
       setCounterfactual(null);
       setBacktest(null);
+      setWorkbenchMode('prepare');
       await persistCurrentState();
     }
   });
@@ -609,6 +877,9 @@ export function App() {
       setPortfolio(data.assets);
       setAnalysis(null);
       setEvaluation(null);
+      setCounterfactual(null);
+      setBacktest(null);
+      setWorkbenchMode('prepare');
       await persistCurrentState();
     }
   });
@@ -620,6 +891,7 @@ export function App() {
       setEvaluation(null);
       setCounterfactual(null);
       setBacktest(null);
+      setWorkbenchMode('prepare');
       await persistCurrentState();
     }
   });
@@ -628,9 +900,9 @@ export function App() {
     mutationFn: runEvaluation,
     onSuccess: async (data) => {
       setEvaluation(data);
-      setEvaluationTab('playbook');
       setCounterfactual(null);
       setBacktest(null);
+      setWorkbenchMode('review');
       await persistCurrentState();
     }
   });
@@ -697,6 +969,7 @@ export function App() {
       setEditingSnapshotName(data.snapshot.name);
       setEditingSnapshotNote(data.snapshot.note);
       setEditingSnapshotRows(rowsFromAssets(data.portfolio.assets));
+      setWorkbenchMode('prepare');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['portfolios'] }),
         queryClient.invalidateQueries({ queryKey: ['portfolio-snapshots', selectedPortfolioId] })
@@ -786,22 +1059,18 @@ export function App() {
   const duplicateCount = new Set(duplicateTickers).size;
   const rowsDirty = rowsSignature(validRows) !== appliedRowsSignature;
   const shouldApplyRowsBeforeAnalysis = rowsDirty || !portfolio.length;
+  const hasFreshEvaluation = Boolean(evaluation && !rowsDirty);
+  const resultStatusLabel = hasFreshEvaluation
+    ? '결과 최신'
+    : evaluation
+      ? '재평가 필요'
+      : '평가 전';
   const snapshotActionPending =
     editSnapshotMutation.isPending ||
     loadSnapshotMutation.isPending ||
     copySnapshotMutation.isPending ||
     updateSnapshotMutation.isPending ||
     deleteSnapshotMutation.isPending;
-
-  const assetColumns = useMemo<ColumnDef<AssetRow>[]>(
-    () => [
-      { accessorKey: 'ticker', header: '티커' },
-      { accessorKey: 'allocation', header: '입력 비중', cell: ({ row }) => pct(row.original.allocation, false) },
-      { accessorKey: 'weight', header: '정규화 비중', cell: ({ row }) => pct(row.original.weight) },
-      { accessorKey: 'group', header: '그룹', cell: ({ row }) => groupLabel(row.original.group) }
-    ],
-    []
-  );
 
   const metricColumns = useMemo<ColumnDef<MetricRow>[]>(
     () => [
@@ -844,22 +1113,6 @@ export function App() {
     []
   );
 
-  const proposalColumns = useMemo<ColumnDef<ProposalRow>[]>(
-    () => [
-      { accessorKey: 'ticker', header: '티커' },
-      { accessorKey: 'current_weight_pct', header: '현재', cell: ({ row }) => pct(row.original.current_weight_pct, false) },
-      { accessorKey: 'target_weight_pct', header: '목표', cell: ({ row }) => pct(row.original.target_weight_pct, false) },
-      { accessorKey: 'gap_pct', header: '갭', cell: ({ row }) => pct(row.original.gap_pct, false) },
-      { accessorKey: 'ips_fit_score', header: 'IPS 적합도', cell: ({ row }) => num(row.original.ips_fit_score) },
-      { accessorKey: 'ips_fit_band', header: 'IPS 등급' },
-      nullableNumberColumn('efficiency_score', 'E', (row) => row.efficiency_score, num),
-      { accessorKey: 'suggested_trade_pct', header: '최종조정', cell: ({ row }) => pct(row.original.suggested_trade_pct, false) },
-      { accessorKey: 'should_execute', header: '최종실행', cell: ({ row }) => (row.original.should_execute ? '실행' : '보류') },
-      { accessorKey: 'action_reason', header: '사유' }
-    ],
-    []
-  );
-
   const evaluationActionByTicker = useMemo(
     () => (evaluation ? recordByTicker(evaluation.ips_actions) : {}),
     [evaluation]
@@ -874,12 +1127,11 @@ export function App() {
     () => [
       { accessorKey: 'ticker', header: '티커' },
       {
-        id: 'recommended_action',
-        header: '권장 조치',
+        id: 'next_step',
+        header: '다음 단계',
         cell: ({ row }) => (
           <div className="max-w-[520px] whitespace-normal">
-            <div className="font-bold text-slate-900">{textFromRecord(row.original, 'action_label')}</div>
-            <div className="mt-1 text-slate-700">{textFromRecord(row.original, 'next_step')}</div>
+            <div className="font-bold text-slate-900">{textFromRecord(row.original, 'next_step')}</div>
             <div className="mt-1 text-xs font-semibold text-slate-500">{textFromRecord(row.original, 'decision_summary')}</div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {supportingSignalsFromAction(row.original, currentEThresh).map((signal) => (
@@ -889,11 +1141,7 @@ export function App() {
           </div>
         )
       },
-      { accessorKey: '현재%', header: '현재', cell: ({ row }) => pct(valueFromRecord(row.original, '현재%'), false) },
-      { accessorKey: '목표%', header: '목표', cell: ({ row }) => pct(valueFromRecord(row.original, '목표%'), false) },
-      { accessorKey: '갭%', header: '갭', cell: ({ row }) => pct(valueFromRecord(row.original, '갭%'), false) },
-      { accessorKey: '실행', header: '최종실행', cell: ({ row }) => (row.original['실행'] ? '실행' : '보류') },
-      { accessorKey: '제안조정%', header: '최종조정', cell: ({ row }) => pct(valueFromRecord(row.original, '제안조정%'), false) }
+      { accessorKey: '제안조정%', header: '조정폭', cell: ({ row }) => pct(valueFromRecord(row.original, '제안조정%'), false) }
     ],
     [currentEThresh]
   );
@@ -901,22 +1149,7 @@ export function App() {
   const performanceColumns = useMemo<ColumnDef<ProposalRow>[]>(
     () => [
       { accessorKey: 'ticker', header: '티커' },
-      {
-        id: 'action',
-        header: '액션',
-        cell: ({ row }) => {
-          const action = evaluationActionByTicker[row.original.ticker];
-          return (
-            <div className="max-w-[220px] whitespace-normal font-bold text-slate-900">
-              {action ? textFromRecord(action, 'action_label') : row.original.action_reason}
-            </div>
-          );
-        }
-      },
-      { accessorKey: 'gap_pct', header: '갭', cell: ({ row }) => signedPct(row.original.gap_pct, false) },
       nullableNumberColumn('efficiency_score', 'E', (row) => row.efficiency_score, num),
-      nullableNumberColumn('return_total_pct', '기간 수익률', (row) => row.return_total_pct, (value) => signedPct(value, false)),
-      { accessorKey: 'ips_fit_score', header: 'IPS 적합도', cell: ({ row }) => num(row.original.ips_fit_score) },
       {
         id: 'risk_status',
         header: '위험 상태',
@@ -956,7 +1189,6 @@ export function App() {
   const scoreColumns = useMemo<ColumnDef<ProposalRow>[]>(
     () => [
       { accessorKey: 'ticker', header: '티커' },
-      { accessorKey: 'ips_fit_score', header: 'IPS 적합도', cell: ({ row }) => num(row.original.ips_fit_score) },
       { accessorKey: 'ips_fit_band', header: 'IPS 등급' },
       { accessorKey: 'ips_score_role', header: '역할', cell: ({ row }) => num(row.original.ips_score_role) },
       { accessorKey: 'ips_score_allocation', header: '비중', cell: ({ row }) => num(row.original.ips_score_allocation) },
@@ -1011,9 +1243,11 @@ export function App() {
   function syncText(nextText: string) {
     setText(nextText);
     setRows(parsePortfolioText(nextText));
+    setWorkbenchMode('prepare');
   }
 
   function updateRow(index: number, field: keyof PortfolioRowInput, value: string | boolean) {
+    setWorkbenchMode('prepare');
     setRows((current) =>
       current.map((row, rowIndex) =>
         rowIndex === index
@@ -1024,7 +1258,10 @@ export function App() {
   }
 
   function submitPortfolioFile(file: File | undefined) {
-    if (file) csvMutation.mutate(file);
+    if (file) {
+      setWorkbenchMode('prepare');
+      csvMutation.mutate(file);
+    }
   }
 
   function runCurrentAnalysis() {
@@ -1092,6 +1329,7 @@ export function App() {
   function createNamedPortfolio() {
     const name = newPortfolioName.trim();
     if (!name) return;
+    setWorkbenchMode('prepare');
     createPortfolioMutation.mutate({ name });
   }
 
@@ -1100,11 +1338,13 @@ export function App() {
   }
 
   function startEditingSnapshot(snapshot: SnapshotSummary) {
+    setWorkbenchMode('prepare');
     editSnapshotMutation.mutate(snapshot.id);
   }
 
   function copySnapshotForEditing(snapshot: SnapshotSummary) {
     setCopyingSnapshotId(snapshot.id);
+    setWorkbenchMode('prepare');
     copySnapshotMutation.mutate(snapshot);
   }
 
@@ -1289,8 +1529,6 @@ export function App() {
         'CAGR, 변동성, MDD, Sharpe는 보조 지표이며 정책 채택 순위가 아닙니다.'
       ]
     : [];
-  const followupComplete = Boolean(counterfactual || backtest || activePortfolio?.latest_snapshot);
-
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -1329,11 +1567,11 @@ export function App() {
           </div>
           {activeView === 'workbench' && (
             <div className="status-strip">
-              <span className={selectedPortfolioId !== null ? 'done' : ''}>1 작업대상</span>
-              <span className={validRows.length ? 'done' : ''}>2 입력</span>
-              <span className={analysis ? 'done' : ''}>3 분석</span>
-              <span className={evaluation ? 'done' : ''}>4 IPS 평가</span>
-              <span className={followupComplete ? 'done' : ''}>5 검증/저장</span>
+              <span className={validRows.length ? 'done' : ''}>입력</span>
+              <span className={analysis ? 'done' : ''}>분석</span>
+              <span className={analysis && !rowsDirty ? 'done' : ''}>보정 반영</span>
+              <span className={evaluation ? 'done' : ''}>평가</span>
+              <span className={hasFreshEvaluation ? 'done' : ''}>{resultStatusLabel}</span>
             </div>
           )}
         </header>
@@ -1575,6 +1813,37 @@ export function App() {
 
           {activeView === 'workbench' && (
             <>
+              <section className="workbench-mode-shell">
+                <div className="workbench-mode-copy">
+                  <strong>{workbenchMode === 'prepare' ? '준비하기' : '결과 보기'}</strong>
+                  <span>
+                    {workbenchMode === 'prepare'
+                      ? '입력, 데이터 조회, 보정, 평가 실행까지 판단을 만드는 작업 공간입니다.'
+                      : '평가 결과를 기준으로 최종 판단, 액션, 근거와 선택 검증을 확인합니다.'}
+                  </span>
+                </div>
+                <div className="workbench-mode-tabs" role="tablist" aria-label="워크벤치 모드">
+                  <button
+                    type="button"
+                    className={cx(workbenchMode === 'prepare' && 'active')}
+                    aria-selected={workbenchMode === 'prepare'}
+                    onClick={() => setWorkbenchMode('prepare')}
+                  >
+                    준비하기
+                  </button>
+                  <button
+                    type="button"
+                    className={cx(workbenchMode === 'review' && 'active')}
+                    aria-selected={workbenchMode === 'review'}
+                    onClick={() => setWorkbenchMode('review')}
+                  >
+                    결과 보기
+                  </button>
+                </div>
+              </section>
+
+              {workbenchMode === 'prepare' ? (
+                <>
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
             <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-5">
               <div className="mb-4 flex items-start justify-between gap-4">
@@ -1670,7 +1939,10 @@ export function App() {
                         type="button"
                         className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-700"
                         aria-label="행 삭제"
-                        onClick={() => setRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}
+                        onClick={() => {
+                          setWorkbenchMode('prepare');
+                          setRows((current) => current.filter((_, rowIndex) => rowIndex !== index));
+                        }}
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -1682,7 +1954,10 @@ export function App() {
                 <button
                   type="button"
                   className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:border-blue-300 hover:text-blue-700"
-                  onClick={() => setRows((current) => [...current, blankRow()])}
+                  onClick={() => {
+                    setWorkbenchMode('prepare');
+                    setRows((current) => [...current, blankRow()]);
+                  }}
                 >
                   <Plus className="h-4 w-4" />
                   행 추가
@@ -1713,18 +1988,12 @@ export function App() {
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="mb-4 flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-blue-700" />
-              <h3 className="text-xl font-semibold text-slate-950">정규화된 포트폴리오</h3>
-            </div>
-            <DataTable data={portfolio} columns={assetColumns} emptyLabel="정규화된 포트폴리오가 아직 없습니다." />
-          </section>
-
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <div className="flex items-center gap-3">
-                  <div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-100 text-sm font-bold text-violet-800">3</div>
+                  <div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-100 text-violet-800">
+                    <BarChart3 className="h-4 w-4" />
+                  </div>
                   <h3 className="text-xl font-semibold text-slate-950">데이터 조회 & 보강</h3>
                 </div>
                 <p className="mt-2 text-sm text-slate-500">조회된 가격 데이터의 품질과 비중 대비 위험 편중을 먼저 확인합니다.</p>
@@ -1767,43 +2036,66 @@ export function App() {
             {analysis && (
               <>
                 {reliabilitySummary && <ReliabilityGatePanel summary={reliabilitySummary} />}
-                <ReliabilityRiskChart data={reliabilityChartData} />
               </>
             )}
-            <DataTable data={reliabilityRows} columns={reliabilityColumns} emptyLabel="신뢰성 점검 결과가 아직 없습니다." />
             {analysis && reliabilitySummary?.warningLines.length ? (
               <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
                 평가 실행 전 확인: {reliabilitySummary.warningLines.join(' · ')}
               </div>
             ) : null}
-            {analysis?.metrics.length ? (
+            {analysis ? (
               <details className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
-                <summary className="cursor-pointer text-sm font-bold text-slate-700">상세 성과 지표 보기</summary>
-                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <MetricCard label="포트폴리오 CAGR" value={analysis.portfolio_metrics.cagr} />
-                  <MetricCard label="포트폴리오 변동성" value={analysis.portfolio_metrics.volatility} />
-                  <MetricCard label="포트폴리오 샤프" value={analysis.portfolio_metrics.sharpe} format="number" />
-                  <MetricCard label="벤치마크 샤프" value={analysis.benchmark_metrics?.sharpe} format="number" />
-                </div>
-                <DataTable data={analysis.metrics} columns={metricColumns} emptyLabel="상세 지표가 없습니다." />
+                <summary className="cursor-pointer text-sm font-bold text-slate-700">
+                  상세 분석 보기
+                  {reliabilitySummary?.warningLines.length ? ` · 경고 ${reliabilitySummary.warningLines.length}건` : ''}
+                </summary>
+                <ReliabilityRiskChart data={reliabilityChartData} />
+                <DataTable data={reliabilityRows} columns={reliabilityColumns} emptyLabel="신뢰성 점검 결과가 아직 없습니다." />
+                {analysis.metrics.length ? (
+                  <>
+                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <MetricCard label="포트폴리오 CAGR" value={analysis.portfolio_metrics.cagr} />
+                      <MetricCard label="포트폴리오 변동성" value={analysis.portfolio_metrics.volatility} />
+                      <MetricCard label="포트폴리오 샤프" value={analysis.portfolio_metrics.sharpe} format="number" />
+                      <MetricCard label="벤치마크 샤프" value={analysis.benchmark_metrics?.sharpe} format="number" />
+                    </div>
+                    <DataTable data={analysis.metrics} columns={metricColumns} emptyLabel="상세 지표가 없습니다." />
+                    <a className="download-link mt-4" href={csvDownloadUrl('metrics')}>
+                      <Download className="h-4 w-4" /> 메트릭 CSV
+                    </a>
+                  </>
+                ) : null}
               </details>
-            ) : null}
-            {analysis?.metrics.length ? (
-              <a className="download-link" href={csvDownloadUrl('metrics')}>
-                <Download className="h-4 w-4" /> 메트릭 CSV
-              </a>
             ) : null}
           </section>
 
           {analysis && (
-            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex flex-col gap-4 border-b border-slate-200 bg-slate-50/80 p-6 md:flex-row md:items-center md:justify-between">
+            <details className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" open={rowsDirty}>
+              <summary className="cursor-pointer list-none bg-slate-50/80 p-6">
                 <div>
-                  <h3 className="text-xl font-semibold text-slate-950">세부 판단값 보정</h3>
+                  <div className="flex items-center gap-3">
+                    <div className="grid h-8 w-8 place-items-center rounded-lg bg-amber-100 text-amber-900">
+                      <RefreshCcw className="h-4 w-4" />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-xl font-semibold text-slate-950">세부 판단값 보정</h3>
+                      {rowsDirty && (
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800">
+                          미반영 변경 있음
+                        </span>
+                      )}
+                    </div>
+                  </div>
                   <p className="mt-2 text-sm text-slate-500">
                     기간 수익률은 자동 계산값입니다. 계좌 기준 수익률을 반영하려면 override를 입력한 뒤 분석을 다시 실행하세요.
                   </p>
                 </div>
+              </summary>
+              <div className="border-t border-slate-200">
+                <div className="flex flex-col gap-3 bg-white p-4 md:flex-row md:items-center md:justify-between">
+                  <span className="text-sm font-semibold text-slate-500">
+                    보정은 평가 전 선택 단계입니다. 변경 후에는 분석 재실행이 필요합니다.
+                  </span>
                 <button
                   type="button"
                   className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
@@ -1861,14 +2153,17 @@ export function App() {
                   보정값이 아직 분석 결과에 반영되지 않았습니다.
                 </div>
               )}
-            </section>
+              </div>
+            </details>
           )}
 
               <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <div className="flex items-center gap-3">
-                      <div className="grid h-8 w-8 place-items-center rounded-lg bg-cyan-100 text-sm font-bold text-cyan-900">4</div>
+                      <div className="grid h-8 w-8 place-items-center rounded-lg bg-cyan-100 text-cyan-900">
+                        <Play className="h-4 w-4" />
+                      </div>
                       <h3 className="text-xl font-semibold text-slate-950">평가 & 실행 계획 제안</h3>
                     </div>
                     <p className="mt-2 text-sm text-slate-500">기본 임계값으로 실행 후보와 보류 사유를 먼저 확인합니다.</p>
@@ -1904,104 +2199,158 @@ export function App() {
                   </div>
                 </div>
                 <ErrorLine error={evaluationMutation.error} />
-                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                  Counterfactual와 백테스트는 평가 결과의 후속 검증입니다. 아래 검증 섹션에서 필요할 때 별도로 실행합니다.
-                </div>
                 {analysis && rowsDirty && (
                   <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
                     세부 판단값 변경사항을 먼저 분석 결과에 반영해야 평가를 실행할 수 있습니다.
                   </div>
                 )}
                 {evaluation && (
-                  <div className="mt-5">
-                    <div className="inline-flex flex-wrap rounded-lg border border-slate-200 bg-slate-50 p-1">
-                      {[
-                        { value: 'playbook', label: '플레이북' },
-                        { value: 'summary', label: '액션 요약' },
-                        { value: 'performance', label: '성과·효율' },
-                        { value: 'logic', label: '로직 확인' },
-                        { value: 'scores', label: '점수 구성' }
-                      ].map((tab) => (
-                        <button
-                          key={tab.value}
-                          type="button"
-                          className={cx(
-                            'rounded-md px-3 py-2 text-sm font-bold transition',
-                            evaluationTab === tab.value
-                              ? 'bg-white text-blue-800 shadow-sm'
-                              : 'text-slate-600 hover:text-slate-950'
-                          )}
-                          onClick={() => setEvaluationTab(tab.value as EvaluationTab)}
-                        >
-                          {tab.label}
-                        </button>
-                      ))}
+                  <div className="mt-4 flex flex-col gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-950 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <strong className="block font-bold">최근 평가가 준비되어 있습니다.</strong>
+                      <span className="mt-1 block">
+                        최종 판단, 권장 액션, 보유 현황 요약은 결과 보기에서 확인합니다.
+                      </span>
                     </div>
-                    {evaluationTab === 'playbook' && (
-                      <div className="mt-4">
-                        <PlaybookPanel playbook={evaluation.playbook} />
-                      </div>
-                    )}
-                    {evaluationTab === 'summary' && (
-                      <>
-                        <DataTable data={evaluation.ips_actions} columns={actionSummaryColumns} emptyLabel="액션 요약이 없습니다." />
-                        <EvaluationCharts evaluation={evaluation} />
-                      </>
-                    )}
-                    {evaluationTab === 'performance' && (
-                      <div className="mt-4">
-                        {performanceSummary && (
-                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                              <span className="block text-sm font-semibold text-amber-700">효율 주의</span>
-                              <strong className="mt-2 block text-2xl font-bold text-slate-950">
-                                {performanceSummary.efficiencyWarningCount}
-                              </strong>
-                            </div>
-                            <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-                              <span className="block text-sm font-semibold text-red-700">위험 초과</span>
-                              <strong className="mt-2 block text-2xl font-bold text-slate-950">
-                                {performanceSummary.riskOverCount}
-                              </strong>
-                            </div>
-                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-                              <span className="block text-sm font-semibold text-emerald-700">수익 양호</span>
-                              <strong className="mt-2 block text-2xl font-bold text-slate-950">
-                                {performanceSummary.strongReturnCount}
-                              </strong>
-                            </div>
-                            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                              <span className="block text-sm font-semibold text-blue-700">IPS 고적합</span>
-                              <strong className="mt-2 block text-2xl font-bold text-slate-950">
-                                {performanceSummary.highIpsFitCount}
-                              </strong>
-                            </div>
-                          </div>
-                        )}
-                        <DataTable data={evaluation.proposal} columns={performanceColumns} emptyLabel="성과·효율 보조 점수가 없습니다." />
-                      </div>
-                    )}
-                    {evaluationTab === 'logic' && (
-                      <DataTable data={evaluation.ips_actions} columns={logicColumns} emptyLabel="로직 정보가 없습니다." />
-                    )}
-                    {evaluationTab === 'scores' && (
-                      <DataTable data={evaluation.proposal} columns={scoreColumns} emptyLabel="점수 구성이 없습니다." />
-                    )}
+                    <button
+                      type="button"
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-600"
+                      onClick={() => setWorkbenchMode('review')}
+                    >
+                      결과 보기
+                    </button>
                   </div>
                 )}
                 {!evaluation && (
-                  <div className="mt-4">
-                    <DataTable data={[]} columns={proposalColumns} emptyLabel="평가 결과가 아직 없습니다." />
+                  <div className="mt-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-600">
+                    분석과 세부 판단값 보정을 마친 뒤 평가를 실행하면 플레이북과 액션 요약이 표시됩니다.
                   </div>
                 )}
               </section>
 
-              <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                </>
+              ) : (
+                <>
+                  {evaluation && rowsDirty && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                      입력이 변경되어 기존 평가가 최신 상태가 아닙니다. 준비하기에서 보정값을 반영하고 평가를 다시 실행하세요.
+                    </div>
+                  )}
+
+                  {!evaluation ? (
+                    <section className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
+                      <h3 className="text-xl font-semibold text-slate-900">평가 실행 후 결과를 확인할 수 있습니다</h3>
+                      <p className="mx-auto mt-2 max-w-2xl text-sm font-semibold text-slate-500">
+                        입력 확정, 데이터 조회, 세부 판단값 보정을 마친 뒤 평가를 실행하면 최종 판단과 액션 요약이 이 화면에 표시됩니다.
+                      </p>
+                      <button
+                        type="button"
+                        className="mt-5 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700"
+                        onClick={() => setWorkbenchMode('prepare')}
+                      >
+                        준비하기로 이동
+                      </button>
+                    </section>
+                  ) : (
+                    <>
+                      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+                        <div className="mb-5 flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                          <div>
+                            <h3 className="text-xl font-semibold text-slate-950">최종 판단 요약</h3>
+                            <p className="mt-2 text-sm text-slate-500">
+                              IPS 기준으로 정기매수 조정, 보유 관찰, 투자 논리 재검토 여부를 먼저 확인합니다.
+                            </p>
+                          </div>
+                          <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-bold text-slate-600">
+                            {decisionContextLabel(settings.decisionContext)} · {resultStatusLabel}
+                          </div>
+                        </div>
+                        <PlaybookPanel playbook={evaluation.playbook} />
+                        <div className="mt-5">
+                          <h4 className="mb-3 text-sm font-bold text-slate-700">액션 요약</h4>
+                          <DataTable data={evaluation.ips_actions} columns={actionSummaryColumns} emptyLabel="액션 요약이 없습니다." />
+                        </div>
+                      </section>
+
+              {evaluation ? (
+                <PortfolioHoldingsOverview
+                  actionsByTicker={evaluationActionByTicker}
+                  analysis={analysis}
+                  evaluation={evaluation}
+                  portfolio={portfolio}
+                />
+              ) : (
+                <section className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6">
+                  <div className="flex items-center gap-3">
+                    <div className="grid h-8 w-8 place-items-center rounded-lg bg-slate-200 text-slate-600">
+                      <ShieldCheck className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-semibold text-slate-800">포트폴리오 현황 요약</h3>
+                      <p className="mt-1 text-sm font-semibold text-slate-500">
+                        평가 완료 후 최종 보유 현황과 권장 액션을 표시합니다.
+                      </p>
+                    </div>
+                  </div>
+                </section>
+              )}
+
+                      <details className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                        <summary className="cursor-pointer list-none p-6">
+                          <div>
+                            <h3 className="text-xl font-semibold text-slate-950">상세 평가 근거</h3>
+                            <p className="mt-2 text-sm text-slate-500">
+                              성과·효율 지표, 로직 확인, 점수 구성은 필요할 때만 펼쳐 확인합니다.
+                            </p>
+                          </div>
+                        </summary>
+                        <div className="border-t border-slate-100 p-6">
+                          <div className="grid gap-5">
+                            <EvaluationCharts evaluation={evaluation} />
+                            {performanceSummary && (
+                              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                                  <span className="block text-sm font-semibold text-amber-700">효율 주의</span>
+                                  <strong className="mt-2 block text-2xl font-bold text-slate-950">
+                                    {performanceSummary.efficiencyWarningCount}
+                                  </strong>
+                                </div>
+                                <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+                                  <span className="block text-sm font-semibold text-red-700">위험 초과</span>
+                                  <strong className="mt-2 block text-2xl font-bold text-slate-950">
+                                    {performanceSummary.riskOverCount}
+                                  </strong>
+                                </div>
+                                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                                  <span className="block text-sm font-semibold text-emerald-700">수익 양호</span>
+                                  <strong className="mt-2 block text-2xl font-bold text-slate-950">
+                                    {performanceSummary.strongReturnCount}
+                                  </strong>
+                                </div>
+                                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                                  <span className="block text-sm font-semibold text-blue-700">IPS 고적합</span>
+                                  <strong className="mt-2 block text-2xl font-bold text-slate-950">
+                                    {performanceSummary.highIpsFitCount}
+                                  </strong>
+                                </div>
+                              </div>
+                            )}
+                            <DataTable data={evaluation.proposal} columns={performanceColumns} emptyLabel="성과·효율 보조 점수가 없습니다." />
+                            <DataTable data={evaluation.ips_actions} columns={logicColumns} emptyLabel="로직 정보가 없습니다." />
+                            <DataTable data={evaluation.proposal} columns={scoreColumns} emptyLabel="점수 구성이 없습니다." />
+                          </div>
+                        </div>
+                      </details>
+
+              <details className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                <summary className="cursor-pointer list-none p-6">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <div className="flex items-center gap-3">
-                      <div className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-100 text-sm font-bold text-emerald-900">5</div>
-                      <h3 className="text-xl font-semibold text-slate-950">후속 검증</h3>
+                      <div className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-100 text-emerald-900">
+                        <LineChart className="h-4 w-4" />
+                      </div>
+                      <h3 className="text-xl font-semibold text-slate-950">선택 검증</h3>
                     </div>
                     <p className="mt-2 text-sm text-slate-500">
                       IPS 평가가 끝난 뒤 정책 대안과 월간 검증으로 판단의 반례를 확인합니다.
@@ -2012,7 +2361,9 @@ export function App() {
                       IPS 평가 후 실행 가능
                     </div>
                   )}
-                </div>
+                  </div>
+                </summary>
+                <div className="border-t border-slate-100 p-6">
 
                 {!evaluation ? (
                   <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -2174,7 +2525,12 @@ export function App() {
                     </div>
                   </div>
                 )}
-              </section>
+                </div>
+              </details>
+                    </>
+                  )}
+                </>
+              )}
             </>
           )}
         </div>
