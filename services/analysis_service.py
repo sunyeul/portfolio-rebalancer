@@ -245,6 +245,12 @@ def run_analysis(
         returns_smooth[weights_no_bench.index], weights_no_bench
     )
     bench_nav = price_to_nav(prices[bench_label]) if bench_label in prices.columns else None
+    bench_cagr = cagr_from_series(bench_nav) if bench_nav is not None else np.nan
+    benchmark_returns = (
+        returns_smooth[bench_label]
+        if bench_label in returns_smooth.columns
+        else pd.Series(dtype=float)
+    )
 
     # 자산별 메트릭 계산 (스무딩된 수익률 사용)
     asset_metrics = []
@@ -265,18 +271,13 @@ def run_analysis(
         ir = np.nan
         asset_beta = np.nan
         asset_alpha = np.nan
-        if bench_label in returns_smooth.columns and t != bench_label:
-            active_returns = returns_smooth[t] - returns_smooth[bench_label]
+        if not benchmark_returns.empty and t != bench_label:
+            active_returns = returns_smooth[t] - benchmark_returns
             te = tracking_error(active_returns)
-            bench_cagr = (
-                cagr_from_series(price_to_nav(prices[bench_label]))
-                if bench_label in prices.columns
-                else np.nan
-            )
             ir = information_ratio(cagr, bench_cagr, te)
 
             # AIDEV-NOTE: beta-alpha-computation; 벤치마크 대비 베타 및 알파 계산
-            asset_beta = beta(returns_smooth[t], returns_smooth[bench_label])
+            asset_beta = beta(returns_smooth[t], benchmark_returns)
             asset_alpha = alpha(cagr, asset_beta, bench_cagr, rf)
 
         asset_metrics.append(
@@ -311,14 +312,12 @@ def run_analysis(
 
     # 벤치마크 메트릭
     benchmark_metrics = None
-    if bench_label in prices.columns:
-        bnav = price_to_nav(prices[bench_label])
+    if bench_nav is not None:
         bdr = (
-            returns_smooth[bench_label]
-            if bench_label in returns_smooth.columns
+            benchmark_returns
+            if not benchmark_returns.empty
             else returns[bench_label]
         )
-        bench_cagr = cagr_from_series(bnav)
         bench_vol = daily_to_annual_vol(bdr)
         bench_sharpe = sharpe_ratio(bench_cagr, bench_vol, rf)
         benchmark_metrics = {

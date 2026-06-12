@@ -243,10 +243,11 @@ def fetch_prices(tickers: tuple[str, ...], start: str, end: str) -> pd.DataFrame
                 for ticker in ticker_list
                 if _is_japan_investment_trust_ticker(ticker)
             ]
+            japan_fund_set = set(japan_fund_tickers)
             yfinance_tickers = [
                 ticker
                 for ticker in ticker_list
-                if ticker not in set(japan_fund_tickers)
+                if ticker not in japan_fund_set
             ]
 
             frames: list[pd.DataFrame] = []
@@ -287,12 +288,12 @@ def ensure_tickers_exist(
     Returns:
         (존재하는 티커 목록, 누락된 티커 목록) 튜플
     """
-    missing = [
-        t for t in tickers if t not in prices.columns or prices[t].dropna().empty
-    ]
-    present = [
-        t for t in tickers if t in prices.columns and not prices[t].dropna().empty
-    ]
+    has_prices = {
+        t: t in prices.columns and not prices[t].dropna().empty
+        for t in tickers
+    }
+    missing = [t for t, exists in has_prices.items() if not exists]
+    present = [t for t, exists in has_prices.items() if exists]
     return present, missing
 
 
