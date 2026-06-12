@@ -580,19 +580,32 @@ function PortfolioHoldingsOverview({
     () => buildHoldingOverviewRows({ portfolio, analysis, evaluation, actionsByTicker }),
     [actionsByTicker, analysis, evaluation, portfolio]
   );
-  const totalWeightPct = portfolio.reduce((sum, asset) => sum + asset.weight * 100, 0);
-  const executeCount = rows.filter((row) => row.shouldExecute).length;
-  const visibleRows = rows.filter((row) => {
-    if (activeFilter === 'all') return true;
-    if (activeFilter === 'execute') return row.shouldExecute;
-    return row.group === activeFilter;
-  });
-  const filterOptions: Array<{ value: HoldingsFilter; label: string; count: number }> = [
-    { value: 'all', label: '전체', count: rows.length },
-    { value: 'core', label: '코어', count: rows.filter((row) => row.group === 'core').length },
-    { value: 'satellite', label: '위성', count: rows.filter((row) => row.group === 'satellite').length },
-    { value: 'execute', label: '실행 후보', count: executeCount }
-  ];
+  const totalWeightPct = useMemo(
+    () => portfolio.reduce((sum, asset) => sum + asset.weight * 100, 0),
+    [portfolio]
+  );
+  const executeCount = useMemo(
+    () => rows.filter((row) => row.shouldExecute).length,
+    [rows]
+  );
+  const visibleRows = useMemo(
+    () =>
+      rows.filter((row) => {
+        if (activeFilter === 'all') return true;
+        if (activeFilter === 'execute') return row.shouldExecute;
+        return row.group === activeFilter;
+      }),
+    [activeFilter, rows]
+  );
+  const filterOptions = useMemo<Array<{ value: HoldingsFilter; label: string; count: number }>>(
+    () => [
+      { value: 'all', label: '전체', count: rows.length },
+      { value: 'core', label: '코어', count: rows.filter((row) => row.group === 'core').length },
+      { value: 'satellite', label: '위성', count: rows.filter((row) => row.group === 'satellite').length },
+      { value: 'execute', label: '실행 후보', count: executeCount }
+    ],
+    [executeCount, rows]
+  );
 
   return (
     <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -1501,7 +1514,10 @@ export function App() {
     };
   }, [analysis, reliabilityRows]);
 
-  const reliabilityChartData = reliabilityRows.filter((row) => row.status !== 'failed');
+  const reliabilityChartData = useMemo(
+    () => reliabilityRows.filter((row) => row.status !== 'failed'),
+    [reliabilityRows]
+  );
   const selectedCounterfactualOption =
     counterfactualScenarioOptions.find((option) => option.value === counterfactualScenario) ??
     counterfactualScenarioOptions[0];
