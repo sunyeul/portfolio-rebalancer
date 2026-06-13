@@ -103,15 +103,23 @@ def risk_contributions(weights: pd.Series, cov: pd.DataFrame) -> pd.Series:
     Returns:
         각 자산의 위험 기여도 (전체 포트폴리오 위험의 비율)
     """
-    w = weights.values.reshape(-1, 1)
-    Sigma = cov.values
-    port_var = float(w.T @ Sigma @ w)
-    if port_var <= 0:
+    clean_weights = pd.to_numeric(weights, errors="coerce").fillna(0.0)
+    clean_cov = (
+        cov.reindex(index=weights.index, columns=weights.index)
+        .apply(pd.to_numeric, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
+    w = clean_weights.values.reshape(-1, 1)
+    Sigma = clean_cov.values
+    port_var = float((w.T @ Sigma @ w).item())
+    if not np.isfinite(port_var) or port_var <= 0:
         return pd.Series(np.nan, index=weights.index)
     mrc = Sigma @ w  # 한계 위험 기여도
     rc = (w * mrc) / port_var
     rc = rc.flatten()
-    return pd.Series(rc, index=weights.index)
+    result = pd.Series(rc, index=weights.index)
+    return result.replace([np.inf, -np.inf], np.nan)
 
 
 def compute_rc_target(

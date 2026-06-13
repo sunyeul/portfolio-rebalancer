@@ -6,7 +6,7 @@
 import numpy as np
 import pandas as pd
 
-from utils.metrics import compute_rc_target, zscore_to_cdf
+from utils.metrics import compute_rc_target, risk_contributions, zscore_to_cdf
 from utils.optimization import calculate_orders_with_constraints
 
 
@@ -60,6 +60,50 @@ class TestRCTargetCalculation:
 
         # 고변동성 자산의 RC가 더 커야 함
         assert rc_target["HIGH_VOL"] > rc_target["LOW_VOL"]
+
+    def test_risk_contributions_return_nan_when_variance_is_zero(self):
+        """분산이 0이면 비중으로 속이지 않고 계산 불가 상태를 반환합니다."""
+        weights = pd.Series([0.4, 0.6], index=["VOO", "QQQ"])
+        cov_matrix = pd.DataFrame(
+            0.0,
+            index=weights.index,
+            columns=weights.index,
+        )
+
+        rc = risk_contributions(weights, cov_matrix)
+
+        assert rc.isna().all()
+
+    def test_risk_contributions_are_not_weight_echo_when_covariance_is_valid(self):
+        """유효한 공분산에서는 위험기여도가 비중 복사값이 아니라 공분산 기반으로 계산됩니다."""
+        weights = pd.Series([0.5, 0.5], index=["LOW_VOL", "HIGH_VOL"])
+        cov_matrix = pd.DataFrame(
+            [[0.04, 0.01], [0.01, 0.09]],
+            index=weights.index,
+            columns=weights.index,
+        )
+
+        rc = risk_contributions(weights, cov_matrix)
+
+        assert rc.notna().all()
+        assert abs(rc.sum() - 1.0) < 1e-9
+        assert rc["HIGH_VOL"] > rc["LOW_VOL"]
+        assert rc["LOW_VOL"] != weights["LOW_VOL"]
+
+    def test_risk_contributions_compute_when_covariance_has_partial_nan(self):
+        """일부 공분산 결측은 0으로 처리해 가능한 RC 계산을 살립니다."""
+        weights = pd.Series([0.5, 0.5], index=["LOW_VOL", "HIGH_VOL"])
+        cov_matrix = pd.DataFrame(
+            [[0.04, np.nan], [np.nan, 0.09]],
+            index=weights.index,
+            columns=weights.index,
+        )
+
+        rc = risk_contributions(weights, cov_matrix)
+
+        assert rc.notna().all()
+        assert abs(rc.sum() - 1.0) < 1e-9
+        assert rc["HIGH_VOL"] > rc["LOW_VOL"]
 
 
 class TestConstrainedScaling:
