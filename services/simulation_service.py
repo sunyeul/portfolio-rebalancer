@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from services.evaluation_service import build_ips_target_weights, run_evaluation
-from utils.ips import compute_group_summary, compute_ips_allocation_status, fixed_group
+from utils.ips import compute_group_summary, compute_ips_allocation_status, fixed_group, group_role
 from utils.ips_config import load_ips_config
 from utils.metrics import (
     daily_to_annual_vol,
@@ -48,8 +48,8 @@ def _prepare_metrics(metrics_df: pd.DataFrame) -> pd.DataFrame:
     df = metrics_df.copy()
     if "ticker" in df.columns:
         df = df.set_index("ticker")
-    df["group"] = df.get("group", pd.Series("unclassified", index=df.index)).fillna(
-        "unclassified"
+    df["group"] = df.get("group", pd.Series("core", index=df.index)).fillna(
+        "core"
     ).map(fixed_group)
     df["dca_enabled"] = (
         df.get("dca_enabled", pd.Series(True, index=df.index)).fillna(True).astype(bool)
@@ -96,17 +96,17 @@ def _expected_rc(
 
 
 def _group_weights(weights: pd.Series, metrics_df: pd.DataFrame) -> dict[str, float]:
-    groups = metrics_df["group"].reindex(weights.index).fillna("unclassified").map(fixed_group)
+    groups = metrics_df["group"].reindex(weights.index).fillna("core").map(group_role)
     return {
         group: float(weights[groups == group].sum())
-        for group in ["core", "satellite", "cash", "unclassified"]
+        for group in ["core", "satellite"]
     }
 
 
 def _scenario_metrics(metrics_df: pd.DataFrame, scenario: CounterfactualScenario) -> pd.DataFrame:
     scenario_df = metrics_df.copy()
     if scenario == "dca_shift_to_core":
-        scenario_df.loc[scenario_df["group"] == "core", "dca_enabled"] = True
+        scenario_df.loc[scenario_df["group"].map(group_role) == "core", "dca_enabled"] = True
     return scenario_df
 
 
@@ -116,16 +116,17 @@ def _redirect_satellite_buy_gap_to_core(
     group: pd.Series,
 ) -> pd.Series:
     adjusted = target.copy()
+    roles = group.map(group_role)
     satellite_buy_gap = (
-        adjusted[(group == "satellite") & (adjusted > current)]
-        - current[(group == "satellite") & (adjusted > current)]
+        adjusted[(roles == "satellite") & (adjusted > current)]
+        - current[(roles == "satellite") & (adjusted > current)]
     ).clip(lower=0.0)
     shift_amount = float(satellite_buy_gap.sum())
     if shift_amount <= 0:
         return adjusted
 
     adjusted.loc[satellite_buy_gap.index] = current.reindex(satellite_buy_gap.index)
-    core_index = adjusted[group == "core"].index
+    core_index = adjusted[roles == "core"].index
     if len(core_index) == 0:
         return adjusted
 
@@ -150,18 +151,18 @@ def _scenario_target_weights(
     target = build_ips_target_weights(metrics_df, ips_config)
     current = metrics_df["가중치"].astype(float)
     group = metrics_df["group"].map(fixed_group)
+    role = group.map(group_role)
     if scenario == "pause_satellite_new_buys":
         target = _redirect_satellite_buy_gap_to_core(target, current, group)
     if scenario == "core_reinforcement":
         target_cfg = ips_config.get("target_allocation", {})
         core_cfg = target_cfg.get("core", {})
         core_target = float(core_cfg.get("max", core_cfg.get("target", 0.8)))
-        cash_weight = float(current[group == "cash"].sum())
-        adjustable = max(0.0, 1.0 - cash_weight)
-        current_core_total = float(current[group == "core"].sum())
+        adjustable = 1.0
+        current_core_total = float(current[role == "core"].sum())
         desired_core = min(adjustable, max(current_core_total, core_target * adjustable))
-        core_mask = group == "core"
-        satellite_mask = group == "satellite"
+        core_mask = role == "core"
+        satellite_mask = role == "satellite"
         if core_mask.any():
             core_current = current[core_mask]
             core_share = core_current / core_current.sum() if core_current.sum() > 0 else pd.Series(
@@ -240,7 +241,7 @@ def _counterfactual_deltas(baseline: dict, scenario: dict) -> dict:
             )
             * 100.0,
         }
-        for group in ["core", "satellite", "cash", "unclassified"]
+        for group in ["core", "satellite"]
     }
     return {"assets": asset_deltas, "groups": group_deltas}
 
@@ -400,7 +401,7 @@ def _strategy_target(
         return target.reindex(metrics.index).fillna(0.0)
 
     target = build_ips_target_weights(metrics, ips_config)
-    group = metrics["group"].map(fixed_group)
+    group = metrics["group"].map(group_role)
     status = compute_ips_allocation_status(
         compute_group_summary(metrics, ips_config), ips_config
     )
@@ -583,8 +584,8 @@ def run_ips_backtest(
                     "decision_context": decision_context,
                     "date": pd.Timestamp(date).date().isoformat(),
                     "nav": float(nav_values[-1]),
-                    "core_weight": float(weights[metrics["group"] == "core"].sum()),
-                    "satellite_weight": float(weights[metrics["group"] == "satellite"].sum()),
+                    "core_weight": float(weights[metrics["group"].map(group_role) == "core"].sum()),
+                    "satellite_weight": float(weights[metrics["group"].map(group_role) == "satellite"].sum()),
                     "ips_violation": bool(counts["ips_violation"]),
                     "satellite_over": bool(counts["satellite_over"]),
                     "risk_contribution_over_count": counts["risk_contribution_over"],

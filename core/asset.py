@@ -2,13 +2,24 @@ from typing import List
 from pydantic import BaseModel, field_validator, Field
 import re
 
-VALID_GROUPS = {"core", "satellite", "cash", "unclassified"}
-DEFAULT_GROUP = "unclassified"
+VALID_GROUPS = {
+    "core",
+    "satellite_ai_infra",
+    "satellite_ai_software",
+    "satellite_nextgen",
+}
+DEFAULT_GROUP = "core"
 GROUP_LABELS = {
     "core": "코어",
-    "satellite": "위성",
-    "cash": "현금",
-    "unclassified": "미분류",
+    "satellite_ai_infra": "위성_AI인프라",
+    "satellite_ai_software": "위성_AI소프트웨어",
+    "satellite_nextgen": "위성_차세대",
+}
+GROUP_ROLES = {
+    "core": "core",
+    "satellite_ai_infra": "satellite",
+    "satellite_ai_software": "satellite",
+    "satellite_nextgen": "satellite",
 }
 
 
@@ -73,7 +84,7 @@ class Asset(BaseModel):
     @field_validator("group", mode="before")
     @classmethod
     def normalize_group(cls, v: str | None) -> str:
-        """그룹은 고정 분류값만 허용하고 그 외 값은 미분류로 정규화합니다."""
+        """그룹은 고정 분류값만 허용하고 그 외 값은 코어로 정규화합니다."""
         if v is None or str(v).strip() == "":
             return DEFAULT_GROUP
         normalized = str(v).strip().lower()

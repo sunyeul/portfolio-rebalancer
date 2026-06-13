@@ -17,7 +17,7 @@ def test_run_evaluation_returns_ips_outputs_and_uses_ips_signals():
             "위험기여도": [0.3, 0.8],
             "E": [0.8, 0.2],
             "return_total": [0.1, -0.1],
-            "group": ["core", "satellite"],
+            "group": ["core", "satellite_ai_infra"],
             "dca_enabled": [True, True],
             "thesis_status": ["intact", "intact"],
         }
@@ -67,7 +67,7 @@ def test_compute_ips_fit_breakdown_scores_range_and_components():
             "갭%": [5.0, 5.0],
             "E": [0.8, 0.2],
             "RC_Over%": [0.0, 4.0],
-            "group": ["core", "satellite"],
+            "group": ["core", "satellite_ai_infra"],
             "dca_enabled": [True, True],
             "thesis_status": ["intact", "watch"],
             "missing_ratio": [0.0, 0.0],
@@ -124,7 +124,7 @@ def test_playbook_recommends_market_correction_for_underweight_core_and_satellit
             "위험기여도": [0.2, 0.8],
             "E": [0.8, 0.8],
             "return_total": [-0.05, 0.1],
-            "group": ["core", "satellite"],
+            "group": ["core", "satellite_ai_infra"],
             "dca_enabled": [True, True],
             "thesis_status": ["intact", "intact"],
             "missing_ratio": [0.0, 0.0],
@@ -155,7 +155,7 @@ def test_playbook_recommends_rebalance_review_for_risk_or_overweight_pressure():
             "위험기여도": [0.3, 0.6, 0.1],
             "E": [0.7, 0.8, 0.7],
             "return_total": [0.1, 0.3, 0.1],
-            "group": ["core", "satellite", "satellite"],
+            "group": ["core", "satellite_ai_infra", "satellite_ai_infra"],
             "dca_enabled": [True, True, True],
             "thesis_status": ["intact", "intact", "intact"],
             "missing_ratio": [0.0, 0.0, 0.0],
@@ -208,20 +208,20 @@ def test_playbook_respects_manual_sharp_drop_review_context():
 def test_market_correction_context_downgrades_satellite_buy_and_blocks_final_trade():
     metrics_df = pd.DataFrame(
         {
-            "ticker": ["VOO", "UFO", "CASH"],
-            "가중치": [0.7, 0.1, 0.2],
-            "위험기여도": [0.3, 0.1, 0.0],
-            "E": [0.8, 0.8, 0.0],
-            "return_total": [0.1, 0.2, 0.0],
-            "group": ["core", "satellite", "cash"],
-            "dca_enabled": [True, True, False],
-            "thesis_status": ["intact", "intact", "intact"],
+            "ticker": ["VOO", "UFO"],
+            "가중치": [0.7, 0.1],
+            "위험기여도": [0.3, 0.1],
+            "E": [0.8, 0.8],
+            "return_total": [0.1, 0.2],
+            "group": ["core", "satellite_ai_infra"],
+            "dca_enabled": [True, True],
+            "thesis_status": ["intact", "intact"],
         }
     ).set_index("ticker")
 
     result = run_evaluation(
         metrics_df,
-        None,
+        {"VOO": 0.65, "UFO": 0.35},
         rc_over_thresh_pct=100.0,
         e_thresh=0.5,
         decision_context="market_correction",
@@ -246,7 +246,7 @@ def test_market_correction_context_increases_underweight_core_even_with_low_effi
             "위험기여도": [0.2, 0.8],
             "E": [0.2, 0.9],
             "return_total": [-0.1, 0.2],
-            "group": ["core", "satellite"],
+            "group": ["core", "satellite_ai_infra"],
             "dca_enabled": [True, True],
             "thesis_status": ["intact", "intact"],
             "missing_ratio": [0.0, 0.0],
@@ -287,7 +287,7 @@ def test_virtual_scenario_keeps_valid_buy_but_blocks_hot_satellite_and_sell_shor
             "최대낙폭": [-0.06, -0.08, -0.05, 0.0],
             "베타": [1.0, 1.1, 1.0, 0.0],
             "return_total": [0.12, 0.85, 0.08, 0.0],
-            "group": ["core", "satellite", "satellite", "cash"],
+            "group": ["core", "satellite_ai_infra", "satellite_ai_infra", "cash"],
             "dca_enabled": [True, True, True, False],
             "thesis_status": ["intact", "watch", "intact", "intact"],
             "missing_ratio": [0.0, 0.0, 0.0, 0.0],
@@ -349,26 +349,25 @@ def test_execution_gate_uses_final_positive_gap_not_pre_gate_constrained_referen
     assert gated.loc["MU", "제안조정%"] == 0.0
 
 
-def test_build_ips_target_weights_keeps_cash_and_allocates_remaining_by_ips_targets():
+def test_build_ips_target_weights_allocates_by_present_ips_groups():
     metrics_df = pd.DataFrame(
         {
-            "ticker": ["VOO", "QQQ", "UFO", "CASH"],
-            "가중치": [0.3, 0.3, 0.3, 0.1],
-            "group": ["core", "core", "satellite", "cash"],
+            "ticker": ["VOO", "QQQ", "UFO"],
+            "가중치": [0.3, 0.3, 0.3],
+            "group": ["core", "core", "satellite_ai_infra"],
         }
     ).set_index("ticker")
     ips_config = {
         "target_allocation": {
             "core": {"target": 0.8},
-            "satellite": {"target": 0.2},
+            "satellite_ai_infra": {"target": 0.2},
         }
     }
 
     target = build_ips_target_weights(metrics_df, ips_config)
 
-    assert round(float(target[["VOO", "QQQ"]].sum()), 4) == 0.72
-    assert round(float(target["UFO"]), 4) == 0.18
-    assert round(float(target["CASH"]), 4) == 0.1
+    assert round(float(target[["VOO", "QQQ"]].sum()), 4) == 0.8
+    assert round(float(target["UFO"]), 4) == 0.2
     assert round(float(target.sum()), 4) == 1.0
 
 
@@ -379,7 +378,7 @@ def test_build_ips_target_weights_keeps_group_internal_current_share():
             "가중치": [0.3, 0.3, 0.4],
             "위험기여도": [0.2, 0.6, 0.5],
             "E": [0.9, 0.2, 0.8],
-            "group": ["core", "core", "satellite"],
+            "group": ["core", "core", "satellite_ai_infra"],
             "thesis_status": ["intact", "watch", "intact"],
             "missing_ratio": [0.0, 0.0, 0.0],
             "observation_count": [120, 120, 120],
@@ -388,7 +387,7 @@ def test_build_ips_target_weights_keeps_group_internal_current_share():
     ips_config = {
         "target_allocation": {
             "core": {"target": 0.8},
-            "satellite": {"target": 0.2},
+            "satellite_ai_infra": {"target": 0.2},
         }
     }
 
@@ -454,7 +453,7 @@ def test_run_evaluation_uses_auto_targets_when_explicit_targets_are_absent():
             "위험기여도": [0.5, 0.5],
             "E": [0.8, 0.2],
             "return_total": [0.1, -0.1],
-            "group": ["core", "satellite"],
+            "group": ["core", "satellite_ai_infra"],
             "dca_enabled": [True, True],
             "thesis_status": ["intact", "intact"],
         }
@@ -469,13 +468,13 @@ def test_run_evaluation_uses_auto_targets_when_explicit_targets_are_absent():
 
     voo = result.proposal_df.loc[result.proposal_df["ticker"] == "VOO"].iloc[0]
     ufo = result.proposal_df.loc[result.proposal_df["ticker"] == "UFO"].iloc[0]
-    assert voo["목표%"] == 80.0
-    assert ufo["목표%"] == 20.0
-    assert voo["갭%"] == 20.0
-    assert ufo["갭%"] == -20.0
+    assert voo["목표%"] == 90.91
+    assert ufo["목표%"] == 9.09
+    assert voo["갭%"] == 30.91
+    assert ufo["갭%"] == -30.91
     assert bool(voo["실행"]) is True
     assert bool(ufo["실행"]) is False
-    assert voo["제안조정%"] == 20.0
+    assert voo["제안조정%"] == 30.91
     assert ufo["제안조정%"] == 0.0
 
 
@@ -487,7 +486,7 @@ def test_run_evaluation_zeros_final_trade_when_ips_requires_thesis_review():
             "위험기여도": [0.4, 0.6],
             "E": [0.8, 0.2],
             "return_total": [0.1, -0.1],
-            "group": ["core", "satellite"],
+            "group": ["core", "satellite_ai_infra"],
             "dca_enabled": [True, False],
             "thesis_status": ["intact", "intact"],
         }
@@ -508,7 +507,7 @@ def test_run_evaluation_zeros_final_trade_when_ips_requires_thesis_review():
         "risk_control_review",
     }
     assert bool(ufo["수치후보"]) is True
-    assert ufo["참고조정%"] == -5.0
+    assert ufo["참고조정%"] == -15.91
     assert bool(ufo["실행"]) is False
     assert ufo["제안조정%"] == 0.0
     assert ufo["판단사유"] in {
@@ -558,7 +557,7 @@ def test_run_evaluation_does_not_drop_trade_flags_on_ticker_index_alignment():
             "위험기여도": [0.1, 0.1, 0.8],
             "E": [0.8, 0.8, 0.8],
             "return_total": [0.1, 0.1, 0.1],
-            "group": ["core", "core", "satellite"],
+            "group": ["core", "core", "satellite_ai_infra"],
             "dca_enabled": [True, True, True],
             "thesis_status": ["intact", "intact", "intact"],
         }

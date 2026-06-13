@@ -349,7 +349,7 @@ def test_simulation_counterfactual_and_backtest_api_return_json_safe_payloads(mo
                 {
                     "ticker": "UFO",
                     "allocation": 30,
-                    "group": "satellite",
+                    "group": "satellite_ai_infra",
                     "thesis_status": "watch",
                 },
             ]
@@ -374,7 +374,7 @@ def test_simulation_counterfactual_and_backtest_api_return_json_safe_payloads(mo
                 "위험기여도": [0.35, 0.15, 0.50],
                 "E": [0.8, 0.7, 0.65],
                 "return_total": [0.1, 0.08, 0.2],
-                "group": ["core", "core", "satellite"],
+                "group": ["core", "core", "satellite_ai_infra"],
                 "dca_enabled": [True, True, True],
                 "thesis_status": ["intact", "intact", "watch"],
                 "missing_ratio": [0.0, 0.0, 0.0],

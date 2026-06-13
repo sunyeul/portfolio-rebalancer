@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from core.asset import VALID_GROUPS
 from storage.database import connect, initialize_database
 
 
-TARGET_GROUPS = {"core", "satellite"}
+TARGET_GROUPS = VALID_GROUPS
 OPTION_TABLES = {
     "thesis_statuses": {
         "default": "unknown",

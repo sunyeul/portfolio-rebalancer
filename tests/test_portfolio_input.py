@@ -15,7 +15,7 @@ def test_parse_csv_keeps_existing_shape_defaults():
 
     assert warnings == []
     assert assets[0].ticker == "VOO"
-    assert assets[0].group == "unclassified"
+    assert assets[0].group == "core"
     assert assets[0].dca_enabled is True
     assert assets[0].thesis_status == "unknown"
 
@@ -45,7 +45,7 @@ def test_parse_csv_reads_ips_metadata_and_percent_return_total():
                 "ticker": "IONQ",
                 "allocation": 2,
                 "return_total": -12,
-                "group": "satellite",
+                "group": "satellite_ai_infra",
                 "dca_enabled": False,
                 "thesis_status": "watch",
             }
@@ -56,9 +56,57 @@ def test_parse_csv_reads_ips_metadata_and_percent_return_total():
 
     assert warnings == []
     assert assets[0].return_total == -0.12
-    assert assets[0].group == "satellite"
+    assert assets[0].group == "satellite_ai_infra"
     assert assets[0].dca_enabled is False
     assert assets[0].thesis_status == "watch"
+
+
+def test_ips_groups_are_preserved_across_input_paths():
+    text_assets = parse_text_to_assets(
+        "SMH 8 satellite_ai_infra intact\n"
+        "UFO 3 satellite_nextgen watch\n"
+        "069500.KS 5 satellite_ai_software intact\n"
+        "BND 5 core intact"
+    )
+    manual_assets, manual_warnings = parse_manual_edit_to_assets(
+        [
+            {"ticker": "SMH", "allocation": "8", "group": "satellite_ai_infra"},
+            {"ticker": "UFO", "allocation": "3", "group": "satellite_nextgen"},
+            {"ticker": "069500.KS", "allocation": "5", "group": "satellite_ai_software"},
+            {"ticker": "BND", "allocation": "5", "group": "core"},
+        ]
+    )
+    csv_assets, csv_warnings = parse_csv_to_assets(
+        pd.DataFrame(
+            [
+                {"ticker": "SMH", "allocation": 8, "group": "satellite_ai_infra"},
+                {"ticker": "UFO", "allocation": 3, "group": "satellite_nextgen"},
+                {"ticker": "069500.KS", "allocation": 5, "group": "satellite_ai_software"},
+                {"ticker": "BND", "allocation": 5, "group": "core"},
+            ]
+        )
+    )
+
+    assert [asset.group for asset in text_assets] == [
+        "satellite_ai_infra",
+        "satellite_nextgen",
+        "satellite_ai_software",
+        "core",
+    ]
+    assert manual_warnings == []
+    assert [asset.group for asset in manual_assets] == [
+        "satellite_ai_infra",
+        "satellite_nextgen",
+        "satellite_ai_software",
+        "core",
+    ]
+    assert csv_warnings == []
+    assert [asset.group for asset in csv_assets] == [
+        "satellite_ai_infra",
+        "satellite_nextgen",
+        "satellite_ai_software",
+        "core",
+    ]
 
 
 def test_parse_csv_maps_korean_ips_columns():
@@ -89,7 +137,7 @@ def test_normalize_warns_on_duplicate_metadata_conflicts():
             {
                 "ticker": "VOO",
                 "allocation": 20,
-                "group": "satellite",
+                "group": "satellite_ai_infra",
             },
         ]
     )
@@ -137,7 +185,7 @@ def test_parse_manual_edit_preserves_metadata_and_percent_return_total():
                 "ticker": "ufo",
                 "allocation": "3",
                 "return_total": "-12",
-                "group": "satellite",
+                "group": "satellite_ai_infra",
                 "thesis_status": "watch",
             }
         ]
@@ -146,5 +194,5 @@ def test_parse_manual_edit_preserves_metadata_and_percent_return_total():
     assert warnings == []
     assert assets[0].ticker == "UFO"
     assert assets[0].return_total == -0.12
-    assert assets[0].group == "satellite"
+    assert assets[0].group == "satellite_ai_infra"
     assert assets[0].thesis_status == "watch"

@@ -1,4 +1,6 @@
 import json
+import tomllib
+from pathlib import Path
 
 import pandas as pd
 from typer.testing import CliRunner
@@ -21,6 +23,14 @@ def _payload(result):
     return json.loads(result.stdout)
 
 
+def test_cli_script_aliases_are_declared():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+
+    assert pyproject["project"]["name"] == "ips-pilot"
+    assert pyproject["project"]["scripts"]["ips-pilot"] == "cli:app"
+    assert pyproject["project"]["scripts"]["portfolio-rebalancer"] == "cli:app"
+
+
 def _fake_analysis(asset_df, period, rf, bench):
     metrics_df = pd.DataFrame(
         {
@@ -41,7 +51,7 @@ def _fake_analysis(asset_df, period, rf, bench):
             "가중치": [0.4, 0.6],
             "E": [0.8, 0.3],
             "return_total": [0.1, -0.05],
-            "group": ["core", "satellite"],
+            "group": ["core", "satellite_ai_infra"],
             "dca_enabled": [True, True],
             "thesis_status": ["intact", "intact"],
         }
@@ -75,7 +85,7 @@ def _fake_evaluation(*args, **kwargs):
             "RC_Over%": [0.0, 10.0],
             "RC_Target%": [40.0, 50.0],
             "return_total%": [10.0, -5.0],
-            "group": ["core", "satellite"],
+            "group": ["core", "satellite_ai_infra"],
             "dca_enabled": [True, True],
             "thesis_status": ["intact", "intact"],
             "risk_over": [False, True],
@@ -218,7 +228,7 @@ def test_portfolio_current_state_can_be_evaluated_and_saved(
                     "ticker": "QQQ",
                     "allocation": 60.0,
                     "return_total": None,
-                    "group": "satellite",
+                    "group": "satellite_ai_infra",
                     "dca_enabled": True,
                     "thesis_status": "intact",
                     "weight": 0.6,

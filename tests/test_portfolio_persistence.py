@@ -49,7 +49,7 @@ def test_portfolio_crud_and_input_only_snapshot(monkeypatch, tmp_path):
         json={
             "rows": [
                 {"ticker": "voo", "allocation": 70, "group": "core"},
-                {"ticker": "ufo", "allocation": 30, "group": "satellite"},
+                {"ticker": "ufo", "allocation": 30, "group": "satellite_ai_infra"},
             ]
         },
     )
@@ -71,7 +71,7 @@ def test_portfolio_crud_and_input_only_snapshot(monkeypatch, tmp_path):
     payload = load_response.json()
     assert [row["ticker"] for row in payload["portfolio"]["assets"]] == ["UFO", "VOO"]
     assert [row["group"] for row in payload["portfolio"]["assets"]] == [
-        "satellite",
+        "satellite_ai_infra",
         "core",
     ]
     assert payload["analysis"] is None
@@ -90,7 +90,7 @@ def test_snapshot_can_save_latest_rows_with_fixed_group(monkeypatch, tmp_path):
             "name": "입력 즉시 저장",
             "rows": [
                 {"ticker": "VOO", "allocation": 70, "group": "core"},
-                {"ticker": "UFO", "allocation": 30, "group": "satellite"},
+                {"ticker": "UFO", "allocation": 30, "group": "satellite_ai_infra"},
             ],
         },
     )
@@ -102,7 +102,7 @@ def test_snapshot_can_save_latest_rows_with_fixed_group(monkeypatch, tmp_path):
     payload = load_response.json()
     assert [row["ticker"] for row in payload["portfolio"]["assets"]] == ["UFO", "VOO"]
     assert [row["group"] for row in payload["portfolio"]["assets"]] == [
-        "satellite",
+        "satellite_ai_infra",
         "core",
     ]
     assert payload["analysis"] is None
@@ -119,7 +119,7 @@ def test_current_state_auto_save_does_not_create_snapshot(monkeypatch, tmp_path)
         json={
             "rows": [
                 {"ticker": "VOO", "allocation": 70, "group": "core"},
-                {"ticker": "UFO", "allocation": 30, "group": "satellite"},
+                {"ticker": "UFO", "allocation": 30, "group": "satellite_ai_infra"},
             ]
         },
     )
@@ -140,7 +140,7 @@ def test_current_state_auto_save_does_not_create_snapshot(monkeypatch, tmp_path)
     assert load_response.status_code == 200
     payload = load_response.json()
     assert [row["group"] for row in payload["portfolio"]["assets"]] == [
-        "satellite",
+        "satellite_ai_infra",
         "core",
     ]
 
@@ -333,7 +333,7 @@ def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp
                     "ticker": "VOO",
                     "allocation": 70,
                     "return_total": 12,
-                    "group": "satellite",
+                    "group": "satellite_ai_infra",
                     "dca_enabled": False,
                     "thesis_status": "watch",
                 },
@@ -371,7 +371,7 @@ def test_snapshot_update_persists_positions_and_clears_analysis(monkeypatch, tmp
             "ticker": "VOO",
             "allocation": 70.0,
             "return_total": 0.12,
-            "group": "satellite",
+            "group": "satellite_ai_infra",
             "dca_enabled": False,
             "thesis_status": "watch",
             "weight": 0.7,
@@ -404,7 +404,7 @@ def test_snapshot_copy_uses_positions_only_and_opens_as_input(monkeypatch, tmp_p
                 {
                     "ticker": "UFO",
                     "allocation": 30,
-                    "group": "satellite",
+                    "group": "satellite_ai_infra",
                     "dca_enabled": False,
                     "thesis_status": "watch",
                 },
@@ -433,7 +433,7 @@ def test_snapshot_copy_uses_positions_only_and_opens_as_input(monkeypatch, tmp_p
                 "가중치": [0.7, 0.3],
                 "E": [0.7, 0.6],
                 "return_total": [0.12, 0.18],
-                "group": ["core", "satellite"],
+                "group": ["core", "satellite_ai_infra"],
                 "dca_enabled": [True, False],
                 "thesis_status": ["intact", "watch"],
             }
@@ -485,7 +485,7 @@ def test_snapshot_copy_uses_positions_only_and_opens_as_input(monkeypatch, tmp_p
             "ticker": "UFO",
             "allocation": 30.0,
             "return_total": None,
-            "group": "satellite",
+            "group": "satellite_ai_infra",
             "dca_enabled": False,
             "thesis_status": "watch",
             "weight": 0.3,

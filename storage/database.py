@@ -18,7 +18,9 @@ THESIS_STATUS_SEEDS = [
 
 TARGET_ALLOCATION_SEEDS = [
     ("core", 0.70, 0.80, 0.90),
-    ("satellite", 0.10, 0.20, 0.30),
+    ("satellite_ai_infra", 0.00, 0.08, 0.15),
+    ("satellite_ai_software", 0.00, 0.04, 0.10),
+    ("satellite_nextgen", 0.00, 0.08, 0.15),
 ]
 
 ACTION_PRIORITY_SEEDS = [
@@ -106,7 +108,7 @@ def initialize_database() -> None:
                 allocation REAL NOT NULL,
                 weight REAL NOT NULL,
                 return_total REAL,
-                "group" TEXT NOT NULL DEFAULT 'unclassified',
+                "group" TEXT NOT NULL DEFAULT 'core',
                 dca_enabled INTEGER NOT NULL DEFAULT 1,
                 thesis_status_id INTEGER NOT NULL REFERENCES thesis_statuses(id),
                 position_order INTEGER NOT NULL DEFAULT 0,
@@ -271,8 +273,11 @@ def _seed_lookup(
 
 
 def _seed_target_allocations(conn: sqlite3.Connection) -> None:
+    active_groups = [group for group, _, _, _ in TARGET_ALLOCATION_SEEDS]
+    placeholders = ",".join("?" for _ in active_groups)
     conn.execute(
-        'DELETE FROM ips_target_allocations WHERE "group" NOT IN (\'core\', \'satellite\')'
+        f'DELETE FROM ips_target_allocations WHERE "group" NOT IN ({placeholders})',
+        active_groups,
     )
     for group, min_value, target_value, max_value in TARGET_ALLOCATION_SEEDS:
         conn.execute(

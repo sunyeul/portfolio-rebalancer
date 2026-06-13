@@ -16,6 +16,7 @@ from utils.ips import (
     compute_group_summary,
     compute_ips_allocation_status,
     fixed_group,
+    group_role,
 )
 
 
@@ -39,9 +40,9 @@ IPS_FIT_SCORING_DEFAULTS = {
     },
     "role_score": {
         "core": 1.0,
-        "satellite": 0.85,
-        "cash": 0.7,
-        "unclassified": 0.0,
+        "satellite_ai_infra": 0.85,
+        "satellite_ai_software": 0.85,
+        "satellite_nextgen": 0.85,
     },
 }
 
@@ -113,6 +114,7 @@ def compute_ips_fit_breakdown(
         .fillna(DEFAULT_GROUP)
         .map(fixed_group)
     )
+    role = group.map(group_role)
     gap_pct = pd.to_numeric(df.get("갭%", pd.Series(0.0, index=index)), errors="coerce").fillna(0.0)
     risk_over = df.get("risk_over", pd.Series(False, index=index)).fillna(False).astype(bool)
     rc_over_pct = pd.to_numeric(
@@ -140,17 +142,20 @@ def compute_ips_fit_breakdown(
     )
 
     role_score = group.map(
-        lambda value: float(cfg["role_score"].get(value, cfg["role_score"].get("unclassified", 0.0)))
+        lambda value: float(
+            cfg["role_score"].get(
+                value,
+                cfg["role_score"].get(group_role(value), cfg["role_score"].get("core", 1.0)),
+            )
+        )
     )
 
     allocation_score = pd.Series(0.65, index=index, dtype=float)
-    allocation_score.loc[(group == "core") & (gap_pct > 0)] = 1.0
-    allocation_score.loc[(group == "satellite") & (gap_pct > 0)] = 0.6
+    allocation_score.loc[(role == "core") & (gap_pct > 0)] = 1.0
+    allocation_score.loc[(role == "satellite") & (gap_pct > 0)] = 0.6
     allocation_score.loc[gap_pct < 0] = 0.75
     allocation_score.loc[(gap_pct < 0) & risk_over] = 0.9
     allocation_score.loc[gap_pct.abs() < 1.0] = 0.7
-    allocation_score.loc[group == "cash"] = 0.6
-    allocation_score.loc[group == "unclassified"] = 0.0
 
     thesis_score = thesis_status.map(
         lambda value: float(cfg["thesis_score"].get(value, cfg["thesis_score"].get("unknown", 0.5)))
@@ -162,8 +167,7 @@ def compute_ips_fit_breakdown(
     action_score = pd.Series(0.6, index=index, dtype=float)
     action_score.loc[numeric_candidate & dca_enabled] = 1.0
     action_score.loc[numeric_candidate & (~dca_enabled)] = 0.25
-    action_score.loc[(gap_pct > 0) & (group == "satellite")] *= 0.75
-    action_score.loc[group.isin(["cash", "unclassified"])] = 0.2
+    action_score.loc[(gap_pct > 0) & (role == "satellite")] *= 0.75
 
     efficiency_score = efficiency.clip(lower=0.0, upper=1.0)
     data_quality_score = ((1.0 - missing_ratio).clip(lower=0.0, upper=1.0)) * (
@@ -275,18 +279,13 @@ def recommend_playbook(
         .astype(bool)
         .any()
     )
-    unclassified_count = int(
-        (actions.get("group", pd.Series("", index=actions.index)).fillna("") == "unclassified").sum()
-    )
     unknown_count = int(
         (actions.get("thesis_status", pd.Series("", index=actions.index)).fillna("") == "unknown").sum()
     )
-    if data_quality_low or unclassified_count > 0 or unknown_count >= max(1, len(actions) // 2):
+    if data_quality_low or unknown_count >= max(1, len(actions) // 2):
         reasons = []
         if data_quality_low:
             reasons.append("일부 자산의 데이터 품질이 낮아 강한 행동 판단보다 기본 점검이 먼저입니다.")
-        if unclassified_count > 0:
-            reasons.append("미분류 자산이 있어 비중 조정 전에 역할 확인이 필요합니다.")
         if unknown_count > 0:
             reasons.append("투자 논리가 미정인 자산이 있어 thesis 확인이 우선입니다.")
         return _playbook_result("regular_review", "high", reasons, context)
@@ -302,7 +301,9 @@ def recommend_playbook(
             context,
         )
 
-    satellite = proposal.get("group", pd.Series("", index=proposal.index)).fillna("") == "satellite"
+    proposal_roles = proposal.get("group", pd.Series("core", index=proposal.index)).fillna("core").map(group_role)
+    group_roles = groups.get("group", pd.Series("core", index=groups.index)).fillna("core").map(group_role)
+    satellite = proposal_roles == "satellite"
     return_total_pct = pd.to_numeric(
         proposal.get("return_total%", pd.Series(0.0, index=proposal.index)),
         errors="coerce",
@@ -350,7 +351,7 @@ def recommend_playbook(
         allocation_status.get("satellite_status") == "over_max"
         or bool(
             (
-                (groups.get("group", pd.Series("", index=groups.index)).fillna("") == "satellite")
+                (group_roles == "satellite")
                 & (pd.to_numeric(groups.get("weight", pd.Series(0.0, index=groups.index)), errors="coerce").fillna(0.0) > 0.30)
             ).any()
         )
@@ -382,17 +383,19 @@ def build_ips_target_weights(metrics_df: pd.DataFrame, ips_config: dict) -> pd.S
     group_series = group_series.fillna(DEFAULT_GROUP).map(fixed_group)
     target = current.copy()
 
-    locked_mask = group_series.isin(["cash", "unclassified"])
+    locked_mask = pd.Series(False, index=group_series.index)
     locked_weight = float(current[locked_mask].sum())
     remaining_weight = max(0.0, 1.0 - locked_weight)
+    target_cfg = ips_config.get("target_allocation", {})
     adjustable_group_values = [
-        group for group in ("core", "satellite") if (group_series == group).any()
+        group
+        for group in target_cfg
+        if (group_series == group).any()
     ]
 
     if not adjustable_group_values:
         return target / target.sum() if target.sum() > 0 else target
 
-    target_cfg = ips_config.get("target_allocation", {})
     desired = {
         group: float(target_cfg.get(group, {}).get("target", 0.0))
         for group in adjustable_group_values

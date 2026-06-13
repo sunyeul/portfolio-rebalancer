@@ -37,7 +37,7 @@ class AssetMetrics(BaseModel):
     return_total: float | None = Field(
         None, description="YTD 수익률 (소수, 예: 0.1234 = 12.34%)"
     )
-    group: str = Field("unclassified", description="IPS 고정 그룹 분류")
+    group: str = Field("core", description="IPS 고정 그룹 분류")
     dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
     thesis_status: str = Field("unknown", description="투자 논리 상태")
 
@@ -104,7 +104,7 @@ class ProposalRow(BaseModel):
     ips_score_action: float | None = Field(None, description="IPS 점수: 실행")
     ips_score_efficiency: float | None = Field(None, description="IPS 점수: 효율")
     ips_score_data_quality: float | None = Field(None, description="IPS 점수: 데이터 품질")
-    group: str = Field("unclassified", description="IPS 고정 그룹 분류")
+    group: str = Field("core", description="IPS 고정 그룹 분류")
     dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
     thesis_status: str = Field("unknown", description="투자 논리 상태")
     risk_over: bool = Field(..., description="위험기여도 초과 여부")

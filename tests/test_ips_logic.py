@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from utils.ips import (
     classify_ips_action,
@@ -11,7 +12,9 @@ def _ips_config():
     return {
         "target_allocation": {
             "core": {"min": 0.70, "target": 0.80, "max": 0.90},
-            "satellite": {"min": 0.10, "target": 0.20, "max": 0.30},
+            "satellite_ai_infra": {"min": 0.00, "target": 0.08, "max": 0.15},
+            "satellite_ai_software": {"min": 0.00, "target": 0.04, "max": 0.10},
+            "satellite_nextgen": {"min": 0.00, "target": 0.08, "max": 0.15},
         },
         "action_priority": {
             "block_action": 1,
@@ -59,7 +62,7 @@ def test_compute_group_summary_and_allocation_status():
             "가중치": [0.8, 0.2],
             "위험기여도": [0.6, 0.4],
             "E": [0.7, 0.5],
-            "group": ["core", "satellite"],
+            "group": ["core", "satellite_ai_infra"],
         }
     ).set_index("ticker")
 
@@ -67,7 +70,38 @@ def test_compute_group_summary_and_allocation_status():
     status = compute_ips_allocation_status(summary, _ips_config())
 
     assert summary.loc[summary["group"] == "core", "weight"].sum() == 0.8
-    assert summary.loc[summary["group"] == "satellite", "weight"].sum() == 0.2
+    assert summary.loc[summary["group"] == "satellite_ai_infra", "weight"].sum() == 0.2
+    assert status["core_status"] == "in_range"
+    assert status["satellite_status"] == "in_range"
+
+
+def test_expanded_group_summary_preserves_detail_but_status_uses_roles():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "SMH", "UFO", "AIQ"],
+            "가중치": [0.80, 0.10, 0.05, 0.05],
+            "위험기여도": [0.50, 0.20, 0.10, 0.05],
+            "E": [0.7, 0.5, 0.4, 0.5],
+            "group": [
+                "core",
+                "satellite_ai_infra",
+                "satellite_nextgen",
+                "satellite_ai_software",
+            ],
+        }
+    ).set_index("ticker")
+
+    summary = compute_group_summary(metrics_df, _ips_config())
+    status = compute_ips_allocation_status(summary, _ips_config())
+
+    assert set(summary["group"]) == {
+        "core",
+        "satellite_ai_infra",
+        "satellite_nextgen",
+        "satellite_ai_software",
+    }
+    assert status["core_weight"] == pytest.approx(0.80)
+    assert status["satellite_weight"] == pytest.approx(0.20)
     assert status["core_status"] == "in_range"
     assert status["satellite_status"] == "in_range"
 
@@ -85,9 +119,33 @@ def test_high_ips_fit_positive_core_gap_classifies_as_increase_dca():
     assert "ips_fit_high" in result["reason_codes"]
 
 
+def test_detailed_satellite_group_uses_satellite_correction_review_behavior():
+    result = classify_ips_action(
+        _row(group="satellite_nextgen"),
+        {"core_status": "under_target", "satellite_status": "in_range"},
+        _ips_config(),
+        decision_context="market_correction",
+    )
+
+    assert result["ips_action"] == "review_before_action"
+    assert "satellite_correction_requires_review" in result["reason_codes"]
+
+
+def test_core_group_uses_core_reinforcement_behavior():
+    result = classify_ips_action(
+        _row(group="core", **{"IPS적합도": 60.0}),
+        {"core_status": "under_target", "satellite_status": "in_range"},
+        _ips_config(),
+        decision_context="market_correction",
+    )
+
+    assert result["ips_action"] == "increase_dca"
+    assert "core_priority_context" in result["reason_codes"]
+
+
 def test_high_ips_fit_negative_gap_classifies_as_reduce_or_pause_dca():
     result = classify_ips_action(
-        _row(group="satellite", **{"갭%": -3.0}),
+        _row(group="satellite_ai_infra", **{"갭%": -3.0}),
         {"core_status": "in_range", "satellite_status": "in_range"},
         _ips_config(),
     )
@@ -110,7 +168,7 @@ def test_medium_core_positive_gap_allows_conditional_increase():
 
 def test_medium_satellite_positive_gap_requires_thesis_review():
     result = classify_ips_action(
-        _row(group="satellite", **{"IPS적합도": 62.0, "IPS등급": "medium"}),
+        _row(group="satellite_ai_infra", **{"IPS적합도": 62.0, "IPS등급": "medium"}),
         {"core_status": "under_target", "satellite_status": "in_range"},
         _ips_config(),
         decision_context="market_correction",
@@ -147,7 +205,7 @@ def test_low_data_quality_blocks_otherwise_executable_action():
 def test_broken_thesis_negative_gap_can_consider_sell():
     result = classify_ips_action(
         _row(
-            group="satellite",
+            group="satellite_ai_infra",
             dca_enabled=False,
             thesis_status="broken",
             risk_over=True,
@@ -166,7 +224,7 @@ def test_broken_thesis_negative_gap_can_consider_sell():
 def test_satellite_over_max_can_consider_sell_without_broken_thesis():
     result = classify_ips_action(
         _row(
-            group="satellite",
+            group="satellite_ai_infra",
             risk_over=True,
             **{
                 "갭%": -3.0,
@@ -187,7 +245,7 @@ def test_satellite_over_max_can_consider_sell_without_broken_thesis():
 def test_satellite_over_max_with_small_gap_uses_risk_review_not_sell_review():
     result = classify_ips_action(
         _row(
-            group="satellite",
+            group="satellite_ai_infra",
             risk_over=True,
             **{
                 "갭%": -1.5,
@@ -238,7 +296,7 @@ def test_sharp_drop_review_adds_buy_caution_without_immediate_buy_action():
 def test_satellite_watch_low_efficiency_blocks_increase_for_review():
     result = classify_ips_action(
         _row(
-            group="satellite",
+            group="satellite_ai_infra",
             thesis_status="watch",
             E=0.09,
             efficiency_warning=True,
@@ -257,7 +315,7 @@ def test_satellite_watch_low_efficiency_blocks_increase_for_review():
 def test_underweight_satellite_with_rc_cap_exceeded_goes_to_risk_review():
     result = classify_ips_action(
         _row(
-            group="satellite",
+            group="satellite_ai_infra",
             thesis_status="watch",
             E=0.94,
             **{
@@ -278,7 +336,7 @@ def test_underweight_satellite_with_rc_cap_exceeded_goes_to_risk_review():
 def test_underweight_satellite_with_intact_thesis_and_clean_risk_can_increase():
     result = classify_ips_action(
         _row(
-            group="satellite",
+            group="satellite_ai_infra",
             thesis_status="intact",
             E=0.86,
             **{
@@ -303,7 +361,7 @@ def test_underweight_satellite_with_intact_thesis_and_clean_risk_can_increase():
 def test_underweight_satellite_watch_with_hot_momentum_requires_review():
     result = classify_ips_action(
         _row(
-            group="satellite",
+            group="satellite_ai_infra",
             thesis_status="watch",
             E=0.88,
             **{
@@ -380,7 +438,7 @@ def test_non_candidate_with_rc_cap_exceeded_still_surfaces_risk_review():
 def test_satellite_over_max_without_strong_risk_prefers_dca_reduction_over_sell_review():
     result = classify_ips_action(
         _row(
-            group="satellite",
+            group="satellite_ai_infra",
             thesis_status="intact",
             **{
                 "갭%": -4.0,

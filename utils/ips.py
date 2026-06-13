@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from core.asset import DEFAULT_GROUP, VALID_GROUPS
+from core.asset import DEFAULT_GROUP, GROUP_ROLES, VALID_GROUPS
 
 
 ACTION_LABELS = {
@@ -81,8 +81,6 @@ REASON_TEXT = {
     "data_quality_low": "데이터 신뢰도가 낮습니다.",
     "missing_ratio_high": "가격 데이터 결측 비율이 높습니다.",
     "observation_too_low": "관측치 수가 부족합니다.",
-    "unclassified_group": "자산 그룹이 미분류 상태입니다.",
-    "role_unclassified": "자산 역할이 미분류 상태입니다.",
     "risk_ok": "위험기여도가 기준 범위 안에 있습니다.",
     "risk_over": "위험기여도가 기준보다 높습니다.",
     "rc_cap_exceeded": "개별 위험기여도 상한을 초과했습니다.",
@@ -129,7 +127,6 @@ REASON_TEXT = {
     "correction_core_reinforcement": "하락장에서는 목표보다 낮은 코어 비중을 정기매수로 우선 보강합니다.",
     "satellite_correction_requires_review": "하락장 위성 추가매수 전에는 수익률 지속성, 변동성, 장기 보유 가능성을 먼저 점검합니다.",
     "sharp_drop_buy_caution": "단기 급락은 단독 매수 사유가 아닙니다.",
-    "unclassified": "분류되지 않은 판단 조합입니다.",
 }
 
 
@@ -139,13 +136,18 @@ def fixed_group(value: object) -> str:
     return normalized if normalized in VALID_GROUPS else DEFAULT_GROUP
 
 
-def classify_range(value: float, cfg: dict) -> str:
+def group_role(value: object) -> str:
+    """세부 IPS 그룹을 코어/위성 판단 역할로 변환합니다."""
+    return GROUP_ROLES.get(fixed_group(value), DEFAULT_GROUP)
+
+
+def classify_range(value: float, cfg: dict, tolerance: float = 1e-9) -> str:
     """비중이 IPS 범위 대비 어느 상태인지 분류합니다."""
-    if value < cfg["min"]:
+    if value < cfg["min"] - tolerance:
         return "under_min"
-    if value < cfg["target"]:
+    if value < cfg["target"] - tolerance:
         return "under_target"
-    if value <= cfg["max"]:
+    if value <= cfg["max"] + tolerance:
         return "in_range"
     return "over_max"
 
@@ -176,17 +178,28 @@ def compute_group_summary(metrics_df: pd.DataFrame, ips_config: dict) -> pd.Data
 def compute_ips_allocation_status(
     group_summary: pd.DataFrame, ips_config: dict
 ) -> dict:
-    """코어/위성 비중이 IPS 범위 안에 있는지 계산합니다."""
+    """세부 그룹을 역할로 접어 코어/위성 비중 상태를 계산합니다."""
     target_cfg = ips_config.get("target_allocation", {})
     core_cfg = target_cfg.get("core", {"min": 0.70, "target": 0.80, "max": 0.90})
-    sat_cfg = target_cfg.get("satellite", {"min": 0.10, "target": 0.20, "max": 0.30})
+    satellite_cfgs = [
+        cfg
+        for group, cfg in target_cfg.items()
+        if group_role(group) == "satellite"
+    ]
+    sat_cfg = (
+        {
+            "min": sum(float(cfg.get("min", 0.0)) for cfg in satellite_cfgs),
+            "target": sum(float(cfg.get("target", 0.0)) for cfg in satellite_cfgs),
+            "max": sum(float(cfg.get("max", 0.0)) for cfg in satellite_cfgs),
+        }
+        if satellite_cfgs
+        else target_cfg.get("satellite", {"min": 0.10, "target": 0.20, "max": 0.30})
+    )
 
-    core_weight = group_summary.loc[
-        group_summary["group"] == "core", "weight"
-    ].sum()
-    satellite_weight = group_summary.loc[
-        group_summary["group"] == "satellite", "weight"
-    ].sum()
+    summary = group_summary.copy()
+    summary["group_role"] = summary["group"].map(group_role)
+    core_weight = summary.loc[summary["group_role"] == "core", "weight"].sum()
+    satellite_weight = summary.loc[summary["group_role"] == "satellite", "weight"].sum()
 
     return {
         "core_weight": float(core_weight),
@@ -276,7 +289,7 @@ def apply_contextual_ips_overlay(
 ) -> dict:
     """판단 모드에 따른 IPS 상황 보정을 기존 액션 위에 적용합니다."""
     context = _normalize_decision_context(decision_context)
-    group = fixed_group(row.get("group", DEFAULT_GROUP))
+    group = group_role(row.get("group", DEFAULT_GROUP))
     gap = float(row.get("갭%", 0) or 0)
     core_under_target = allocation_status.get("core_status") in {
         "under_min",
@@ -354,23 +367,6 @@ def apply_contextual_ips_overlay(
             next_step="위성 자산의 투자 논리와 장기 보유 가능성을 확인한 뒤 다음 정기매수 반영 여부를 결정합니다.",
         )
 
-    if correction_context and core_under_target and group == "unclassified" and action["ips_action"] == "review_before_action":
-        next_step = f"{action['next_step']} 판단이 어려운 자산보다 코어 정기매수 증액을 우선합니다."
-        return _with_action_metadata(
-            action,
-            "review_before_action",
-            ips_config,
-            context,
-            reason_codes=[*action["reason_codes"], "core_priority_context"],
-            decision_summary="미분류 자산은 비중 조정 전 그룹을 먼저 확인합니다.",
-            decision_reasons=[
-                "자산 그룹이 미분류 상태입니다.",
-                "코어 비중이 목표보다 낮아 판단이 어려운 자산보다 코어 보강을 우선합니다.",
-            ],
-            risk_notes=risk_notes,
-            next_step=next_step,
-        )
-
     if context == "sharp_drop_review" and risk_notes:
         reason_codes = action["reason_codes"]
         if "sharp_drop_buy_caution" not in reason_codes:
@@ -407,7 +403,7 @@ def _signal_codes(
     allocation_status: dict,
     e_thresh: float = 0.5,
 ) -> tuple[list[str], dict[str, bool]]:
-    group = fixed_group(row.get("group", DEFAULT_GROUP))
+    group = group_role(row.get("group", DEFAULT_GROUP))
     gap = _as_float(row, "갭%", "gap_pct")
     thesis_status = str(row.get("thesis_status", "unknown") or "unknown").lower()
     efficiency = _as_float(row, "E", "efficiency_score", default=0.5)
@@ -467,8 +463,6 @@ def _signal_codes(
     }.get(thesis_status)
     if thesis_code:
         codes.append(thesis_code)
-    if group == "unclassified":
-        codes.extend(["unclassified_group", "role_unclassified"])
     if group == "satellite":
         codes.append("satellite_requires_review")
 
@@ -531,7 +525,7 @@ def _signal_codes(
 
 def _sell_gate_allows(row: pd.Series | dict, allocation_status: dict) -> bool:
     thesis_status = str(row.get("thesis_status", "unknown") or "unknown").lower()
-    group = fixed_group(row.get("group", DEFAULT_GROUP))
+    group = group_role(row.get("group", DEFAULT_GROUP))
     gap = float(row.get("갭%", 0) or 0)
     reason_codes, flags = _signal_codes(row, allocation_status)
     strong_sell_risk = (
@@ -567,7 +561,7 @@ def classify_ips_action(
     gap = float(row.get("갭%", 0) or 0)
     ips_band = str(row.get("IPS등급", row.get("ips_fit_band", "low")) or "low")
     ips_score = float(row.get("IPS적합도", row.get("ips_fit_score", 0)) or 0)
-    group = fixed_group(row.get("group", DEFAULT_GROUP))
+    group = group_role(row.get("group", DEFAULT_GROUP))
     dca_enabled = bool(row.get("dca_enabled", True))
     thesis_status = str(row.get("thesis_status", "unknown") or "unknown").lower()
     should_execute = bool(row.get("수치후보", row.get("실행", False)))
@@ -583,22 +577,6 @@ def classify_ips_action(
         non_trade_reasons.append("hysteresis_blocked")
     if bool(row.get("최소거래미만", False)):
         non_trade_reasons.append("min_trade_blocked")
-
-    if group == "unclassified":
-        next_step = NEXT_STEPS["review_before_action"]
-        if allocation_status.get("core_status") in {"under_min", "under_target"}:
-            next_step += " 판단이 어려운 자산보다 코어 정기매수 증액을 우선합니다."
-        action = _action_result(
-            "review_before_action",
-            [*base_reasons, "role_unclassified"],
-            ips_config,
-            decision_context,
-            next_step=next_step,
-            decision_summary="미분류 자산은 비중 조정 전 그룹과 역할을 먼저 확인합니다.",
-        )
-        return apply_contextual_ips_overlay(
-            action, row, allocation_status, decision_context, ips_config
-        )
 
     if flags["thesis_broken"]:
         if gap < 0 and _sell_gate_allows(row, allocation_status):
