@@ -1931,22 +1931,27 @@ export function App() {
           hidden={activeView !== 'workbench'}
         >
           <div className="context-panel-header">
-            <div>
+            <div className="context-panel-title">
               <div className="flex items-center gap-2">
-                <FolderOpen className="h-5 w-5 text-blue-700" />
+                <span className="context-panel-icon">
+                  <FolderOpen className="h-5 w-5" />
+                </span>
                 <h3 className="text-lg font-semibold text-slate-950">현재 작업 대상</h3>
               </div>
               <p className="mt-1 text-sm text-slate-500">최근 상태를 기준으로 점검하고, 필요할 때만 새 포트폴리오나 스냅샷을 만듭니다.</p>
             </div>
-            <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            <div className="context-panel-save-badge">
               {activePortfolio?.latest_snapshot
                 ? `최근 저장: ${activePortfolio.latest_snapshot.name} · ${shortDate(activePortfolio.latest_snapshot.created_at)}`
                 : '아직 저장된 스냅샷이 없습니다.'}
             </div>
           </div>
-          <div className="context-panel-grid">
-            <div className="context-panel-fields">
+
+          <div className="context-panel-portfolio-row">
+            <div className="context-field-group context-portfolio-select">
+              <label className="context-field-label" htmlFor="portfolio-select">포트폴리오 선택</label>
               <select
+                id="portfolio-select"
                 className="table-input"
                 value={selectedPortfolioId ?? ''}
                 onChange={(event) => {
@@ -1961,8 +1966,13 @@ export function App() {
                   </option>
                 ))}
               </select>
-              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+            </div>
+
+            <div className="context-field-group context-portfolio-create">
+              <label className="context-field-label" htmlFor="new-portfolio-name">신규 생성</label>
+              <div className="context-inline-control">
                 <input
+                  id="new-portfolio-name"
                   className="table-input"
                   value={newPortfolioName}
                   placeholder="새 포트폴리오 이름"
@@ -1978,57 +1988,63 @@ export function App() {
                   만들기
                 </button>
               </div>
-              <ErrorLine error={createPortfolioMutation.error} />
             </div>
+          </div>
+          <div className="context-panel-error-line">
+            <ErrorLine error={createPortfolioMutation.error} />
+          </div>
 
-            <div className="context-panel-snapshots">
-              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                <input
-                  className="table-input"
-                  value={snapshotName}
-                  placeholder="스냅샷 이름"
-                  onChange={(event) => setSnapshotName(event.target.value)}
-                />
-                <button
-                  type="button"
-                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-800 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
-                  disabled={selectedPortfolioId === null || !validRows.length || portfolioMutation.isPending || saveSnapshotMutation.isPending}
-                  onClick={saveCurrentSnapshot}
+          <div className="context-panel-snapshot-area">
+            <div className="context-inline-control snapshot-save-control">
+              <input
+                className="table-input"
+                value={snapshotName}
+                placeholder="스냅샷 이름"
+                onChange={(event) => setSnapshotName(event.target.value)}
+              />
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-800 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                disabled={selectedPortfolioId === null || !validRows.length || portfolioMutation.isPending || saveSnapshotMutation.isPending}
+                onClick={saveCurrentSnapshot}
+              >
+                {saveSnapshotMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Save className="h-4 w-4" />}
+                현재 상태 저장
+              </button>
+            </div>
+            <div className="snapshot-list-compact">
+              {savedSnapshots.map((snapshot) => (
+                <div
+                  key={snapshot.id}
+                  className={cx(
+                    'snapshot-card-row',
+                    editingSnapshotId === snapshot.id ? 'active' : ''
+                  )}
                 >
-                  {saveSnapshotMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Save className="h-4 w-4" />}
-                  현재 상태 저장
-                </button>
-              </div>
-              <div className="snapshot-list-compact">
-                {savedSnapshots.map((snapshot) => (
-                    <div
-                      key={snapshot.id}
-                      className={cx(
-                        'flex items-center gap-2 rounded-lg border px-2 py-2 text-sm transition hover:border-blue-300 hover:bg-blue-50',
-                        editingSnapshotId === snapshot.id ? 'border-blue-300 bg-blue-50' : 'border-slate-200'
-                      )}
-                    >
-                      <button
-                        type="button"
-                        className="min-w-0 flex-1 px-1 text-left"
-                        onClick={() => loadSnapshotMutation.mutate(snapshot.id)}
-                        disabled={snapshotActionPending}
-                      >
-                        <span>
-                          <strong className="block truncate text-slate-900">{snapshot.name}</strong>
-                          <span className="block truncate text-xs text-slate-500">
-                            {shortDate(snapshot.created_at)} · {snapshot.position_count}종목
-                            {snapshot.note ? ` · ${snapshot.note}` : ''}
-                          </span>
-                        </span>
-                      </button>
-                      <span className="shrink-0 text-xs font-bold text-blue-800">
-                        {snapshot.has_evaluation ? '평가' : snapshot.has_analysis ? '분석' : '입력'}
+                  <button
+                    type="button"
+                    className="snapshot-card-main"
+                    onClick={() => loadSnapshotMutation.mutate(snapshot.id)}
+                    disabled={snapshotActionPending}
+                  >
+                    <span>
+                      <strong>{snapshot.name}</strong>
+                      <span>
+                        {shortDate(snapshot.created_at)} · {snapshot.position_count}종목
+                        {snapshot.note ? ` · ${snapshot.note}` : ''}
                       </span>
+                    </span>
+                  </button>
+                  <div className="snapshot-card-actions">
+                    <span className="snapshot-status-label">
+                      {snapshot.has_evaluation ? '평가' : snapshot.has_analysis ? '분석' : '입력'}
+                    </span>
+                    <div className="snapshot-icon-actions">
                       <button
                         type="button"
-                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-blue-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                        className="snapshot-icon-button"
                         title="스냅샷 복사"
+                        aria-label="스냅샷 복사"
                         disabled={snapshotActionPending}
                         onClick={() => copySnapshotForEditing(snapshot)}
                       >
@@ -2036,8 +2052,9 @@ export function App() {
                       </button>
                       <button
                         type="button"
-                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-blue-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                        className="snapshot-icon-button"
                         title="스냅샷 편집"
+                        aria-label="스냅샷 편집"
                         disabled={snapshotActionPending}
                         onClick={() => startEditingSnapshot(snapshot)}
                       >
@@ -2045,32 +2062,34 @@ export function App() {
                       </button>
                       <button
                         type="button"
-                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-red-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                        className="snapshot-icon-button danger"
                         title="스냅샷 삭제"
+                        aria-label="스냅샷 삭제"
                         disabled={snapshotActionPending}
                         onClick={() => removeSnapshot(snapshot)}
                       >
                         {deletingSnapshotId === snapshot.id ? <Loader2 className="spin h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
                       </button>
                     </div>
-                ))}
-                {!savedSnapshots.length && (
-                  <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500">
-                    저장 이력이 없습니다.
                   </div>
-                )}
-              </div>
-              <ErrorLine
-                error={
-                  saveSnapshotMutation.error ??
-                  editSnapshotMutation.error ??
-                  loadSnapshotMutation.error ??
-                  copySnapshotMutation.error ??
-                  updateSnapshotMutation.error ??
-                  deleteSnapshotMutation.error
-                }
-              />
+                </div>
+              ))}
+              {!savedSnapshots.length && (
+                <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500">
+                  저장 이력이 없습니다.
+                </div>
+              )}
             </div>
+            <ErrorLine
+              error={
+                saveSnapshotMutation.error ??
+                editSnapshotMutation.error ??
+                loadSnapshotMutation.error ??
+                copySnapshotMutation.error ??
+                updateSnapshotMutation.error ??
+                deleteSnapshotMutation.error
+              }
+            />
           </div>
         </section>
 

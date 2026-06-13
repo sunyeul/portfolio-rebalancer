@@ -178,8 +178,15 @@ a {
     border: 1px solid #d8dee9;
     border-radius: 12px;
     background: #ffffff;
-    padding: 16px;
+    overflow: hidden;
+    padding: 0;
     box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+  }
+
+  .current-context-panel .table-input {
+    border-radius: 10px;
+    background: #f8fafc;
+    padding: 12px 14px;
   }
 
   .workbench-mode-shell {
@@ -249,31 +256,260 @@ a {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 16px;
-    border-bottom: 1px solid #e5e7eb;
-    padding-bottom: 12px;
+    gap: 20px;
+    border-bottom: 1px solid #eef2f7;
+    padding: 20px 24px;
   }
 
-  .context-panel-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr);
-    gap: 14px;
-    padding-top: 12px;
-  }
-
-  .context-panel-fields,
-  .context-panel-snapshots {
-    display: grid;
-    gap: 10px;
+  .context-panel-title {
     min-width: 0;
   }
 
-  .snapshot-list-compact {
-    max-height: 132px;
-    overflow-y: auto;
-    padding-right: 4px;
+  .context-panel-icon {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 8px;
+    background: #eff6ff;
+    color: #2563eb;
+  }
+
+  .context-panel-save-badge {
+    flex: 0 1 auto;
+    max-width: 100%;
+    border: 1px solid #eef2f7;
+    border-radius: 999px;
+    background: #f8fafc;
+    padding: 8px 14px;
+    color: #475467;
+    font-size: 0.78rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .context-panel-portfolio-row {
+    display: flex;
+    align-items: end;
+    justify-content: flex-start;
+    gap: 16px;
+    border-bottom: 1px solid #eef2f7;
+    padding: 20px 24px;
+  }
+
+  .context-field-group {
     display: grid;
     gap: 8px;
+    min-width: 0;
+  }
+
+  .context-portfolio-select {
+    flex: 0 1 360px;
+    max-width: 380px;
+  }
+
+  .context-portfolio-create {
+    flex: 1 1 460px;
+  }
+
+  .context-field-label {
+    color: #98a2b3;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .context-inline-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
+  .context-panel-error-line:not(:empty) {
+    border-bottom: 1px solid #eef2f7;
+    padding: 0 24px 16px;
+  }
+
+  .context-panel-snapshot-area {
+    display: grid;
+    gap: 16px;
+    padding: 20px 24px;
+  }
+
+  .snapshot-save-control {
+    align-items: stretch;
+  }
+
+  .snapshot-list-compact {
+    max-height: 250px;
+    overflow-y: auto;
+    display: grid;
+    gap: 12px;
+    padding-right: 4px;
+  }
+
+  .snapshot-list-compact::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .snapshot-list-compact::-webkit-scrollbar-track {
+    border-radius: 999px;
+    background: #f1f5f9;
+  }
+
+  .snapshot-list-compact::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: #cbd5e1;
+  }
+
+  .snapshot-card-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    border: 1px solid #d8dee9;
+    border-radius: 10px;
+    background: #ffffff;
+    padding: 14px 16px;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease,
+      background 0.15s ease;
+  }
+
+  .snapshot-card-row:hover {
+    border-color: #93c5fd;
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+  }
+
+  .snapshot-card-row.active {
+    border-color: #93c5fd;
+    background: #eff6ff;
+  }
+
+  .snapshot-card-main {
+    min-width: 0;
+    flex: 1 1 auto;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    padding: 0;
+    text-align: left;
+  }
+
+  .snapshot-card-main:disabled {
+    cursor: not-allowed;
+  }
+
+  .snapshot-card-main strong {
+    display: block;
+    overflow: hidden;
+    color: #172033;
+    font-size: 1.04rem;
+    font-weight: 850;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .snapshot-card-main span span {
+    display: block;
+    overflow: hidden;
+    color: #667085;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.45;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .snapshot-card-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .snapshot-status-label {
+    color: #1d4ed8;
+    font-size: 0.8rem;
+    font-weight: 850;
+    white-space: nowrap;
+  }
+
+  .snapshot-icon-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-left: 1px solid #eef2f7;
+    padding-left: 10px;
+  }
+
+  .snapshot-icon-button {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #98a2b3;
+    cursor: pointer;
+    transition:
+      background 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .snapshot-icon-button:hover {
+    background: #f8fafc;
+    color: #2563eb;
+  }
+
+  .snapshot-icon-button.danger:hover {
+    background: #fef2f2;
+    color: #dc2626;
+  }
+
+  .snapshot-icon-button:disabled {
+    cursor: not-allowed;
+    color: #cbd5e1;
+  }
+
+  @media (max-width: 760px) {
+    .context-panel-header {
+      flex-direction: column;
+    }
+
+    .context-panel-save-badge {
+      white-space: normal;
+    }
+
+    .context-panel-portfolio-row {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .context-portfolio-select,
+    .context-portfolio-create {
+      max-width: none;
+      width: 100%;
+    }
+
+    .context-inline-control {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .snapshot-card-row {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .snapshot-card-actions {
+      justify-content: space-between;
+      width: 100%;
+    }
   }
 
   .table-input {
