@@ -20,7 +20,7 @@ const plotHeight = chartHeight - plotTop - plotBottom;
 const actionFamilyLabels: Record<string, string> = {
   buy_adjustment: '정기매수 조정',
   hold: '유지·관찰',
-  thesis_review: '실행 전 검토',
+  thesis_review: '반영 전 검토',
   risk_review: '위험 점검',
   sell_review: '리밸런싱 검토',
   blocked: '판단 보류'

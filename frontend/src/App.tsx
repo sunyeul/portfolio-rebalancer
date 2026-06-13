@@ -355,7 +355,7 @@ function supportingInterpretation(row: ProposalRow, actionRow: Record<string, un
   if (efficiencyWarning && actionLabel.includes('증액')) return '증액 가능하나 효율 주의';
   if (efficiencyWarning) return '효율 낮아 우선순위 확인';
   if (weakReturn) return '수익 부진은 논리 점검 참고';
-  if (strongReturn) return '수익 양호하나 단독 실행 신호 아님';
+  if (strongReturn) return '수익 양호하나 단독 반영 신호 아님';
   return '보조 신호 중립';
 }
 
@@ -657,7 +657,7 @@ function JournalPanel({
   );
 }
 
-type HoldingsFilter = 'all' | 'core' | 'satellite' | 'execute';
+type HoldingsFilter = 'all' | 'core' | 'satellite' | 'candidate';
 
 type HoldingOverviewRow = {
   ticker: string;
@@ -669,8 +669,8 @@ type HoldingOverviewRow = {
   riskContributionPct: number | null;
   ipsFitScore: number | null;
   actionLabel: string;
-  shouldExecute: boolean;
-  actionTone: 'execute' | 'risk' | 'hold' | 'pending';
+  isReviewCandidate: boolean;
+  actionTone: 'candidate' | 'risk' | 'hold' | 'pending';
 };
 
 function metricRowsByTicker(rows: MetricRow[]) {
@@ -692,7 +692,7 @@ function holdingActionTone(
   actionRow: Record<string, unknown> | undefined
 ): HoldingOverviewRow['actionTone'] {
   if (!proposal && !actionRow) return 'pending';
-  if (proposal?.should_execute || (actionRow && booleanFromRecord(actionRow, '실행'))) return 'execute';
+  if (proposal?.should_execute || (actionRow && booleanFromRecord(actionRow, '실행'))) return 'candidate';
   if (proposal?.risk_over) return 'risk';
   return 'hold';
 }
@@ -749,12 +749,12 @@ function buildHoldingOverviewRows({
             : metric.risk_contribution * 100,
         ipsFitScore: proposal?.ips_fit_score ?? null,
         actionLabel: holdingActionLabel(proposal, actionRow, analysis),
-        shouldExecute: Boolean(proposal?.should_execute || (actionRow && booleanFromRecord(actionRow, '실행'))),
+        isReviewCandidate: Boolean(proposal?.should_execute || (actionRow && booleanFromRecord(actionRow, '실행'))),
         actionTone: holdingActionTone(proposal, actionRow)
       };
     })
     .sort((a, b) => {
-      if (a.shouldExecute !== b.shouldExecute) return a.shouldExecute ? -1 : 1;
+      if (a.isReviewCandidate !== b.isReviewCandidate) return a.isReviewCandidate ? -1 : 1;
       const groupDiff = (groupOrder[a.group] ?? 9) - (groupOrder[b.group] ?? 9);
       if (groupDiff !== 0) return groupDiff;
       return b.currentWeightPct - a.currentWeightPct;
@@ -781,7 +781,7 @@ function compactNumber(value: number | null | undefined) {
 
 function HoldingActionBadge({ row }: { row: HoldingOverviewRow }) {
   const className =
-    row.actionTone === 'execute'
+    row.actionTone === 'candidate'
       ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
       : row.actionTone === 'risk'
         ? 'bg-rose-50 text-rose-700 border-rose-200'
@@ -816,15 +816,15 @@ function PortfolioHoldingsOverview({
     () => portfolio.reduce((sum, asset) => sum + asset.weight * 100, 0),
     [portfolio]
   );
-  const executeCount = useMemo(
-    () => rows.filter((row) => row.shouldExecute).length,
+  const candidateCount = useMemo(
+    () => rows.filter((row) => row.isReviewCandidate).length,
     [rows]
   );
   const visibleRows = useMemo(
     () =>
       rows.filter((row) => {
         if (activeFilter === 'all') return true;
-        if (activeFilter === 'execute') return row.shouldExecute;
+        if (activeFilter === 'candidate') return row.isReviewCandidate;
         return groupRole(row.group) === activeFilter;
       }),
     [activeFilter, rows]
@@ -834,9 +834,9 @@ function PortfolioHoldingsOverview({
       { value: 'all', label: '전체', count: rows.length },
       { value: 'core', label: '코어 역할', count: rows.filter((row) => groupRole(row.group) === 'core').length },
       { value: 'satellite', label: '위성 역할', count: rows.filter((row) => groupRole(row.group) === 'satellite').length },
-      { value: 'execute', label: 'DCA/점검 후보', count: executeCount }
+      { value: 'candidate', label: 'DCA/점검 후보', count: candidateCount }
     ],
-    [executeCount, rows]
+    [candidateCount, rows]
   );
 
   return (
@@ -1557,7 +1557,7 @@ export function App() {
       { accessorKey: 'ips_score_allocation', header: '비중', cell: ({ row }) => num(row.original.ips_score_allocation) },
       { accessorKey: 'ips_score_thesis', header: '논리', cell: ({ row }) => num(row.original.ips_score_thesis) },
       { accessorKey: 'ips_score_risk', header: '위험', cell: ({ row }) => num(row.original.ips_score_risk) },
-      { accessorKey: 'ips_score_action', header: '실행', cell: ({ row }) => num(row.original.ips_score_action) },
+      { accessorKey: 'ips_score_action', header: '행동', cell: ({ row }) => num(row.original.ips_score_action) },
       { accessorKey: 'ips_score_efficiency', header: 'E', cell: ({ row }) => num(row.original.ips_score_efficiency) },
       { accessorKey: 'ips_score_data_quality', header: '데이터', cell: ({ row }) => num(row.original.ips_score_data_quality) },
       { accessorKey: 'efficiency_warning', header: '효율 경고', cell: ({ row }) => (row.original.efficiency_warning ? '경고' : '정상') }
@@ -2171,7 +2171,7 @@ export function App() {
                   <strong>{workbenchMode === 'prepare' ? '준비하기' : '결과 보기'}</strong>
                   <span>
                     {workbenchMode === 'prepare'
-                      ? '입력, 데이터 조회, 보정, 평가 실행까지 판단을 만드는 작업 공간입니다.'
+                      ? '입력, 데이터 조회, 보정, IPS 평가까지 판단을 만드는 작업 공간입니다.'
                       : '평가 결과를 기준으로 최종 판단, 액션, 근거와 선택 검증을 확인합니다.'}
                   </span>
                 </div>
@@ -2240,7 +2240,7 @@ export function App() {
               <div className="flex flex-col gap-2 sm:items-end">
                 {rowsDirty && (
                   <span className="text-sm font-semibold text-amber-700">
-                    변경사항 저장 후 분석을 다시 실행하세요.
+                    변경사항 저장 후 분석을 다시 시작하세요.
                   </span>
                 )}
                 <button
@@ -2298,7 +2298,7 @@ export function App() {
                   onClick={shouldApplyRowsBeforeAnalysis ? applyRowsAndRunAnalysis : runCurrentAnalysis}
                 >
                   {portfolioMutation.isPending || analysisMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <BarChart3 className="h-4 w-4" />}
-                  {shouldApplyRowsBeforeAnalysis ? '입력 반영 후 분석 실행' : '분석 실행'}
+                  {shouldApplyRowsBeforeAnalysis ? '입력 반영 후 분석 시작' : '분석 시작'}
                 </button>
               </div>
             </div>
@@ -2310,7 +2310,7 @@ export function App() {
             )}
             {analysis && reliabilitySummary?.warningLines.length ? (
               <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-                평가 실행 전 확인: {reliabilitySummary.warningLines.join(' · ')}
+                IPS 평가 전 확인: {reliabilitySummary.warningLines.join(' · ')}
               </div>
             ) : null}
             {analysis ? (
@@ -2348,9 +2348,9 @@ export function App() {
                       <div className="grid h-8 w-8 place-items-center rounded-lg bg-cyan-100 text-cyan-900">
                         <Play className="h-4 w-4" />
                       </div>
-                      <h3 className="text-xl font-semibold text-slate-950">평가 & 실행 계획 제안</h3>
+                      <h3 className="text-xl font-semibold text-slate-950">평가 & 검토 큐 제안</h3>
                     </div>
-                    <p className="mt-2 text-sm text-slate-500">기본 임계값으로 실행 후보와 보류 사유를 먼저 확인합니다.</p>
+                    <p className="mt-2 text-sm text-slate-500">기본 임계값으로 정기매수 반영 후보와 검토 큐를 먼저 확인합니다.</p>
                   </div>
                   <div className="run-controls evaluation-controls">
                     <label className="control-field compact">
@@ -2378,14 +2378,14 @@ export function App() {
                       onClick={runCurrentEvaluation}
                     >
                       {evaluationMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Play className="h-4 w-4" />}
-                      평가 실행
+                      IPS 평가 시작
                     </button>
                   </div>
                 </div>
                 <ErrorLine error={evaluationMutation.error} />
                 {analysis && rowsDirty && (
                   <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-                    세부 판단값 변경사항을 먼저 분석 결과에 반영해야 평가를 실행할 수 있습니다.
+                    세부 판단값 변경사항을 먼저 분석 결과에 반영해야 IPS 평가를 시작할 수 있습니다.
                   </div>
                 )}
                 {evaluation && (
@@ -2407,7 +2407,7 @@ export function App() {
                 )}
                 {!evaluation && (
                   <div className="mt-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-600">
-                    포지션 입력과 분석을 마친 뒤 평가를 실행하면 플레이북과 점검 큐가 표시됩니다.
+                    포지션 입력과 분석을 마친 뒤 IPS 평가를 시작하면 플레이북과 점검 큐가 표시됩니다.
                   </div>
                 )}
               </section>
@@ -2417,15 +2417,15 @@ export function App() {
                 <>
                   {evaluation && rowsDirty && (
                     <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-                      입력이 변경되어 기존 평가가 최신 상태가 아닙니다. 준비하기에서 보정값을 반영하고 평가를 다시 실행하세요.
+                      입력이 변경되어 기존 평가가 최신 상태가 아닙니다. 준비하기에서 보정값을 반영하고 다시 평가하세요.
                     </div>
                   )}
 
                   {!evaluation ? (
                     <section className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
-                      <h3 className="text-xl font-semibold text-slate-900">평가 실행 후 결과를 확인할 수 있습니다</h3>
+                      <h3 className="text-xl font-semibold text-slate-900">평가 완료 후 결과를 확인할 수 있습니다</h3>
                       <p className="mx-auto mt-2 max-w-2xl text-sm font-semibold text-slate-500">
-                        포지션 입력, 데이터 조회, 평가 실행을 마치면 IPS 상태와 점검 큐가 이 화면에 표시됩니다.
+                        포지션 입력, 데이터 조회, IPS 평가를 마치면 IPS 상태와 점검 큐가 이 화면에 표시됩니다.
                       </p>
                       <button
                         type="button"
@@ -2557,7 +2557,7 @@ export function App() {
                   </div>
                   {!evaluation && (
                     <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-600">
-                      IPS 평가 후 실행 가능
+                      IPS 평가 후 사용 가능
                     </div>
                   )}
                   </div>

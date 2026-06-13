@@ -175,7 +175,7 @@ def build_evaluation_view(
                     "data_quality_low",
                     "warning",
                     ticker=_value(row, "ticker"),
-                    message="데이터 품질이 낮아 실행 판단보다 점검이 우선입니다.",
+                    message="데이터 품질이 낮아 정기매수 반영 판단보다 점검이 우선입니다.",
                     missing_ratio=_value(row, "missing_ratio"),
                     observation_count=_value(row, "observation_count"),
                 )
