@@ -8,13 +8,11 @@ import {
   Database,
   Download,
   Edit3,
-  FileUp,
   FolderOpen,
   LineChart,
   Loader2,
   Play,
   Plus,
-  RefreshCcw,
   Save,
   ShieldCheck,
   Trash2,
@@ -62,7 +60,6 @@ import {
   saveTargetAllocations,
   submitPortfolio,
   updateSnapshot,
-  uploadPortfolioCsv
 } from './lib/api';
 import { blankRow, parsePortfolioText } from './lib/parser';
 import { type PortfolioRowInput, type SettingsValues, settingsSchema } from './lib/schemas';
@@ -729,7 +726,7 @@ function rowsFromAssets(assets: AssetRow[]): PortfolioRowInput[] {
     return_total: asset.return_total === null ? '' : Number((asset.return_total * 100).toFixed(4)),
     group: asset.group,
     dca_enabled: asset.dca_enabled,
-    thesis_status: asset.thesis_status
+    thesis_status: asset.thesis_status || 'intact'
   }));
 }
 
@@ -745,8 +742,111 @@ function rowsSignature(rows: PortfolioRowInput[]) {
       return_total: row.return_total ?? '',
       group: row.group ?? '',
       dca_enabled: row.dca_enabled ?? true,
-      thesis_status: row.thesis_status ?? ''
+      thesis_status: row.thesis_status || 'intact'
     }))
+  );
+}
+
+function dcaChecked(value: PortfolioRowInput['dca_enabled']) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') return !['false', '0', 'no', 'off'].includes(value.trim().toLowerCase());
+  return true;
+}
+
+function normalizeRowsForSubmit(rows: PortfolioRowInput[]) {
+  return rows.map((row) => ({
+    ...row,
+    dca_enabled: dcaChecked(row.dca_enabled),
+    thesis_status: row.thesis_status || 'intact'
+  }));
+}
+
+type PositionRowsEditorProps = {
+  rows: PortfolioRowInput[];
+  onRowsChange: (rows: PortfolioRowInput[]) => void;
+  thesisStatusOptions: ConfigOption[];
+  activeThesisStatusOptions: ConfigOption[];
+  emptyLabel: string;
+};
+
+function PositionRowsEditor({
+  rows,
+  onRowsChange,
+  thesisStatusOptions,
+  activeThesisStatusOptions,
+  emptyLabel
+}: PositionRowsEditorProps) {
+  function updateEditorRow(index: number, field: keyof PortfolioRowInput, value: string | boolean) {
+    onRowsChange(
+      rows.map((row, rowIndex) =>
+        rowIndex === index
+          ? { ...row, [field]: field === 'ticker' ? String(value).toUpperCase() : value }
+          : row
+      )
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      <div className="min-w-[860px] space-y-2 p-3">
+        <div className="grid grid-cols-[0.8fr_0.7fr_0.8fr_1.1fr_56px_1fr_36px] gap-2 px-1 text-xs font-bold uppercase text-slate-500">
+          <span>티커</span>
+          <span className="text-right">비중</span>
+          <span className="text-right">수익률</span>
+          <span>그룹</span>
+          <span>DCA</span>
+          <span>논리 상태</span>
+          <span />
+        </div>
+        {rows.map((row, index) => (
+          <div key={`${row.ticker}-${index}`} className="grid grid-cols-[0.8fr_0.7fr_0.8fr_1.1fr_56px_1fr_36px] items-center gap-2">
+            <input className="table-input font-bold text-blue-700" value={String(row.ticker ?? '')} placeholder="VOO" onChange={(event) => updateEditorRow(index, 'ticker', event.target.value)} />
+            <input className="table-input text-right" value={String(row.allocation ?? '')} placeholder="40" type="number" onChange={(event) => updateEditorRow(index, 'allocation', event.target.value)} />
+            <input className="table-input text-right" value={String(row.return_total ?? '')} placeholder="자동" type="number" onChange={(event) => updateEditorRow(index, 'return_total', event.target.value)} />
+            <select className="table-input" value={String(row.group ?? '')} onChange={(event) => updateEditorRow(index, 'group', event.target.value)}>
+              <option value="">그룹 선택</option>
+              {fixedGroupOptions.map((group) => (
+                <option key={group.value} value={group.value}>
+                  {group.label}
+                </option>
+              ))}
+            </select>
+            <label className="grid h-9 place-items-center">
+              <input
+                className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
+                checked={dcaChecked(row.dca_enabled)}
+                type="checkbox"
+                onChange={(event) => updateEditorRow(index, 'dca_enabled', event.target.checked)}
+              />
+            </label>
+            <select className="table-input" value={String(row.thesis_status || 'intact')} onChange={(event) => updateEditorRow(index, 'thesis_status', event.target.value)}>
+              <option value="">상태 선택</option>
+              {activeThesisStatusOptions.map((status) => (
+                <option key={status.value} value={status.value}>
+                  {status.label}
+                </option>
+              ))}
+              {row.thesis_status && !thesisStatusOptions.some((status) => status.value === row.thesis_status) ? (
+                <option value={String(row.thesis_status)}>기타: {row.thesis_status}</option>
+              ) : null}
+            </select>
+            <button
+              type="button"
+              className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-700"
+              title="행 삭제"
+              onClick={() => onRowsChange(rows.filter((_, rowIndex) => rowIndex !== index))}
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        ))}
+        {!rows.length && (
+          <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500">
+            {emptyLabel}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -887,22 +987,6 @@ export function App() {
 
   const portfolioMutation = useMutation({
     mutationFn: submitPortfolio,
-    onSuccess: async (data) => {
-      const nextRows = rowsFromAssets(data.assets);
-      setRows(nextRows);
-      setAppliedRowsSignature(rowsSignature(nextRows));
-      setPortfolio(data.assets);
-      setAnalysis(null);
-      setEvaluation(null);
-      setCounterfactual(null);
-      setBacktest(null);
-      setWorkbenchMode('prepare');
-      await persistCurrentState();
-    }
-  });
-
-  const csvMutation = useMutation({
-    mutationFn: uploadPortfolioCsv,
     onSuccess: async (data) => {
       const nextRows = rowsFromAssets(data.assets);
       setRows(nextRows);
@@ -1082,7 +1166,7 @@ export function App() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ips-config'] })
   });
 
-  const validRows = rows.filter((row) => row.ticker && row.allocation !== '');
+  const validRows = normalizeRowsForSubmit(rows.filter((row) => row.ticker && row.allocation !== ''));
   const totalAllocation = validRows.reduce(
     (sum, row) => sum + (Number.parseFloat(String(row.allocation)) || 0),
     0
@@ -1274,28 +1358,15 @@ export function App() {
     []
   );
 
-  function syncText(nextText: string) {
-    setText(nextText);
-    setRows(parsePortfolioText(nextText));
+  function updateCurrentRows(nextRows: PortfolioRowInput[]) {
     setWorkbenchMode('prepare');
+    setRows(nextRows);
   }
 
-  function updateRow(index: number, field: keyof PortfolioRowInput, value: string | boolean) {
+  function saveCurrentRows() {
+    if (!validRows.length) return;
     setWorkbenchMode('prepare');
-    setRows((current) =>
-      current.map((row, rowIndex) =>
-        rowIndex === index
-          ? { ...row, [field]: field === 'ticker' ? String(value).toUpperCase() : value }
-          : row
-      )
-    );
-  }
-
-  function submitPortfolioFile(file: File | undefined) {
-    if (file) {
-      setWorkbenchMode('prepare');
-      csvMutation.mutate(file);
-    }
+    portfolioMutation.mutate(validRows);
   }
 
   function runCurrentAnalysis() {
@@ -1387,16 +1458,6 @@ export function App() {
     setEditingSnapshotName('');
     setEditingSnapshotNote('');
     setEditingSnapshotRows([]);
-  }
-
-  function updateEditingSnapshotRow(index: number, field: keyof PortfolioRowInput, value: string | boolean) {
-    setEditingSnapshotRows((current) =>
-      current.map((row, rowIndex) =>
-        rowIndex === index
-          ? { ...row, [field]: field === 'ticker' ? String(value).toUpperCase() : value }
-          : row
-      )
-    );
   }
 
   function saveEditedSnapshot() {
@@ -1888,147 +1949,64 @@ export function App() {
 
               {workbenchMode === 'prepare' ? (
                 <>
-              <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
-            <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-5">
-              <div className="mb-4 flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="flex items-center gap-2 text-xl font-semibold text-slate-950">
-                    <Edit3 className="h-5 w-5 text-blue-700" />
-                    포트폴리오 입력/수정
-                  </h3>
-                  <p className="mt-2 text-sm text-slate-500">
-                    기존 상태를 다듬거나 티커와 비중을 한 줄씩 붙여넣습니다. 그룹은 오른쪽에서 바로 보정합니다.
-                  </p>
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="flex items-center gap-3">
+                  <div className="grid h-8 w-8 place-items-center rounded-lg bg-blue-100 text-blue-800">
+                    <Database className="h-4 w-4" />
+                  </div>
+                  <h3 className="text-xl font-semibold text-slate-950">포지션 입력</h3>
                 </div>
-                <button
-                  type="button"
-                  className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-50"
-                  onClick={() => syncText(sampleText)}
-                >
-                  <RefreshCcw className="h-4 w-4" />
-                  예시
-                </button>
+                <p className="mt-2 text-sm text-slate-500">
+                  티커, 비중, 수익률 override, 그룹, DCA, 투자 논리를 이 화면에서 바로 관리합니다.
+                </p>
               </div>
-
-              <textarea
-                className="h-80 w-full resize-none rounded-lg border-0 bg-slate-100 p-4 font-mono text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-blue-700"
-                value={text}
-                placeholder={'VOO 40\nQQQ 25.5\nAAPL 10\nMSFT 10\nNVDA 2.0'}
-                onChange={(event) => syncText(event.target.value)}
-              />
-
-              <label
-                className="mt-5 flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-white p-6 text-center transition hover:border-blue-300 hover:bg-blue-50/50"
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  submitPortfolioFile(event.dataTransfer.files[0]);
-                }}
-              >
-                <FileUp className="mb-2 h-8 w-8 text-slate-400" />
-                <span className="text-sm font-semibold text-slate-800">CSV/TSV 파일을 여기에 놓거나 선택하세요</span>
-                <span className="mt-1 text-xs text-slate-500">Excel, Google Sheets 데이터 지원</span>
-                <input
-                  className="hidden"
-                  type="file"
-                  accept=".csv,.tsv,text/csv,text/tab-separated-values"
-                  onChange={(event) => {
-                    submitPortfolioFile(event.target.files?.[0]);
-                    event.target.value = '';
-                  }}
-                />
-              </label>
-            </section>
-
-            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm xl:col-span-7">
-              <div className="flex flex-col gap-4 border-b border-slate-200 bg-slate-50/80 p-6 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <h3 className="flex items-center gap-2 text-xl font-semibold text-slate-950">
-                    <Database className="h-5 w-5 text-blue-700" />
-                    인식된 포지션
-                  </h3>
-                  <p className="mt-2 text-sm text-slate-500">이번 점검에 쓸 포지션과 IPS 그룹을 확인합니다.</p>
-                </div>
+              <div className="flex flex-col gap-3 lg:items-end">
                 <div className="grid grid-cols-3 gap-3 text-right">
                   <SummaryStat label="유효 행" value={`${validRows.length}개`} />
                   <SummaryStat label="합계 비중" value={`${totalAllocation.toFixed(2)}%`} />
                   <SummaryStat label="중복" value={`${duplicateCount}개`} tone={duplicateCount ? 'warn' : 'default'} />
                 </div>
               </div>
-
-              <div className="overflow-x-auto p-4">
-                <div className="min-w-[620px] space-y-2">
-                  <div className="grid grid-cols-[0.9fr_0.75fr_1.3fr_44px] gap-2 px-1 text-xs font-bold uppercase text-slate-500">
-                    <span>티커</span>
-                    <span>비중</span>
-                    <span>그룹</span>
-                    <span />
-                  </div>
-                  {rows.map((row, index) => (
-                    <div
-                      className="grid grid-cols-[0.9fr_0.75fr_1.3fr_44px] items-center gap-2 rounded-lg border border-slate-200 bg-white p-2 transition hover:bg-slate-50"
-                      key={`${row.ticker}-${index}`}
-                    >
-                      <input className="table-input font-bold text-blue-700" value={String(row.ticker ?? '')} placeholder="VOO" onChange={(event) => updateRow(index, 'ticker', event.target.value)} />
-                      <input className="table-input text-right" value={String(row.allocation ?? '')} placeholder="40" type="number" onChange={(event) => updateRow(index, 'allocation', event.target.value)} />
-                      <select className="table-input" value={String(row.group ?? '')} onChange={(event) => updateRow(index, 'group', event.target.value)}>
-                        <option value="">그룹 선택</option>
-                        {fixedGroupOptions.map((group) => (
-                          <option key={group.value} value={group.value}>
-                            {group.label}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-700"
-                        aria-label="행 삭제"
-                        onClick={() => {
-                          setWorkbenchMode('prepare');
-                          setRows((current) => current.filter((_, rowIndex) => rowIndex !== index));
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <button
-                  type="button"
-                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:border-blue-300 hover:text-blue-700"
-                  onClick={() => {
-                    setWorkbenchMode('prepare');
-                    setRows((current) => [...current, blankRow()]);
-                  }}
-                >
-                  <Plus className="h-4 w-4" />
-                  행 추가
-                </button>
-                <span className="text-sm text-slate-500">DCA와 투자 논리는 분석 후 세부 판단값에서 입력합니다.</span>
-              </div>
-            </section>
-          </div>
-
-          <ErrorLine error={portfolioMutation.error ?? csvMutation.error} />
-
-          <section className="relative overflow-hidden rounded-xl bg-blue-800 p-6 shadow-lg">
-            <div className="relative z-10 flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-              <div className="text-white">
-                <h3 className="text-2xl font-semibold">이번 점검 입력 확정</h3>
-                <p className="mt-2 text-sm text-blue-100">확정된 입력을 기준으로 분석과 IPS 평가 루틴을 이어갑니다.</p>
-              </div>
+            </div>
+            <div className="mt-5">
+              <PositionRowsEditor
+                activeThesisStatusOptions={activeThesisStatusOptions}
+                emptyLabel="저장할 포지션이 없습니다."
+                onRowsChange={updateCurrentRows}
+                rows={rows}
+                thesisStatusOptions={thesisStatusOptions}
+              />
+            </div>
+            <div className="mt-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
               <button
                 type="button"
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-6 py-3 text-sm font-bold text-blue-800 shadow-xl transition hover:bg-blue-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={!validRows.length || portfolioMutation.isPending}
-                onClick={() => portfolioMutation.mutate(validRows)}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:border-blue-300 hover:text-blue-700"
+                disabled={portfolioMutation.isPending}
+                onClick={() => updateCurrentRows([...rows, blankRow()])}
               >
-                {portfolioMutation.isPending ? <Loader2 className="spin h-5 w-5" /> : <CheckCircle2 className="h-5 w-5" />}
-                입력 확정
+                <Plus className="h-4 w-4" />
+                행 추가
               </button>
+              <div className="flex flex-col gap-2 sm:items-end">
+                {rowsDirty && (
+                  <span className="text-sm font-semibold text-amber-700">
+                    변경사항 저장 후 분석을 다시 실행하세요.
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  disabled={portfolioMutation.isPending || !validRows.length}
+                  onClick={saveCurrentRows}
+                >
+                  {portfolioMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <Save className="h-4 w-4" />}
+                  저장하고 확정
+                </button>
+              </div>
             </div>
+            <ErrorLine error={portfolioMutation.error} />
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -2115,94 +2093,6 @@ export function App() {
             ) : null}
           </section>
 
-          {analysis && (
-            <details className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" open={rowsDirty}>
-              <summary className="cursor-pointer list-none bg-slate-50/80 p-6">
-                <div>
-                  <div className="flex items-center gap-3">
-                    <div className="grid h-8 w-8 place-items-center rounded-lg bg-amber-100 text-amber-900">
-                      <RefreshCcw className="h-4 w-4" />
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-xl font-semibold text-slate-950">세부 판단값 보정</h3>
-                      {rowsDirty && (
-                        <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800">
-                          미반영 변경 있음
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <p className="mt-2 text-sm text-slate-500">
-                    기간 수익률은 자동 계산값입니다. 계좌 기준 수익률을 반영하려면 override를 입력한 뒤 분석을 다시 실행하세요.
-                  </p>
-                </div>
-              </summary>
-              <div className="border-t border-slate-200">
-                <div className="flex flex-col gap-3 bg-white p-4 md:flex-row md:items-center md:justify-between">
-                  <span className="text-sm font-semibold text-slate-500">
-                    보정은 평가 전 선택 단계입니다. 변경 후에는 분석 재실행이 필요합니다.
-                  </span>
-                <button
-                  type="button"
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
-                  disabled={!validRows.length || !rowsDirty || portfolioMutation.isPending || analysisMutation.isPending}
-                  onClick={applyRowsAndRunAnalysis}
-                >
-                  {portfolioMutation.isPending || analysisMutation.isPending ? <Loader2 className="spin h-4 w-4" /> : <RefreshCcw className="h-4 w-4" />}
-                  보정값 반영 후 분석 재실행
-                </button>
-              </div>
-              <div className="overflow-x-auto p-4">
-                <div className="min-w-[820px] space-y-2">
-                  <div className="grid grid-cols-[0.8fr_0.85fr_1fr_56px_1fr] gap-2 px-1 text-xs font-bold uppercase text-slate-500">
-                    <span>티커</span>
-                    <span className="text-right">계좌 수익률 override</span>
-                    <span>그룹</span>
-                    <span className="text-center">DCA</span>
-                    <span>투자 논리</span>
-                  </div>
-                  {rows.map((row, index) => (
-                    <div
-                      className="grid grid-cols-[0.8fr_0.85fr_1fr_56px_1fr] items-center gap-2 rounded-lg border border-slate-200 bg-white p-2"
-                      key={`detail-${row.ticker}-${index}`}
-                    >
-                      <div className="px-2 text-sm font-bold text-blue-700">{row.ticker || '미입력'}</div>
-                      <input className="table-input text-right" value={String(row.return_total ?? '')} placeholder="자동 계산" type="number" onChange={(event) => updateRow(index, 'return_total', event.target.value)} />
-                      <select className="table-input" value={String(row.group ?? '')} onChange={(event) => updateRow(index, 'group', event.target.value)}>
-                        <option value="">그룹 선택</option>
-                        {fixedGroupOptions.map((group) => (
-                          <option key={group.value} value={group.value}>
-                            {group.label}
-                          </option>
-                        ))}
-                      </select>
-                      <label className="grid place-items-center">
-                        <input className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700" checked={Boolean(row.dca_enabled)} type="checkbox" onChange={(event) => updateRow(index, 'dca_enabled', event.target.checked)} />
-                      </label>
-                      <select className="table-input" value={String(row.thesis_status ?? '')} onChange={(event) => updateRow(index, 'thesis_status', event.target.value)}>
-                        <option value="">논리 선택</option>
-                        {activeThesisStatusOptions.map((status) => (
-                          <option key={status.value} value={status.value}>
-                            {status.label}
-                          </option>
-                        ))}
-                        {row.thesis_status && !thesisStatusOptions.some((status) => status.value === row.thesis_status) ? (
-                          <option value={String(row.thesis_status)}>기타: {row.thesis_status}</option>
-                        ) : null}
-                      </select>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              {rowsDirty && (
-                <div className="border-t border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-                  보정값이 아직 분석 결과에 반영되지 않았습니다.
-                </div>
-              )}
-              </div>
-            </details>
-          )}
-
               <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
@@ -2269,7 +2159,7 @@ export function App() {
                 )}
                 {!evaluation && (
                   <div className="mt-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-600">
-                    분석과 세부 판단값 보정을 마친 뒤 평가를 실행하면 플레이북과 액션 요약이 표시됩니다.
+                    포지션 입력과 분석을 마친 뒤 평가를 실행하면 플레이북과 액션 요약이 표시됩니다.
                   </div>
                 )}
               </section>
@@ -2287,7 +2177,7 @@ export function App() {
                     <section className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
                       <h3 className="text-xl font-semibold text-slate-900">평가 실행 후 결과를 확인할 수 있습니다</h3>
                       <p className="mx-auto mt-2 max-w-2xl text-sm font-semibold text-slate-500">
-                        입력 확정, 데이터 조회, 세부 판단값 보정을 마친 뒤 평가를 실행하면 최종 판단과 액션 요약이 이 화면에 표시됩니다.
+                        포지션 입력, 데이터 조회, 평가 실행을 마치면 최종 판단과 액션 요약이 이 화면에 표시됩니다.
                       </p>
                       <button
                         type="button"
@@ -2617,62 +2507,13 @@ export function App() {
                   onChange={(event) => setEditingSnapshotNote(event.target.value)}
                 />
               </div>
-              <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-                <div className="min-w-[780px] space-y-2 p-3">
-                  <div className="grid grid-cols-[0.8fr_0.7fr_0.8fr_1.1fr_0.7fr_1fr_36px] gap-2 px-1 text-xs font-bold uppercase text-slate-500">
-                    <span>티커</span>
-                    <span className="text-right">비중</span>
-                    <span className="text-right">수익률</span>
-                    <span>그룹</span>
-                    <span>DCA</span>
-                    <span>논리 상태</span>
-                    <span />
-                  </div>
-                  {editingSnapshotRows.map((row, index) => (
-                    <div key={`${row.ticker}-${index}`} className="grid grid-cols-[0.8fr_0.7fr_0.8fr_1.1fr_0.7fr_1fr_36px] items-center gap-2">
-                      <input className="table-input font-bold text-blue-700" value={String(row.ticker ?? '')} placeholder="VOO" onChange={(event) => updateEditingSnapshotRow(index, 'ticker', event.target.value)} />
-                      <input className="table-input text-right" value={String(row.allocation ?? '')} placeholder="40" type="number" onChange={(event) => updateEditingSnapshotRow(index, 'allocation', event.target.value)} />
-                      <input className="table-input text-right" value={String(row.return_total ?? '')} placeholder="%" type="number" onChange={(event) => updateEditingSnapshotRow(index, 'return_total', event.target.value)} />
-                      <select className="table-input" value={String(row.group ?? '')} onChange={(event) => updateEditingSnapshotRow(index, 'group', event.target.value)}>
-                        <option value="">그룹 선택</option>
-                        {fixedGroupOptions.map((group) => (
-                          <option key={group.value} value={group.value}>
-                            {group.label}
-                          </option>
-                        ))}
-                      </select>
-                      <select className="table-input" value={String(row.dca_enabled ?? true)} onChange={(event) => updateEditingSnapshotRow(index, 'dca_enabled', event.target.value === 'true')}>
-                        <option value="true">ON</option>
-                        <option value="false">OFF</option>
-                      </select>
-                      <select className="table-input" value={String(row.thesis_status ?? '')} onChange={(event) => updateEditingSnapshotRow(index, 'thesis_status', event.target.value)}>
-                        <option value="">상태 선택</option>
-                        {activeThesisStatusOptions.map((status) => (
-                          <option key={status.value} value={status.value}>
-                            {status.label}
-                          </option>
-                        ))}
-                        {row.thesis_status && !thesisStatusOptions.some((status) => status.value === row.thesis_status) ? (
-                          <option value={String(row.thesis_status)}>기타: {row.thesis_status}</option>
-                        ) : null}
-                      </select>
-                      <button
-                        type="button"
-                        className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-700"
-                        title="행 삭제"
-                        onClick={() => setEditingSnapshotRows((current) => current.filter((_, rowIndex) => rowIndex !== index))}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                  {!editingSnapshotRows.length && (
-                    <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500">
-                      저장할 포지션이 없습니다.
-                    </div>
-                  )}
-                </div>
-              </div>
+              <PositionRowsEditor
+                activeThesisStatusOptions={activeThesisStatusOptions}
+                emptyLabel="저장할 포지션이 없습니다."
+                onRowsChange={setEditingSnapshotRows}
+                rows={editingSnapshotRows}
+                thesisStatusOptions={thesisStatusOptions}
+              />
             </div>
             <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 p-5 sm:flex-row sm:items-center sm:justify-between">
               <button

@@ -49,7 +49,7 @@ export function blankRow(): PortfolioRowInput {
     return_total: '',
     group: 'core',
     dca_enabled: true,
-    thesis_status: ''
+    thesis_status: 'intact'
   };
 }
 
