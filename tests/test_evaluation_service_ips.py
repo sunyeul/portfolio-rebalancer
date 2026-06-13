@@ -1,5 +1,12 @@
 import pandas as pd
 
+from api.v1.serialization import (
+    GROUP_SUMMARY_COLUMNS,
+    METRICS_COLUMNS,
+    PROPOSAL_COLUMNS,
+    RC_VIOLATION_COLUMNS,
+    dataframe_records,
+)
 from services.evaluation_service import (
     _apply_ips_execution_gate,
     _action_reason,
@@ -7,6 +14,19 @@ from services.evaluation_service import (
     compute_ips_fit_breakdown,
     run_evaluation,
 )
+from services.evaluation_view import build_evaluation_view
+
+
+def _view_from_result(result, metrics_df, missing_tickers=None):
+    return build_evaluation_view(
+        metrics=dataframe_records(metrics_df, METRICS_COLUMNS, include_index=True),
+        proposal=dataframe_records(result.proposal_df, PROPOSAL_COLUMNS),
+        ips_actions=dataframe_records(result.ips_action_df),
+        group_summary=dataframe_records(result.group_summary_df, GROUP_SUMMARY_COLUMNS),
+        rc_violations=dataframe_records(result.rc_violations, RC_VIOLATION_COLUMNS),
+        missing_tickers=missing_tickers or [],
+        playbook=result.playbook,
+    )
 
 
 def test_run_evaluation_returns_ips_outputs_and_uses_ips_signals():
@@ -58,6 +78,53 @@ def test_run_evaluation_returns_ips_outputs_and_uses_ips_signals():
     assert "execution_type" in result.ips_action_df.columns
     assert "decision_summary" in result.ips_action_df.columns
     assert "risk_notes" in result.ips_action_df.columns
+    view = _view_from_result(result, metrics_df)
+    assert view["review_queue"]["sell_review"][0]["ticker"] == "UFO"
+    risk_over_flag = next(flag for flag in view["risk_flags"] if flag["type"] == "risk_over")
+    assert risk_over_flag["type_code"] == "risk_over"
+    assert risk_over_flag["type_label"] == "위험기여도 초과"
+    assert risk_over_flag["severity_code"] == "review"
+    assert risk_over_flag["severity_label"] == "점검"
+
+
+def test_evaluation_view_buckets_core_dca_review_risk_and_data_quality():
+    metrics_df = pd.DataFrame(
+        {
+            "ticker": ["VOO", "SAT", "LOW"],
+            "가중치": [0.5, 0.35, 0.15],
+            "위험기여도": [0.2, 0.7, 0.1],
+            "E": [0.8, 0.8, 0.8],
+            "return_total": [-0.1, -0.2, 0.0],
+            "group": ["core", "satellite_ai_infra", "satellite_ai_software"],
+            "dca_enabled": [True, True, True],
+            "thesis_status": ["intact", "intact", "unknown"],
+            "missing_ratio": [0.0, 0.0, 0.4],
+            "observation_count": [120, 120, 10],
+        }
+    ).set_index("ticker")
+
+    result = run_evaluation(
+        metrics_df,
+        {"VOO": 0.75, "SAT": 0.15, "LOW": 0.10},
+        rc_over_thresh_pct=1.0,
+        e_thresh=0.5,
+        decision_context="sharp_drop_review",
+    )
+
+    view = _view_from_result(result, metrics_df, missing_tickers=["MISSING"])
+    assert any(item["ticker"] == "VOO" for item in view["dca_plan"]["increase"])
+    assert any(item["ticker"] == "SAT" for item in view["review_queue"]["sell_review"])
+    assert any(item["ticker"] == "LOW" for item in view["review_queue"]["blocked"])
+    assert any(flag["type"] == "data_quality_low" for flag in view["risk_flags"])
+    assert any(flag["type"] == "risk_over" for flag in view["risk_flags"])
+    assert any(flag["type"] == "missing_ticker" for flag in view["risk_flags"])
+    assert view["ips_status"]["status"] == "data_or_policy_blocked"
+    assert view["ips_status"]["status_code"] == "data_or_policy_blocked"
+    assert view["ips_status"]["status_label"] == "데이터/정책 확인 필요"
+    assert view["ips_status"]["status_label"] != view["ips_status"]["status_code"]
+    assert all(flag["type_label"] != flag["type_code"] for flag in view["risk_flags"])
+    assert all(flag["severity_label"] != flag["severity_code"] for flag in view["risk_flags"])
+    assert view["guardrails"]["no_immediate_order_instruction"] is True
 
 
 def test_compute_ips_fit_breakdown_scores_range_and_components():

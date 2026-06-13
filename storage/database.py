@@ -213,6 +213,19 @@ def initialize_database() -> None:
                 ticker TEXT,
                 record_json TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS journal_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id INTEGER NOT NULL UNIQUE REFERENCES portfolio_snapshots(id) ON DELETE CASCADE,
+                date TEXT NOT NULL,
+                decision_context TEXT NOT NULL,
+                playbook_code TEXT,
+                dca_changes_considered_json TEXT NOT NULL DEFAULT '[]',
+                review_items_json TEXT NOT NULL DEFAULT '[]',
+                decision_note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
         _ensure_column(conn, "evaluation_runs", "ips_config_snapshot_json", "TEXT")

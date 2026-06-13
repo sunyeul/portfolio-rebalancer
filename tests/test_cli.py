@@ -3,6 +3,7 @@ import tomllib
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from typer.testing import CliRunner
 
 from cli import app
@@ -114,6 +115,15 @@ def _fake_evaluation(*args, **kwargs):
         fine_tune_list=pd.DataFrame(),
         rc_violations=pd.DataFrame({"ticker": ["QQQ"], "현재RC%": [60.0]}),
         ips_config_snapshot={"rules": {}},
+        playbook={
+            "code": "market_correction",
+            "label": "시장 조정 대응",
+            "confidence": "high",
+            "reasons": ["코어 비중이 IPS 목표보다 낮습니다."],
+            "steps": ["정기매수 조정 가능성을 먼저 봅니다."],
+            "manual_context": kwargs.get("decision_context", "regular_review"),
+            "is_manual_override": False,
+        },
     )
 
 
@@ -147,6 +157,108 @@ def test_evaluate_text_outputs_agent_readable_json(monkeypatch):
     assert payload["agent_summary"]["rebalance_needed"] is True
     assert payload["agent_summary"]["recommended_actions"][0]["ticker"] == "VOO"
     assert payload["error"] is None
+
+
+def test_agent_brief_text_outputs_ips_schema_without_rebalance_legacy_keys(monkeypatch):
+    captured_kwargs = {}
+
+    def fake_evaluation_with_capture(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return _fake_evaluation(*args, **kwargs)
+
+    monkeypatch.setattr("cli.run_analysis", _fake_analysis)
+    monkeypatch.setattr("cli.run_evaluation", fake_evaluation_with_capture)
+
+    result = runner.invoke(
+        app,
+        [
+            "agent-brief",
+            "--text",
+            "VOO 40\nQQQ 60",
+            "--decision-context",
+            "market_correction",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["ok"] is True
+    assert payload["command"] == "agent-brief"
+    assert payload["input"]["source"] == "text"
+    assert payload["input"]["decision_context"] == "market_correction"
+    assert captured_kwargs["decision_context"] == "market_correction"
+    assert payload["ips_status"]["status"] == "review_required"
+    assert payload["ips_status"]["status_code"] == "review_required"
+    assert payload["ips_status"]["status_label"] == "검토 필요"
+    assert payload["dca_plan"]["increase"][0]["ticker"] == "VOO"
+    assert payload["review_queue"]["thesis_review"][0]["ticker"] == "QQQ"
+    assert payload["risk_flags"][0]["type"] == "risk_contribution_limit"
+    assert payload["risk_flags"][0]["type_code"] == "risk_contribution_limit"
+    assert payload["risk_flags"][0]["type_label"] == "위험기여도 한도"
+    assert payload["risk_flags"][0]["severity_code"] == "warning"
+    assert payload["risk_flags"][0]["severity_label"] == "주의"
+    assert payload["playbook"]["code"] == "market_correction"
+    assert payload["guardrails"]["not_investment_advice"] is True
+    assert payload["guardrails"]["no_immediate_order_instruction"] is True
+    assert "rebalance_needed" not in payload
+    assert "recommended_actions" not in payload
+    assert "agent_summary" not in payload
+    assert payload["error"] is None
+
+
+def test_agent_brief_failure_uses_same_ips_envelope():
+    result = runner.invoke(app, ["agent-brief"])
+
+    assert result.exit_code == 1
+    payload = _payload(result)
+    assert payload["ok"] is False
+    assert payload["command"] == "agent-brief"
+    assert payload["ips_status"] is None
+    assert payload["dca_plan"] == {
+        "increase": [],
+        "reduce_or_pause": [],
+        "hold": [],
+    }
+    assert payload["review_queue"] == {
+        "thesis_review": [],
+        "risk_review": [],
+        "sell_review": [],
+        "blocked": [],
+    }
+    assert payload["risk_flags"] == []
+    assert payload["guardrails"]["not_investment_advice"] is True
+    assert payload["error"]["stage"] == "input"
+    assert "정확히 하나" in payload["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_key"),
+    [
+        ("diagnose", "ips_status"),
+        ("dca-plan", "dca_plan"),
+        ("review-queue", "review_queue"),
+        ("risk", "risk_flags"),
+    ],
+)
+def test_purpose_built_agent_commands_emit_scoped_json(
+    monkeypatch,
+    command,
+    expected_key,
+):
+    monkeypatch.setattr("cli.run_analysis", _fake_analysis)
+    monkeypatch.setattr("cli.run_evaluation", _fake_evaluation)
+
+    result = runner.invoke(app, [command, "--text", "VOO 40\nQQQ 60"])
+
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["ok"] is True
+    assert payload["command"] == command
+    assert expected_key in payload
+    assert payload["guardrails"]["no_immediate_order_instruction"] is True
+    assert "rebalance_needed" not in payload
+    assert "recommended_actions" not in payload
+    assert "agent_summary" not in payload
 
 
 def test_evaluate_can_include_counterfactual_and_backtest(monkeypatch):
@@ -199,6 +311,22 @@ def test_evaluate_missing_file_error_is_json():
     assert payload["ok"] is False
     assert payload["error"]["stage"] == "input"
     assert "파일을 찾을 수 없습니다" in payload["error"]["message"]
+
+
+def test_codex_cli_usage_lives_in_repo_skill_not_docs():
+    readme = Path("README.md").read_text()
+    removed_doc = Path("docs/codex-cli-usage.md")
+    skill = Path(".agents/skills/ips-pilot-cli-review/SKILL.md")
+
+    assert "docs/codex-cli-usage.md" not in readme
+    assert not removed_doc.exists()
+    assert ".agents/skills/ips-pilot-cli-review/SKILL.md" in readme
+    assert skill.exists()
+
+    text = skill.read_text()
+    assert "agent-brief" in text
+    assert "not investment advice" in text
+    assert "no immediate buy/sell" in text
 
 
 def test_portfolio_current_state_can_be_evaluated_and_saved(

@@ -17,6 +17,7 @@ from api.v1.serialization import (
 )
 from middleware.session import session_manager
 from services.evaluation_service import EvaluationError, run_evaluation
+from services.evaluation_view import build_evaluation_view
 from utils.metrics import annualize_cov
 
 router = APIRouter()
@@ -96,6 +97,22 @@ async def run_evaluation_endpoint(payload: EvaluationRunRequest, request: Reques
         },
     )
 
+    proposal = dataframe_records(result.proposal_df, PROPOSAL_COLUMNS)
+    ips_actions = dataframe_records(result.ips_action_df)
+    group_summary = dataframe_records(result.group_summary_df, GROUP_SUMMARY_COLUMNS)
+    rc_violations = dataframe_records(result.rc_violations, RC_VIOLATION_COLUMNS)
+    metrics = dataframe_records(metrics_df, METRICS_COLUMNS, include_index=True)
+    missing_tickers = session_manager.get(session_id, "missing_tickers") or []
+    operating_view = build_evaluation_view(
+        metrics=metrics,
+        proposal=proposal,
+        ips_actions=ips_actions,
+        group_summary=group_summary,
+        rc_violations=rc_violations,
+        missing_tickers=missing_tickers,
+        playbook=result.playbook,
+    )
+
     return {
         "proposal": dataframe_records(result.proposal_df, PROPOSAL_COLUMNS),
         "ips_actions": dataframe_records(result.ips_action_df),
@@ -108,6 +125,7 @@ async def run_evaluation_endpoint(payload: EvaluationRunRequest, request: Reques
         ),
         "ips_config_snapshot": result.ips_config_snapshot,
         "playbook": result.playbook,
+        **operating_view,
     }
 
 

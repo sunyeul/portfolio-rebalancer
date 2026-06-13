@@ -22,6 +22,7 @@ from api.v1.serialization import (
 )
 from services.analysis_service import DEFAULT_BENCH, DEFAULT_RF, AnalysisError, run_analysis
 from services.evaluation_service import EvaluationError, run_evaluation
+from services.evaluation_view import build_evaluation_view, empty_operating_view
 from services.portfolio_service import (
     PortfolioInputError,
     normalize_and_validate_assets,
@@ -295,6 +296,171 @@ def _agent_summary(
     }
 
 
+def _empty_agent_brief(
+    command: str,
+    error: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    view = empty_operating_view()
+    return {
+        "ok": error is None,
+        "command": command,
+        **view,
+        "error": error,
+    }
+
+
+def _exit_agent_brief_with_error(command: str, exc: Exception) -> None:
+    if isinstance(exc, CliError):
+        stage = exc.stage
+        message = exc.message
+        hint = exc.hint
+    else:
+        stage = "unexpected"
+        message = str(exc)
+        hint = "명령 옵션과 입력 데이터를 확인한 뒤 다시 실행하세요."
+    _emit_json(
+        _empty_agent_brief(
+            command,
+            {
+                "stage": stage,
+                "message": message,
+                "hint": hint,
+            },
+        )
+    )
+    raise typer.Exit(code=1)
+
+
+def _agent_command_payload(
+    *,
+    command: str,
+    input_meta: dict[str, Any],
+    warnings: list[str],
+    view: dict[str, Any],
+    period: int | str,
+    rf: float,
+    bench: str,
+    decision_context: str,
+) -> dict[str, Any]:
+    payload = _empty_agent_brief(command)
+    payload.update(
+        {
+            "input": {
+                **input_meta,
+                "period": period,
+                "rf": rf,
+                "bench": bench,
+                "decision_context": decision_context,
+                "database_path": str(db_path()),
+            },
+            "warnings": warnings,
+            **view,
+        }
+    )
+    return payload
+
+
+def _run_agent_evaluation(
+    *,
+    command: str,
+    file_path: Path | None,
+    text: str | None,
+    portfolio_id: int | None,
+    snapshot_id: int | None,
+    period: str,
+    rf: float,
+    bench: str,
+    rc_threshold: float,
+    e_threshold: float,
+    decision_context: DecisionContext,
+) -> dict[str, Any]:
+    parsed_period = _parse_period(period)
+    asset_df, warnings, input_meta, _source_portfolio_id = _load_asset_df(
+        file_path=file_path,
+        text=text,
+        portfolio_id=portfolio_id,
+        snapshot_id=snapshot_id,
+    )
+    bench_ticker = bench.upper()
+
+    try:
+        analysis = run_analysis(asset_df, parsed_period, rf, bench_ticker)
+    except AnalysisError as exc:
+        raise CliError("analysis", str(exc)) from exc
+
+    cov_matrix = _cov_matrix(analysis.returns_smooth, analysis.metrics_df)
+
+    try:
+        evaluation = run_evaluation(
+            analysis.metrics_df,
+            None,
+            rc_threshold,
+            e_threshold,
+            cov_matrix=cov_matrix,
+            decision_context=decision_context.value,
+        )
+    except EvaluationError as exc:
+        raise CliError("evaluation", str(exc)) from exc
+
+    metrics = dataframe_records(analysis.metrics_df, METRICS_COLUMNS, include_index=True)
+    proposal = dataframe_records(evaluation.proposal_df, PROPOSAL_COLUMNS)
+    ips_actions = dataframe_records(evaluation.ips_action_df)
+    group_summary = dataframe_records(
+        evaluation.group_summary_df, GROUP_SUMMARY_COLUMNS
+    )
+    rc_violations = dataframe_records(evaluation.rc_violations, RC_VIOLATION_COLUMNS)
+    view = build_evaluation_view(
+        metrics=metrics,
+        proposal=proposal,
+        ips_actions=ips_actions,
+        group_summary=group_summary,
+        rc_violations=rc_violations,
+        missing_tickers=analysis.missing_tickers,
+        playbook=evaluation.playbook,
+    )
+    return _agent_command_payload(
+        command=command,
+        input_meta=input_meta,
+        warnings=warnings,
+        view=view,
+        period=parsed_period,
+        rf=rf,
+        bench=bench_ticker,
+        decision_context=decision_context.value,
+    )
+
+
+def _select_agent_payload(payload: dict[str, Any], command: str) -> dict[str, Any]:
+    base_keys = [
+        "ok",
+        "command",
+        "input",
+        "warnings",
+        "guardrails",
+        "not_advice_notice",
+        "error",
+    ]
+    selected = {key: payload[key] for key in base_keys if key in payload}
+    selected["command"] = command
+    if command == "diagnose":
+        selected["ips_status"] = payload["ips_status"]
+        selected["risk_flags"] = payload["risk_flags"]
+        selected["playbook"] = payload["playbook"]
+    elif command == "dca-plan":
+        selected["dca_plan"] = payload["dca_plan"]
+    elif command == "review-queue":
+        selected["review_queue"] = payload["review_queue"]
+        selected["risk_flags"] = payload["risk_flags"]
+    elif command == "risk":
+        selected["risk_flags"] = payload["risk_flags"]
+        selected["top_risk_contributors"] = (
+            payload.get("ips_status", {}).get("top_risk_contributors", [])
+            if payload.get("ips_status")
+            else []
+        )
+    return selected
+
+
 def _save_run(
     *,
     portfolio_id: int,
@@ -524,6 +690,202 @@ def evaluate(
         )
     except Exception as exc:
         _exit_with_error("evaluate", exc)
+
+
+@app.command("agent-brief")
+def agent_brief(
+    file_path: Annotated[
+        Path | None,
+        typer.Option("--file"),
+    ] = None,
+    text: Annotated[str | None, typer.Option("--text")] = None,
+    portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
+    snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
+    period: Annotated[str, typer.Option("--period")] = "12",
+    rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
+    bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
+    rc_threshold: Annotated[float, typer.Option("--rc-threshold")] = 1.5,
+    e_threshold: Annotated[float, typer.Option("--e-threshold")] = 0.5,
+    decision_context: Annotated[
+        DecisionContext,
+        typer.Option("--decision-context"),
+    ] = DecisionContext.regular_review,
+) -> None:
+    """Emit a compact IPS brief for Codex and other agents."""
+    try:
+        _emit_json(
+            _run_agent_evaluation(
+                command="agent-brief",
+                file_path=file_path,
+                text=text,
+                portfolio_id=portfolio_id,
+                snapshot_id=snapshot_id,
+                period=period,
+                rf=rf,
+                bench=bench,
+                rc_threshold=rc_threshold,
+                e_threshold=e_threshold,
+                decision_context=decision_context,
+            )
+        )
+    except Exception as exc:
+        _exit_agent_brief_with_error("agent-brief", exc)
+
+
+@app.command("diagnose")
+def diagnose(
+    file_path: Annotated[
+        Path | None,
+        typer.Option("--file"),
+    ] = None,
+    text: Annotated[str | None, typer.Option("--text")] = None,
+    portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
+    snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
+    period: Annotated[str, typer.Option("--period")] = "12",
+    rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
+    bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
+    rc_threshold: Annotated[float, typer.Option("--rc-threshold")] = 1.5,
+    e_threshold: Annotated[float, typer.Option("--e-threshold")] = 0.5,
+    decision_context: Annotated[
+        DecisionContext,
+        typer.Option("--decision-context"),
+    ] = DecisionContext.regular_review,
+) -> None:
+    """Emit IPS status, risk flags, and playbook."""
+    try:
+        payload = _run_agent_evaluation(
+            command="diagnose",
+            file_path=file_path,
+            text=text,
+            portfolio_id=portfolio_id,
+            snapshot_id=snapshot_id,
+            period=period,
+            rf=rf,
+            bench=bench,
+            rc_threshold=rc_threshold,
+            e_threshold=e_threshold,
+            decision_context=decision_context,
+        )
+        _emit_json(_select_agent_payload(payload, "diagnose"))
+    except Exception as exc:
+        _exit_agent_brief_with_error("diagnose", exc)
+
+
+@app.command("dca-plan")
+def dca_plan(
+    file_path: Annotated[
+        Path | None,
+        typer.Option("--file"),
+    ] = None,
+    text: Annotated[str | None, typer.Option("--text")] = None,
+    portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
+    snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
+    period: Annotated[str, typer.Option("--period")] = "12",
+    rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
+    bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
+    rc_threshold: Annotated[float, typer.Option("--rc-threshold")] = 1.5,
+    e_threshold: Annotated[float, typer.Option("--e-threshold")] = 0.5,
+    decision_context: Annotated[
+        DecisionContext,
+        typer.Option("--decision-context"),
+    ] = DecisionContext.regular_review,
+) -> None:
+    """Emit regular-purchase adjustment candidates only."""
+    try:
+        payload = _run_agent_evaluation(
+            command="dca-plan",
+            file_path=file_path,
+            text=text,
+            portfolio_id=portfolio_id,
+            snapshot_id=snapshot_id,
+            period=period,
+            rf=rf,
+            bench=bench,
+            rc_threshold=rc_threshold,
+            e_threshold=e_threshold,
+            decision_context=decision_context,
+        )
+        _emit_json(_select_agent_payload(payload, "dca-plan"))
+    except Exception as exc:
+        _exit_agent_brief_with_error("dca-plan", exc)
+
+
+@app.command("review-queue")
+def review_queue(
+    file_path: Annotated[
+        Path | None,
+        typer.Option("--file"),
+    ] = None,
+    text: Annotated[str | None, typer.Option("--text")] = None,
+    portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
+    snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
+    period: Annotated[str, typer.Option("--period")] = "12",
+    rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
+    bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
+    rc_threshold: Annotated[float, typer.Option("--rc-threshold")] = 1.5,
+    e_threshold: Annotated[float, typer.Option("--e-threshold")] = 0.5,
+    decision_context: Annotated[
+        DecisionContext,
+        typer.Option("--decision-context"),
+    ] = DecisionContext.regular_review,
+) -> None:
+    """Emit thesis, risk, sell-review, and blocked review items."""
+    try:
+        payload = _run_agent_evaluation(
+            command="review-queue",
+            file_path=file_path,
+            text=text,
+            portfolio_id=portfolio_id,
+            snapshot_id=snapshot_id,
+            period=period,
+            rf=rf,
+            bench=bench,
+            rc_threshold=rc_threshold,
+            e_threshold=e_threshold,
+            decision_context=decision_context,
+        )
+        _emit_json(_select_agent_payload(payload, "review-queue"))
+    except Exception as exc:
+        _exit_agent_brief_with_error("review-queue", exc)
+
+
+@app.command("risk")
+def risk(
+    file_path: Annotated[
+        Path | None,
+        typer.Option("--file"),
+    ] = None,
+    text: Annotated[str | None, typer.Option("--text")] = None,
+    portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
+    snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
+    period: Annotated[str, typer.Option("--period")] = "12",
+    rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
+    bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
+    rc_threshold: Annotated[float, typer.Option("--rc-threshold")] = 1.5,
+    e_threshold: Annotated[float, typer.Option("--e-threshold")] = 0.5,
+    decision_context: Annotated[
+        DecisionContext,
+        typer.Option("--decision-context"),
+    ] = DecisionContext.regular_review,
+) -> None:
+    """Emit risk flags and top risk contributors."""
+    try:
+        payload = _run_agent_evaluation(
+            command="risk",
+            file_path=file_path,
+            text=text,
+            portfolio_id=portfolio_id,
+            snapshot_id=snapshot_id,
+            period=period,
+            rf=rf,
+            bench=bench,
+            rc_threshold=rc_threshold,
+            e_threshold=e_threshold,
+            decision_context=decision_context,
+        )
+        _emit_json(_select_agent_payload(payload, "risk"))
+    except Exception as exc:
+        _exit_agent_brief_with_error("risk", exc)
 
 
 @portfolios_app.command("list")

@@ -17,6 +17,7 @@ from api.v1.serialization import (
 )
 from utils.ips import fixed_group
 from middleware.session import session_manager
+from services.evaluation_view import build_evaluation_view
 from services.portfolio_service import (
     PortfolioInputError,
     normalize_and_validate_assets,
@@ -346,12 +347,34 @@ def _state_response(state: dict) -> dict:
         ips_action_df = pd.DataFrame(state["evaluation"]["ips_action_df"])
         group_summary_df = pd.DataFrame(state["evaluation"]["group_summary_df"])
         rc_violations_df = pd.DataFrame(state["evaluation"]["rc_violations"])
+        metrics_for_view = pd.DataFrame(
+            state["analysis"]["metrics_df"] if state["analysis"] else []
+        )
+        if not metrics_for_view.empty and "ticker" in metrics_for_view.columns:
+            metrics_for_view = metrics_for_view.set_index("ticker")
+        proposal = dataframe_records(proposal_df, PROPOSAL_COLUMNS)
+        ips_actions = dataframe_records(ips_action_df)
+        group_summary = dataframe_records(group_summary_df, GROUP_SUMMARY_COLUMNS)
+        rc_violations = dataframe_records(rc_violations_df, RC_VIOLATION_COLUMNS)
+        operating_view = build_evaluation_view(
+            metrics=dataframe_records(
+                metrics_for_view,
+                METRICS_COLUMNS,
+                include_index=True,
+            ),
+            proposal=proposal,
+            ips_actions=ips_actions,
+            group_summary=group_summary,
+            rc_violations=rc_violations,
+            missing_tickers=state["analysis"]["missing_tickers"] if state["analysis"] else [],
+            playbook=state["evaluation"].get("playbook"),
+        )
         gap = proposal_df.get("갭%", pd.Series(dtype=float))
         should_execute = proposal_df.get("실행", pd.Series(dtype=bool)).astype(bool)
         response["evaluation"] = {
-            "proposal": dataframe_records(proposal_df, PROPOSAL_COLUMNS),
-            "ips_actions": dataframe_records(ips_action_df),
-            "group_summary": dataframe_records(group_summary_df, GROUP_SUMMARY_COLUMNS),
+            "proposal": proposal,
+            "ips_actions": ips_actions,
+            "group_summary": group_summary,
             "sell_list": dataframe_records(
                 proposal_df[(gap < 0) & should_execute],
                 PROPOSAL_COLUMNS,
@@ -370,6 +393,7 @@ def _state_response(state: dict) -> dict:
             ),
             "ips_config_snapshot": state["evaluation"].get("ips_config_snapshot"),
             "playbook": state["evaluation"].get("playbook"),
+            **operating_view,
         }
 
     return response
@@ -410,12 +434,34 @@ def _snapshot_response(snapshot: dict) -> dict:
         ips_action_df = pd.DataFrame(snapshot["evaluation"]["ips_action_df"])
         group_summary_df = pd.DataFrame(snapshot["evaluation"]["group_summary_df"])
         rc_violations_df = pd.DataFrame(snapshot["evaluation"]["rc_violations"])
+        metrics_for_view = pd.DataFrame(
+            snapshot["analysis"]["metrics_df"] if snapshot["analysis"] else []
+        )
+        if not metrics_for_view.empty and "ticker" in metrics_for_view.columns:
+            metrics_for_view = metrics_for_view.set_index("ticker")
+        proposal = dataframe_records(proposal_df, PROPOSAL_COLUMNS)
+        ips_actions = dataframe_records(ips_action_df)
+        group_summary = dataframe_records(group_summary_df, GROUP_SUMMARY_COLUMNS)
+        rc_violations = dataframe_records(rc_violations_df, RC_VIOLATION_COLUMNS)
+        operating_view = build_evaluation_view(
+            metrics=dataframe_records(
+                metrics_for_view,
+                METRICS_COLUMNS,
+                include_index=True,
+            ),
+            proposal=proposal,
+            ips_actions=ips_actions,
+            group_summary=group_summary,
+            rc_violations=rc_violations,
+            missing_tickers=snapshot["analysis"]["missing_tickers"] if snapshot["analysis"] else [],
+            playbook=snapshot["evaluation"].get("playbook"),
+        )
         gap = proposal_df.get("갭%", pd.Series(dtype=float))
         should_execute = proposal_df.get("실행", pd.Series(dtype=bool)).astype(bool)
         response["evaluation"] = {
-            "proposal": dataframe_records(proposal_df, PROPOSAL_COLUMNS),
-            "ips_actions": dataframe_records(ips_action_df),
-            "group_summary": dataframe_records(group_summary_df, GROUP_SUMMARY_COLUMNS),
+            "proposal": proposal,
+            "ips_actions": ips_actions,
+            "group_summary": group_summary,
             "sell_list": dataframe_records(
                 proposal_df[(gap < 0) & should_execute],
                 PROPOSAL_COLUMNS,
@@ -434,6 +480,7 @@ def _snapshot_response(snapshot: dict) -> dict:
             ),
             "ips_config_snapshot": snapshot["evaluation"].get("ips_config_snapshot"),
             "playbook": snapshot["evaluation"].get("playbook"),
+            **operating_view,
         }
 
     return response

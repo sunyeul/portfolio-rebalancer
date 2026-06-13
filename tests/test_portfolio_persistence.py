@@ -594,7 +594,21 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
         )
         return EvaluationResult(
             proposal_df=proposal,
-            ips_action_df=pd.DataFrame([{"ticker": "VOO", "ips_action": "hold"}]),
+            ips_action_df=pd.DataFrame(
+                [
+                    {
+                        "ticker": "VOO",
+                        "ips_action": "hold_observe",
+                        "action_label": "유지·관찰",
+                        "execution_type": "observe",
+                        "decision_summary": "다음 점검까지 관찰합니다.",
+                        "next_step": "매매하지 않고 다음 점검까지 관찰합니다.",
+                        "risk_notes": [],
+                        "data_quality_low": False,
+                        "risk_over": False,
+                    }
+                ]
+            ),
             group_summary_df=pd.DataFrame([{"group": "core", "weight": 1.0}]),
             sell_list=pd.DataFrame(),
             buy_list=pd.DataFrame(),
@@ -638,6 +652,12 @@ def test_snapshot_persists_analysis_and_evaluation(monkeypatch, tmp_path):
     assert payload["evaluation"]["ips_config_snapshot"]["target_allocation"]["core"]["target"] == 0.8
     assert payload["evaluation"]["playbook"]["code"] == "regular_review"
     assert payload["evaluation"]["playbook"]["reasons"] == ["저장된 플레이북입니다."]
+    assert payload["evaluation"]["ips_status"]["status"] == "ok"
+    assert payload["evaluation"]["ips_status"]["status_code"] == "ok"
+    assert payload["evaluation"]["ips_status"]["status_label"] == "특이사항 없음"
+    assert payload["evaluation"]["dca_plan"]["hold"][0]["ticker"] == "VOO"
+    assert payload["evaluation"]["review_queue"]["blocked"] == []
+    assert payload["evaluation"]["risk_flags"] == []
 
     csv_response = load_client.get("/api/v1/evaluation/download-csv?type=proposal")
     assert csv_response.status_code == 200

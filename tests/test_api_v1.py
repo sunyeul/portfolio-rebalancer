@@ -489,7 +489,21 @@ def test_evaluation_api_and_download(monkeypatch):
         )
         return EvaluationResult(
             proposal_df=proposal,
-            ips_action_df=pd.DataFrame([{"ticker": "VOO", "ips_action": "hold"}]),
+            ips_action_df=pd.DataFrame(
+                [
+                    {
+                        "ticker": "VOO",
+                        "ips_action": "hold_observe",
+                        "action_label": "유지·관찰",
+                        "execution_type": "observe",
+                        "decision_summary": "다음 점검까지 관찰합니다.",
+                        "next_step": "매매하지 않고 다음 점검까지 관찰합니다.",
+                        "risk_notes": [],
+                        "data_quality_low": False,
+                        "risk_over": False,
+                    }
+                ]
+            ),
             group_summary_df=pd.DataFrame([{"group": "core", "weight": 1.0}]),
             sell_list=pd.DataFrame(),
             buy_list=pd.DataFrame(),
@@ -527,6 +541,13 @@ def test_evaluation_api_and_download(monkeypatch):
     assert payload["playbook"]["label"] == "일반 점검"
     assert payload["playbook"]["reasons"] == ["기본 점검입니다."]
     assert payload["playbook"]["steps"] == ["데이터 품질을 확인합니다."]
+    assert payload["ips_status"]["status"] == "ok"
+    assert payload["ips_status"]["status_code"] == "ok"
+    assert payload["ips_status"]["status_label"] == "특이사항 없음"
+    assert payload["dca_plan"]["hold"][0]["ticker"] == "VOO"
+    assert payload["review_queue"]["blocked"] == []
+    assert payload["risk_flags"] == []
+    assert payload["guardrails"]["not_investment_advice"] is True
 
     csv_response = client.get("/api/v1/evaluation/download-csv?type=proposal")
     assert csv_response.status_code == 200
@@ -621,3 +642,49 @@ def test_analysis_rerun_clears_stale_evaluation_outputs(monkeypatch):
 
     assert response.status_code == 404
     assert "다운로드할 결과가 없습니다" in response.json()["detail"]
+
+
+def test_journal_api_persists_latest_snapshot_entry(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "PORTFOLIO_DB_PATH",
+        str(tmp_path / "portfolio_rebalancer.sqlite3"),
+    )
+    client = TestClient(app)
+    portfolio = client.post(
+        "/api/v1/portfolios",
+        json={"name": "Journal account"},
+    ).json()["portfolio"]
+    snapshot = client.post(
+        f"/api/v1/portfolios/{portfolio['id']}/snapshots",
+        json={
+            "name": "Monthly review",
+            "rows": [{"ticker": "VOO", "allocation": 100, "group": "core"}],
+        },
+    ).json()["snapshot"]
+
+    empty_response = client.get(f"/api/v1/journal/snapshots/{snapshot['id']}")
+    assert empty_response.status_code == 200
+    assert empty_response.json()["journal"] is None
+
+    create_response = client.post(
+        f"/api/v1/journal/snapshots/{snapshot['id']}",
+        json={
+            "date": "2026-06-14",
+            "decision_context": "regular_review",
+            "playbook_code": "regular_review",
+            "dca_changes_considered": [{"ticker": "VOO"}],
+            "review_items": [],
+            "decision_note": "정기 점검 기록",
+        },
+    )
+    assert create_response.status_code == 200
+    journal = create_response.json()["journal"]
+    assert journal["snapshot_id"] == snapshot["id"]
+    assert journal["dca_changes_considered"] == [{"ticker": "VOO"}]
+
+    patch_response = client.patch(
+        f"/api/v1/journal/snapshots/{snapshot['id']}",
+        json={"decision_note": "수정된 기록"},
+    )
+    assert patch_response.status_code == 200
+    assert patch_response.json()["journal"]["decision_note"] == "수정된 기록"
