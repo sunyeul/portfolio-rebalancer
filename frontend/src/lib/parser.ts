@@ -47,7 +47,7 @@ export function blankRow(): PortfolioRowInput {
     ticker: '',
     allocation: '',
     return_total: '',
-    group: 'unclassified',
+    group: 'core',
     dca_enabled: true,
     thesis_status: ''
   };

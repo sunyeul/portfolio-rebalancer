@@ -102,9 +102,10 @@ function textFromRecord(row: Record<string, unknown>, key: string) {
 
 function groupLabel(value: string | null | undefined) {
   if (value === 'core') return '코어';
-  if (value === 'satellite') return '위성';
-  if (value === 'cash') return '현금';
-  return '미분류';
+  if (value === 'satellite_ai_infra') return '위성_AI인프라';
+  if (value === 'satellite_ai_software') return '위성_AI소프트웨어';
+  if (value === 'satellite_nextgen') return '위성_차세대';
+  return '코어';
 }
 
 function recordByTicker(rows: Array<Record<string, unknown>>) {
@@ -372,7 +373,7 @@ export function EvaluationCharts({ evaluation }: { evaluation: EvaluationRespons
     acc[textFromRecord(row, 'group')] = row;
     return acc;
   }, {});
-  const groupBandData = ['core', 'satellite', 'cash'].map((group) => {
+  const groupBandData = ['core', 'satellite_ai_infra', 'satellite_ai_software', 'satellite_nextgen'].map((group) => {
     const groupConfig = recordFromConfig(targetAllocation, group);
     return {
       groupLabel: groupLabel(group),

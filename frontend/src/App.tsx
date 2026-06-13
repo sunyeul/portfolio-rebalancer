@@ -79,9 +79,9 @@ const DEFAULT_RF_PCT = 2.5;
 const DEFAULT_BENCHMARK = 'SPY:80,QQQ:20';
 const fixedGroupOptions = [
   { value: 'core', label: '코어' },
-  { value: 'satellite', label: '위성' },
-  { value: 'cash', label: '현금' },
-  { value: 'unclassified', label: '미분류' }
+  { value: 'satellite_ai_infra', label: '위성_AI인프라' },
+  { value: 'satellite_ai_software', label: '위성_AI소프트웨어' },
+  { value: 'satellite_nextgen', label: '위성_차세대' }
 ] as const;
 const decisionContextOptions = [
   { value: 'regular_review', label: '일반 점검' },
@@ -104,6 +104,7 @@ type AppView = 'workbench' | 'settings';
 type WorkbenchMode = 'prepare' | 'review';
 type ReliabilityStatus = 'ready' | 'warn' | 'hold';
 type ReliabilityRowStatus = 'failed' | 'insufficient' | 'risk_attention' | 'normal';
+type ReliabilityIssue = 'failed' | 'missing_ratio' | 'low_observation' | 'risk_attention';
 type SupportingSignalTone = 'good' | 'warn' | 'risk' | 'info' | 'neutral';
 type SupportingSignal = {
   label: string;
@@ -126,6 +127,7 @@ type ReliabilityRow = {
   observationCount: number | null;
   missingRatio: number | null;
   status: ReliabilityRowStatus;
+  issues: ReliabilityIssue[];
 };
 type ReliabilitySummary = {
   status: ReliabilityStatus;
@@ -160,7 +162,12 @@ function optionLabel(options: ConfigOption[], value: string | null | undefined) 
 
 function groupLabel(value: string | null | undefined) {
   const option = fixedGroupOptions.find((item) => item.value === value);
-  return option?.label ?? '미분류';
+  return option?.label ?? '코어';
+}
+
+function groupRole(value: string | null | undefined) {
+  if (value?.startsWith('satellite_')) return 'satellite';
+  return 'core';
 }
 
 function decisionContextLabel(value: string | null | undefined) {
@@ -496,7 +503,12 @@ function buildHoldingOverviewRows({
 }) {
   const metricsByTicker = metricRowsByTicker(analysis?.metrics ?? []);
   const proposalsByTicker = proposalRowsByTicker(evaluation?.proposal ?? []);
-  const groupOrder: Record<string, number> = { core: 0, satellite: 1, cash: 2, unclassified: 3 };
+  const groupOrder: Record<string, number> = {
+    core: 0,
+    satellite_ai_infra: 1,
+    satellite_ai_software: 2,
+    satellite_nextgen: 3
+  };
 
   return portfolio
     .map<HoldingOverviewRow>((asset) => {
@@ -593,16 +605,16 @@ function PortfolioHoldingsOverview({
       rows.filter((row) => {
         if (activeFilter === 'all') return true;
         if (activeFilter === 'execute') return row.shouldExecute;
-        return row.group === activeFilter;
+        return groupRole(row.group) === activeFilter;
       }),
     [activeFilter, rows]
   );
   const filterOptions = useMemo<Array<{ value: HoldingsFilter; label: string; count: number }>>(
     () => [
       { value: 'all', label: '전체', count: rows.length },
-      { value: 'core', label: '코어', count: rows.filter((row) => row.group === 'core').length },
-      { value: 'satellite', label: '위성', count: rows.filter((row) => row.group === 'satellite').length },
-      { value: 'execute', label: '실행 후보', count: executeCount }
+      { value: 'core', label: '코어 역할', count: rows.filter((row) => groupRole(row.group) === 'core').length },
+      { value: 'satellite', label: '위성 역할', count: rows.filter((row) => groupRole(row.group) === 'satellite').length },
+      { value: 'execute', label: 'DCA/점검 후보', count: executeCount }
     ],
     [executeCount, rows]
   );
@@ -615,8 +627,8 @@ function PortfolioHoldingsOverview({
             <ShieldCheck className="h-4 w-4" />
           </div>
           <div>
-            <h3 className="text-xl font-semibold text-slate-950">포트폴리오 현황 요약</h3>
-            <p className="mt-1 text-sm font-semibold text-slate-500">평가 결과를 기준으로 보유 현황과 권장 액션을 한 화면에서 확인합니다.</p>
+            <h3 className="text-xl font-semibold text-slate-950">Dashboard</h3>
+            <p className="mt-1 text-sm font-semibold text-slate-500">IPS 평가 결과를 기준으로 보유 현황, DCA Plan, Review Queue를 한 화면에서 확인합니다.</p>
           </div>
         </div>
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -1129,7 +1141,7 @@ export function App() {
       {
         accessorKey: 'status',
         header: '상태',
-        cell: ({ row }) => <ReliabilityStatusBadge status={row.original.status} />
+        cell: ({ row }) => <ReliabilityStatusBadges issues={row.original.issues} />
       }
     ],
     []
@@ -1436,6 +1448,11 @@ export function App() {
         (row.missing_ratio ?? 0) > DATA_QUALITY_MISSING_RATIO_THRESHOLD ||
         (row.observation_count ?? Number.POSITIVE_INFINITY) < DATA_QUALITY_OBSERVATION_THRESHOLD;
       const riskAttention = (riskWeightGapPct ?? 0) > RISK_WEIGHT_GAP_WARN_PCT;
+      const issues: ReliabilityIssue[] = [
+        (row.missing_ratio ?? 0) > DATA_QUALITY_MISSING_RATIO_THRESHOLD ? 'missing_ratio' : null,
+        row.observation_count !== null && row.observation_count < DATA_QUALITY_OBSERVATION_THRESHOLD ? 'low_observation' : null,
+        riskAttention ? 'risk_attention' : null
+      ].filter((issue): issue is ReliabilityIssue => issue !== null);
 
       return {
         ticker: row.ticker,
@@ -1447,7 +1464,8 @@ export function App() {
         dataEnd: row.data_end,
         observationCount: row.observation_count,
         missingRatio: row.missing_ratio,
-        status: dataInsufficient ? 'insufficient' : riskAttention ? 'risk_attention' : 'normal'
+        status: dataInsufficient ? 'insufficient' : riskAttention ? 'risk_attention' : 'normal',
+        issues
       } satisfies ReliabilityRow;
     });
     const knownTickers = new Set(metricRows.map((row) => row.ticker));
@@ -1463,7 +1481,8 @@ export function App() {
         dataEnd: null,
         observationCount: null,
         missingRatio: null,
-        status: 'failed' as const
+        status: 'failed' as const,
+        issues: ['failed'] as ReliabilityIssue[]
       }));
     return [...failedRows, ...metricRows];
   }, [analysis]);
@@ -1558,8 +1577,8 @@ export function App() {
     <main className="app-shell">
       <header className="app-header">
         <div className="brand-lockup">
-          <p className="eyebrow">Portfolio Rebalancer</p>
-          <h1>리밸런싱 워크벤치</h1>
+          <p className="eyebrow">IPS Pilot</p>
+          <h1>월간 IPS 운용 워크벤치</h1>
         </div>
         <nav className="view-tabs" aria-label="주요 화면">
           <button
@@ -1567,14 +1586,14 @@ export function App() {
             className={cx(activeView === 'workbench' && 'active')}
             onClick={() => setActiveView('workbench')}
           >
-            워크벤치
+            IPS Review
           </button>
           <button
             type="button"
             className={cx(activeView === 'settings' && 'active')}
             onClick={() => setActiveView('settings')}
           >
-            설정
+            Settings / IPS
           </button>
         </nav>
       </header>
@@ -1583,11 +1602,11 @@ export function App() {
         <section className="workspace">
         <header className="topbar">
           <div>
-            <h2>{activeView === 'workbench' ? '워크벤치' : '설정 관리'}</h2>
+            <h2>{activeView === 'workbench' ? 'Dashboard / DCA Plan' : 'Settings / IPS'}</h2>
             <p>
               {activeView === 'workbench'
-                ? '현재 포트폴리오를 불러와 입력을 보정하고, IPS 기준으로 실행 여부를 점검합니다.'
-                : 'IPS 목표와 투자 논리 옵션을 관리하고 다음 평가에 적용합니다.'}
+                ? '현재 포트폴리오를 불러와 IPS 기준으로 다음 정기매수 조정안과 투자 논리 점검 대상을 정리합니다.'
+                : 'IPS 목표 비중, 판단 룰, 투자 논리 옵션을 관리하고 다음 월간 점검에 적용합니다.'}
             </p>
           </div>
           {activeView === 'workbench' && (
@@ -1595,7 +1614,7 @@ export function App() {
               <span className={validRows.length ? 'done' : ''}>입력</span>
               <span className={analysis ? 'done' : ''}>분석</span>
               <span className={analysis && !rowsDirty ? 'done' : ''}>보정 반영</span>
-              <span className={evaluation ? 'done' : ''}>평가</span>
+              <span className={evaluation ? 'done' : ''}>IPS Review</span>
               <span className={hasFreshEvaluation ? 'done' : ''}>{resultStatusLabel}</span>
             </div>
           )}
@@ -2726,27 +2745,38 @@ function reliabilityStatusLabel(status: ReliabilityStatus) {
   return '평가 보류 권장';
 }
 
-function reliabilityRowStatusLabel(status: ReliabilityRowStatus) {
-  if (status === 'failed') return '실패';
-  if (status === 'insufficient') return '부족';
-  if (status === 'risk_attention') return '위험주의';
+function reliabilityIssueLabel(issue: ReliabilityIssue | 'normal') {
+  if (issue === 'failed') return '조회실패';
+  if (issue === 'missing_ratio') return '결측률';
+  if (issue === 'low_observation') return '관측부족';
+  if (issue === 'risk_attention') return '위험초과';
   return '정상';
 }
 
-function ReliabilityStatusBadge({ status }: { status: ReliabilityRowStatus }) {
-  const className =
-    status === 'failed'
+function reliabilityIssueClass(issue: ReliabilityIssue | 'normal') {
+  return issue === 'failed'
       ? 'border-red-200 bg-red-50 text-red-700'
-      : status === 'insufficient'
+      : issue === 'missing_ratio' || issue === 'low_observation'
         ? 'border-amber-200 bg-amber-50 text-amber-700'
-        : status === 'risk_attention'
+        : issue === 'risk_attention'
           ? 'border-orange-200 bg-orange-50 text-orange-700'
           : 'border-emerald-200 bg-emerald-50 text-emerald-700';
+}
+
+function ReliabilityStatusBadges({ issues }: { issues: ReliabilityIssue[] }) {
+  const visibleIssues: Array<ReliabilityIssue | 'normal'> = issues.length ? issues : ['normal'];
 
   return (
-    <span className={cx('inline-flex rounded-md border px-2 py-1 text-xs font-bold', className)}>
-      {reliabilityRowStatusLabel(status)}
-    </span>
+    <div className="flex min-w-[180px] flex-wrap gap-1.5">
+      {visibleIssues.map((issue) => (
+        <span
+          className={cx('inline-flex rounded-md border px-2 py-1 text-xs font-bold', reliabilityIssueClass(issue))}
+          key={issue}
+        >
+          {reliabilityIssueLabel(issue)}
+        </span>
+      ))}
+    </div>
   );
 }
 
