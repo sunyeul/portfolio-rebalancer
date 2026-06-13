@@ -707,7 +707,7 @@ wheels = [
 ]
 
 [[package]]
-name = "portfolio-rebalancer"
+name = "ips-pilot"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

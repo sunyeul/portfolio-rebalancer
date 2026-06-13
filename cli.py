@@ -1,4 +1,4 @@
-"""Agent-oriented Typer CLI for the portfolio rebalancer."""
+"""Agent-oriented Typer CLI for IPS Pilot."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ from utils.metrics import annualize_cov
 
 
 app = typer.Typer(
-    help="Portfolio rebalancer CLI optimized for agent-readable JSON output.",
+    help="IPS Pilot CLI optimized for monthly IPS review and agent-readable JSON output.",
     no_args_is_help=True,
 )
 portfolios_app = typer.Typer(help="Inspect saved portfolios.")

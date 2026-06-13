@@ -1,4 +1,4 @@
-"""FastAPI entrypoint for the portfolio rebalancer JSON API."""
+"""FastAPI entrypoint for the IPS Pilot JSON API."""
 
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="포트폴리오 리밸런서", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="IPS Pilot", version="0.1.0", lifespan=lifespan)
 app.include_router(api_v1_router)
 
 FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"

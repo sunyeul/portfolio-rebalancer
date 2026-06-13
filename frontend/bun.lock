@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "portfolio-rebalancer-frontend",
+      "name": "ips-pilot-frontend",
       "dependencies": {
         "@tanstack/react-query": "^5.90.12",
         "@tanstack/react-table": "^8.21.3",

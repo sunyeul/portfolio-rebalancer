@@ -1,7 +1,7 @@
 [project]
-name = "portfolio-rebalancer"
+name = "ips-pilot"
 version = "0.1.0"
-description = "Add your description here"
+description = "IPS-based monthly investment operations workbench"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -20,6 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
+ips-pilot = "cli:app"
 portfolio-rebalancer = "cli:app"
 
 [build-system]
