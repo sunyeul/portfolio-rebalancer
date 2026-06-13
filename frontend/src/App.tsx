@@ -34,9 +34,12 @@ import {
   type CounterfactualScenario,
   type EvaluationResponse,
   type IpsRule,
+  type JournalEntry,
   type MetricRow,
+  type OperatingItem,
   type PlaybookRecommendation,
   type ProposalRow,
+  type RiskFlag,
   type SnapshotLoadResponse,
   type SnapshotSummary,
   type TargetAllocation,
@@ -46,6 +49,7 @@ import {
   getConfigOptions,
   getCurrentState,
   getIpsConfig,
+  getJournal,
   getSnapshot,
   listPortfolios,
   listSnapshots,
@@ -56,6 +60,7 @@ import {
   runEvaluation,
   saveCurrentState,
   saveIpsRules,
+  saveJournal,
   saveSnapshot,
   saveTargetAllocations,
   submitPortfolio,
@@ -434,6 +439,224 @@ function PlaybookPanel({ playbook }: { playbook?: PlaybookRecommendation | null 
   );
 }
 
+function OperatingItemList({
+  title,
+  items,
+  emptyLabel,
+}: {
+  title: string;
+  items: OperatingItem[];
+  emptyLabel: string;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h4 className="text-sm font-bold text-slate-800">{title}</h4>
+        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
+          {items.length}건
+        </span>
+      </div>
+      {items.length === 0 ? (
+        <p className="mt-3 text-sm font-semibold text-slate-500">{emptyLabel}</p>
+      ) : (
+        <div className="mt-3 grid gap-3">
+          {items.map((item, index) => (
+            <div key={`${item.ticker ?? 'item'}-${item.ips_action ?? title}-${index}`} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <strong className="text-sm text-slate-950">{item.ticker ?? 'N/A'}</strong>
+                <span className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-600">
+                  {item.label ?? item.ips_action ?? '점검'}
+                </span>
+                <span className="text-xs font-semibold text-slate-500">
+                  {groupLabel(item.group)} · 갭 {signedPct(item.gap_pct, false)}
+                </span>
+              </div>
+              <p className="mt-2 text-sm font-semibold text-slate-700">
+                {item.decision_summary ?? '점검 사유가 없습니다.'}
+              </p>
+              {item.next_step && (
+                <p className="mt-1 text-xs font-semibold text-slate-500">{item.next_step}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IpsStatusPanel({ evaluation }: { evaluation: EvaluationResponse }) {
+  const status = evaluation.ips_status;
+  if (!status) return null;
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <span className="block text-sm font-semibold text-slate-500">상태</span>
+        <strong className="mt-2 block text-2xl font-bold text-slate-950">
+          {status.status_label ?? status.status}
+        </strong>
+        {status.status_description && (
+          <span className="mt-2 block text-xs font-semibold leading-5 text-slate-500">
+            {status.status_description}
+          </span>
+        )}
+      </div>
+      <MetricCard label="DCA 증액 후보" value={status.summary.dca_increase_count} format="number" />
+      <MetricCard label="DCA 축소/중단" value={status.summary.dca_reduce_or_pause_count} format="number" />
+      <MetricCard label="검토 큐" value={status.summary.review_count} format="number" />
+      <MetricCard label="위험 플래그" value={status.summary.risk_flag_count} format="number" />
+    </div>
+  );
+}
+
+function DcaPlanPanel({ evaluation }: { evaluation: EvaluationResponse }) {
+  const plan = evaluation.dca_plan ?? { increase: [], reduce_or_pause: [], hold: [] };
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="mb-5">
+        <h3 className="text-xl font-semibold text-slate-950">DCA Plan</h3>
+        <p className="mt-2 text-sm font-semibold text-slate-500">
+          다음 정기매수에서 조정할 후보만 분리합니다. 즉시 주문 지시로 해석하지 않습니다.
+        </p>
+      </div>
+      <div className="grid gap-4 xl:grid-cols-3">
+        <OperatingItemList title="정기매수 증액 후보" items={plan.increase} emptyLabel="증액 후보가 없습니다." />
+        <OperatingItemList title="정기매수 축소·중단 후보" items={plan.reduce_or_pause} emptyLabel="축소·중단 후보가 없습니다." />
+        <OperatingItemList title="유지·관찰" items={plan.hold} emptyLabel="유지·관찰 항목이 없습니다." />
+      </div>
+    </section>
+  );
+}
+
+function ReviewQueuePanel({ evaluation }: { evaluation: EvaluationResponse }) {
+  const queue = evaluation.review_queue ?? { thesis_review: [], risk_review: [], sell_review: [], blocked: [] };
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="mb-5">
+        <h3 className="text-xl font-semibold text-slate-950">Review Queue</h3>
+        <p className="mt-2 text-sm font-semibold text-slate-500">
+          사람이 투자 논리, 위험, 예외적 리밸런싱 필요성을 확인할 항목입니다.
+        </p>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <OperatingItemList title="투자 논리 점검" items={queue.thesis_review} emptyLabel="투자 논리 점검 항목이 없습니다." />
+        <OperatingItemList title="위험 관리 점검" items={queue.risk_review} emptyLabel="위험 관리 점검 항목이 없습니다." />
+        <OperatingItemList title="예외적 리밸런싱 검토" items={queue.sell_review} emptyLabel="예외적 리밸런싱 검토 항목이 없습니다." />
+        <OperatingItemList title="행동 보류" items={queue.blocked} emptyLabel="행동 보류 항목이 없습니다." />
+      </div>
+    </section>
+  );
+}
+
+function RiskCheckPanel({ riskFlags }: { riskFlags: RiskFlag[] }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="mb-5 flex items-center gap-3">
+        <div className="grid h-8 w-8 place-items-center rounded-lg bg-red-100 text-red-800">
+          <AlertCircle className="h-4 w-4" />
+        </div>
+        <div>
+          <h3 className="text-xl font-semibold text-slate-950">Risk Check</h3>
+          <p className="mt-1 text-sm font-semibold text-slate-500">위험기여도, 데이터 품질, 누락 티커를 별도 점검합니다.</p>
+        </div>
+      </div>
+      {riskFlags.length === 0 ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800">
+          별도 위험 플래그가 없습니다.
+        </div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2">
+          {riskFlags.map((flag, index) => (
+            <div key={`${flag.type}-${flag.ticker ?? index}`} className="rounded-lg border border-red-100 bg-red-50 p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <strong className="text-sm text-red-950">{flag.ticker ?? flag.type_label ?? flag.type}</strong>
+                <span className="rounded-md border border-red-100 bg-white px-2 py-1 text-xs font-bold text-red-700">
+                  {flag.type_label ?? flag.type}
+                </span>
+                <span className="rounded-md bg-white px-2 py-1 text-xs font-bold text-red-700">
+                  {flag.severity_label ?? flag.severity}
+                </span>
+              </div>
+              <p className="mt-2 text-sm font-semibold text-red-900">{flag.message}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function todayText() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function JournalPanel({
+  activeSnapshotId,
+  evaluation,
+  journal,
+  note,
+  setNote,
+  onSave,
+  isSaving,
+}: {
+  activeSnapshotId: number | null;
+  evaluation: EvaluationResponse;
+  journal: JournalEntry | null | undefined;
+  note: string;
+  setNote: (value: string) => void;
+  onSave: () => void;
+  isSaving: boolean;
+}) {
+  const plan = evaluation.dca_plan ?? { increase: [], reduce_or_pause: [], hold: [] };
+  const queue = evaluation.review_queue ?? { thesis_review: [], risk_review: [], sell_review: [], blocked: [] };
+  const dcaCount = plan.increase.length + plan.reduce_or_pause.length;
+  const reviewCount = queue.thesis_review.length + queue.risk_review.length + queue.sell_review.length + queue.blocked.length;
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h3 className="text-xl font-semibold text-slate-950">Journal</h3>
+          <p className="mt-2 text-sm font-semibold text-slate-500">
+            이번 점검에서 검토한 정기매수 조정 후보와 Review Queue를 판단 기록으로 남깁니다.
+          </p>
+        </div>
+        <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-bold text-slate-600">
+          {journal ? `저장됨 ${journal.updated_at}` : '미저장'}
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <span className="block text-sm font-semibold text-slate-500">기록일</span>
+          <strong className="mt-2 block text-2xl font-bold text-slate-950">{journal?.date ?? todayText()}</strong>
+        </div>
+        <MetricCard label="DCA 검토" value={dcaCount} format="number" />
+        <MetricCard label="큐 검토" value={reviewCount} format="number" />
+      </div>
+      <textarea
+        className="mt-4 min-h-28 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
+        placeholder="판단 메모를 입력하세요."
+      />
+      <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <p className="text-sm font-semibold text-slate-500">
+          {activeSnapshotId === null ? '스냅샷을 저장하거나 불러온 뒤 Journal을 저장할 수 있습니다.' : `snapshot_id ${activeSnapshotId}에 저장됩니다.`}
+        </p>
+        <button
+          type="button"
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          onClick={onSave}
+          disabled={activeSnapshotId === null || isSaving}
+        >
+          {isSaving ? <Loader2 className="spin h-4 w-4" /> : <Save className="h-4 w-4" />}
+          기록 저장
+        </button>
+      </div>
+    </section>
+  );
+}
+
 type HoldingsFilter = 'all' | 'core' | 'satellite' | 'execute';
 
 type HoldingOverviewRow = {
@@ -673,7 +896,7 @@ function PortfolioHoldingsOverview({
                 <th className="px-4 py-3 text-right">기간 수익률</th>
                 <th className="px-4 py-3 text-right">위험기여도</th>
                 <th className="px-4 py-3 text-right">IPS 적합도</th>
-                <th className="px-4 py-3">권장 액션</th>
+                <th className="px-4 py-3">IPS 상태</th>
               </tr>
             </thead>
             <tbody>
@@ -870,6 +1093,7 @@ export function App() {
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<number | null>(null);
   const [newPortfolioName, setNewPortfolioName] = useState('');
   const [snapshotName, setSnapshotName] = useState('');
+  const [activeSnapshotId, setActiveSnapshotId] = useState<number | null>(null);
   const [editingSnapshotId, setEditingSnapshotId] = useState<number | null>(null);
   const [editingSnapshotName, setEditingSnapshotName] = useState('');
   const [editingSnapshotNote, setEditingSnapshotNote] = useState('');
@@ -880,6 +1104,7 @@ export function App() {
   const [targetAllocationRows, setTargetAllocationRows] = useState<TargetAllocation[]>([]);
   const [actionPriorityRows, setActionPriorityRows] = useState<ActionPriority[]>([]);
   const [rulesJson, setRulesJson] = useState('[]');
+  const [journalNote, setJournalNote] = useState('');
 
   const configOptionsQuery = useQuery({
     queryKey: ['config-options'],
@@ -908,6 +1133,12 @@ export function App() {
     queryKey: ['portfolio-current-state', selectedPortfolioId],
     queryFn: () => getCurrentState(selectedPortfolioId as number),
     enabled: selectedPortfolioId !== null,
+    retry: false
+  });
+  const journalQuery = useQuery({
+    queryKey: ['snapshot-journal', activeSnapshotId],
+    queryFn: () => getJournal(activeSnapshotId as number),
+    enabled: activeSnapshotId !== null,
     retry: false
   });
   const savedSnapshots = snapshotsQuery.data?.snapshots ?? [];
@@ -980,6 +1211,7 @@ export function App() {
     setCounterfactual(null);
     setBacktest(null);
     setSelectedPortfolioId(data.snapshot.portfolio_id);
+    setActiveSnapshotId(data.snapshot.id);
     await queryClient.invalidateQueries({
       queryKey: ['portfolio-current-state', data.snapshot.portfolio_id]
     });
@@ -997,6 +1229,7 @@ export function App() {
       setEvaluation(null);
       setCounterfactual(null);
       setBacktest(null);
+      setActiveSnapshotId(null);
       setWorkbenchMode('prepare');
       await persistCurrentState();
     }
@@ -1009,6 +1242,7 @@ export function App() {
       setEvaluation(null);
       setCounterfactual(null);
       setBacktest(null);
+      setActiveSnapshotId(null);
       setWorkbenchMode('prepare');
       await persistCurrentState();
     }
@@ -1022,6 +1256,36 @@ export function App() {
       setBacktest(null);
       setWorkbenchMode('review');
       await persistCurrentState();
+    }
+  });
+
+  useEffect(() => {
+    setJournalNote(journalQuery.data?.journal?.decision_note ?? '');
+  }, [journalQuery.data]);
+
+  const saveJournalMutation = useMutation({
+    mutationFn: async () => {
+      if (activeSnapshotId === null || !evaluation) {
+        throw new Error('Journal을 저장할 스냅샷과 평가 결과가 필요합니다.');
+      }
+      const plan = evaluation.dca_plan ?? { increase: [], reduce_or_pause: [], hold: [] };
+      const queue = evaluation.review_queue ?? { thesis_review: [], risk_review: [], sell_review: [], blocked: [] };
+      return saveJournal(activeSnapshotId, {
+        date: journalQuery.data?.journal?.date ?? todayText(),
+        decision_context: settings.decisionContext,
+        playbook_code: evaluation.playbook?.code ?? null,
+        dca_changes_considered: [...plan.increase, ...plan.reduce_or_pause],
+        review_items: [
+          ...queue.thesis_review,
+          ...queue.risk_review,
+          ...queue.sell_review,
+          ...queue.blocked
+        ],
+        decision_note: journalNote
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['snapshot-journal', activeSnapshotId] });
     }
   });
 
@@ -1044,6 +1308,7 @@ export function App() {
     onSuccess: async (data) => {
       setNewPortfolioName('');
       setSelectedPortfolioId(data.portfolio.id);
+      setActiveSnapshotId(null);
       await queryClient.invalidateQueries({ queryKey: ['portfolios'] });
     }
   });
@@ -1061,8 +1326,9 @@ export function App() {
         name: snapshotName || undefined
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (data) => {
       setSnapshotName('');
+      setActiveSnapshotId(data.snapshot.id);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['portfolios'] }),
         queryClient.invalidateQueries({ queryKey: ['portfolio-snapshots', selectedPortfolioId] }),
@@ -1083,6 +1349,7 @@ export function App() {
     },
     onSuccess: async (data) => {
       setSnapshotName('');
+      setActiveSnapshotId(data.snapshot.id);
       setEditingSnapshotId(data.snapshot.id);
       setEditingSnapshotName(data.snapshot.name);
       setEditingSnapshotNote(data.snapshot.note);
@@ -1139,6 +1406,7 @@ export function App() {
       setEditingSnapshotName('');
       setEditingSnapshotNote('');
       setEditingSnapshotRows([]);
+      if (activeSnapshotId === deletingSnapshotId) setActiveSnapshotId(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['portfolios'] }),
         queryClient.invalidateQueries({ queryKey: ['portfolio-snapshots', selectedPortfolioId] })
@@ -1239,29 +1507,6 @@ export function App() {
   const performanceSummary = useMemo(
     () => (evaluation ? supportingSignalSummary(evaluation, currentEThresh) : null),
     [currentEThresh, evaluation]
-  );
-
-  const actionSummaryColumns = useMemo<ColumnDef<Record<string, unknown>>[]>(
-    () => [
-      { accessorKey: 'ticker', header: '티커' },
-      {
-        id: 'next_step',
-        header: '다음 단계',
-        cell: ({ row }) => (
-          <div className="max-w-[520px] whitespace-normal">
-            <div className="font-bold text-slate-900">{textFromRecord(row.original, 'next_step')}</div>
-            <div className="mt-1 text-xs font-semibold text-slate-500">{textFromRecord(row.original, 'decision_summary')}</div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {supportingSignalsFromAction(row.original, currentEThresh).map((signal) => (
-                <SupportingSignalChip key={`${textFromRecord(row.original, 'ticker')}-${signal.label}`} signal={signal} />
-              ))}
-            </div>
-          </div>
-        )
-      },
-      { accessorKey: '제안조정%', header: '조정폭', cell: ({ row }) => pct(valueFromRecord(row.original, '제안조정%'), false) }
-    ],
-    [currentEThresh]
   );
 
   const performanceColumns = useMemo<ColumnDef<ProposalRow>[]>(
@@ -1704,7 +1949,10 @@ export function App() {
               <select
                 className="table-input"
                 value={selectedPortfolioId ?? ''}
-                onChange={(event) => setSelectedPortfolioId(event.target.value ? Number(event.target.value) : null)}
+                onChange={(event) => {
+                  setSelectedPortfolioId(event.target.value ? Number(event.target.value) : null);
+                  setActiveSnapshotId(null);
+                }}
               >
                 <option value="">포트폴리오 선택</option>
                 {savedPortfolios.map((item) => (
@@ -2145,7 +2393,7 @@ export function App() {
                     <div>
                       <strong className="block font-bold">최근 평가가 준비되어 있습니다.</strong>
                       <span className="mt-1 block">
-                        최종 판단, 권장 액션, 보유 현황 요약은 결과 보기에서 확인합니다.
+                        IPS 상태, DCA Plan, Review Queue는 결과 보기에서 확인합니다.
                       </span>
                     </div>
                     <button
@@ -2159,7 +2407,7 @@ export function App() {
                 )}
                 {!evaluation && (
                   <div className="mt-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-600">
-                    포지션 입력과 분석을 마친 뒤 평가를 실행하면 플레이북과 액션 요약이 표시됩니다.
+                    포지션 입력과 분석을 마친 뒤 평가를 실행하면 플레이북과 점검 큐가 표시됩니다.
                   </div>
                 )}
               </section>
@@ -2177,7 +2425,7 @@ export function App() {
                     <section className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
                       <h3 className="text-xl font-semibold text-slate-900">평가 실행 후 결과를 확인할 수 있습니다</h3>
                       <p className="mx-auto mt-2 max-w-2xl text-sm font-semibold text-slate-500">
-                        포지션 입력, 데이터 조회, 평가 실행을 마치면 최종 판단과 액션 요약이 이 화면에 표시됩니다.
+                        포지션 입력, 데이터 조회, 평가 실행을 마치면 IPS 상태와 점검 큐가 이 화면에 표시됩니다.
                       </p>
                       <button
                         type="button"
@@ -2192,21 +2440,24 @@ export function App() {
                       <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
                         <div className="mb-5 flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
                           <div>
-                            <h3 className="text-xl font-semibold text-slate-950">최종 판단 요약</h3>
+                            <h3 className="text-xl font-semibold text-slate-950">IPS Status / Playbook</h3>
                             <p className="mt-2 text-sm text-slate-500">
-                              IPS 기준으로 정기매수 조정, 보유 관찰, 투자 논리 재검토 여부를 먼저 확인합니다.
+                              IPS 기준 상태, 위험 플래그 수, 점검 플레이북을 먼저 확인합니다.
                             </p>
                           </div>
                           <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-bold text-slate-600">
                             {decisionContextLabel(settings.decisionContext)} · {resultStatusLabel}
                           </div>
                         </div>
-                        <PlaybookPanel playbook={evaluation.playbook} />
-                        <div className="mt-5">
-                          <h4 className="mb-3 text-sm font-bold text-slate-700">액션 요약</h4>
-                          <DataTable data={evaluation.ips_actions} columns={actionSummaryColumns} emptyLabel="액션 요약이 없습니다." />
+                        <div className="mb-5">
+                          <IpsStatusPanel evaluation={evaluation} />
                         </div>
+                        <PlaybookPanel playbook={evaluation.playbook} />
                       </section>
+
+                      <DcaPlanPanel evaluation={evaluation} />
+                      <ReviewQueuePanel evaluation={evaluation} />
+                      <RiskCheckPanel riskFlags={evaluation.risk_flags ?? []} />
 
               {evaluation ? (
                 <PortfolioHoldingsOverview
@@ -2224,12 +2475,22 @@ export function App() {
                     <div>
                       <h3 className="text-xl font-semibold text-slate-800">포트폴리오 현황 요약</h3>
                       <p className="mt-1 text-sm font-semibold text-slate-500">
-                        평가 완료 후 최종 보유 현황과 권장 액션을 표시합니다.
+                        평가 완료 후 최종 보유 현황과 IPS 상태를 표시합니다.
                       </p>
                     </div>
                   </div>
                 </section>
               )}
+
+                      <JournalPanel
+                        activeSnapshotId={activeSnapshotId}
+                        evaluation={evaluation}
+                        journal={journalQuery.data?.journal}
+                        note={journalNote}
+                        setNote={setJournalNote}
+                        onSave={() => saveJournalMutation.mutate()}
+                        isSaving={saveJournalMutation.isPending}
+                      />
 
                       <details className="rounded-xl border border-slate-200 bg-white shadow-sm">
                         <summary className="cursor-pointer list-none p-6">

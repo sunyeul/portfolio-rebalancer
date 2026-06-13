@@ -83,6 +83,12 @@ export type EvaluationResponse = {
   rc_violations: Array<Record<string, unknown>>;
   ips_config_snapshot?: Record<string, unknown> | null;
   playbook?: PlaybookRecommendation | null;
+  ips_status?: IpsStatus | null;
+  dca_plan?: DcaPlan;
+  review_queue?: ReviewQueue;
+  risk_flags?: RiskFlag[];
+  guardrails?: Guardrails;
+  not_advice_notice?: string;
 };
 
 export type PlaybookRecommendation = {
@@ -93,6 +99,77 @@ export type PlaybookRecommendation = {
   steps: string[];
   manual_context: DecisionContext;
   is_manual_override: boolean;
+};
+
+export type OperatingItem = {
+  ticker: string | null;
+  ips_action: string | null;
+  label: string | null;
+  family: string | null;
+  execution_type: string | null;
+  current_weight_pct: number | null;
+  target_weight_pct: number | null;
+  gap_pct: number | null;
+  group: string | null;
+  ips_fit_score: number | null;
+  ips_fit_band: string | null;
+  risk_over: boolean | null;
+  data_quality_low: boolean | null;
+  decision_summary: string | null;
+  decision_reasons: string[];
+  risk_notes: string[];
+  next_step: string | null;
+  blocked_reason: string | null;
+};
+
+export type DcaPlan = {
+  increase: OperatingItem[];
+  reduce_or_pause: OperatingItem[];
+  hold: OperatingItem[];
+};
+
+export type ReviewQueue = {
+  thesis_review: OperatingItem[];
+  risk_review: OperatingItem[];
+  sell_review: OperatingItem[];
+  blocked: OperatingItem[];
+};
+
+export type RiskFlag = {
+  type: string;
+  type_code?: string;
+  type_label?: string;
+  ticker?: string | null;
+  severity: string;
+  severity_code?: string;
+  severity_label?: string;
+  message: string;
+  current_rc_pct?: number | null;
+  rc_cap_pct?: number | null;
+  rc_over_pct?: number | null;
+  missing_ratio?: number | null;
+  observation_count?: number | null;
+};
+
+export type IpsStatus = {
+  status: string;
+  status_code?: string;
+  status_label?: string;
+  status_description?: string;
+  summary: {
+    dca_increase_count: number;
+    dca_reduce_or_pause_count: number;
+    hold_count: number;
+    review_count: number;
+    risk_flag_count: number;
+  };
+  group_summary: Array<Record<string, unknown>>;
+  top_risk_contributors: MetricRow[];
+};
+
+export type Guardrails = {
+  not_investment_advice: boolean;
+  no_immediate_order_instruction: boolean;
 };
 
 export type CounterfactualScenario =
@@ -261,6 +338,19 @@ export type SnapshotLoadResponse = {
   evaluation: EvaluationResponse | null;
 };
 
+export type JournalEntry = {
+  id: number;
+  snapshot_id: number;
+  date: string;
+  decision_context: DecisionContext;
+  playbook_code: string | null;
+  dca_changes_considered: OperatingItem[];
+  review_items: OperatingItem[];
+  decision_note: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type CurrentStateResponse = {
   portfolio: PortfolioResponse;
   analysis: AnalysisResponse | null;
@@ -414,6 +504,29 @@ export function deleteSnapshot(snapshotId: number) {
 export function loadSnapshot(snapshotId: number) {
   return requestJson<SnapshotLoadResponse>(`/api/v1/portfolios/snapshots/${snapshotId}/load`, {
     method: 'POST'
+  });
+}
+
+export function getJournal(snapshotId: number) {
+  return requestJson<{ journal: JournalEntry | null }>(`/api/v1/journal/snapshots/${snapshotId}`, {
+    method: 'GET'
+  });
+}
+
+export function saveJournal(
+  snapshotId: number,
+  payload: {
+    date: string;
+    decision_context: DecisionContext;
+    playbook_code?: string | null;
+    dca_changes_considered: OperatingItem[];
+    review_items: OperatingItem[];
+    decision_note: string;
+  }
+) {
+  return requestJson<{ journal: JournalEntry }>(`/api/v1/journal/snapshots/${snapshotId}`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
   });
 }
 
