@@ -27,23 +27,47 @@ uv run ips-pilot snapshots list --portfolio-id <portfolio_id>
 
 3. If the user asks for `latest`, choose the newest snapshot from `snapshots list`. Prefer the newest `created_at`; if timestamps are missing or tied, use the largest `id`. Always include the actual `snapshot_id` in the final response.
 
-4. Evaluate with the current CLI contract:
+4. Use the agent-facing brief by default:
 
 ```bash
-uv run ips-pilot evaluate --snapshot-id <snapshot_id>
+uv run ips-pilot agent-brief --snapshot-id <snapshot_id>
 ```
 
 Use optional existing flags only when the user asks for them or the review context requires them, for example:
 
 ```bash
-uv run ips-pilot evaluate --snapshot-id <snapshot_id> --decision-context regular_review
+uv run ips-pilot agent-brief --snapshot-id <snapshot_id> --decision-context regular_review
 ```
 
 If a requested context is not accepted by the CLI, rerun with the closest supported context and state the fallback.
 
+Use `evaluate` only when the user asks for full raw analysis, compatibility fields, CSV artifacts, or report generation:
+
+```bash
+uv run ips-pilot evaluate --snapshot-id <snapshot_id> --output-dir /tmp/ips_pilot_eval_<snapshot_id>
+```
+
+Use narrower commands when the user asks for only one surface:
+
+```bash
+uv run ips-pilot diagnose --snapshot-id <snapshot_id>
+uv run ips-pilot dca-plan --snapshot-id <snapshot_id>
+uv run ips-pilot review-queue --snapshot-id <snapshot_id>
+uv run ips-pilot risk --snapshot-id <snapshot_id>
+```
+
 ## JSON Fields To Read
 
-Read these fields first:
+For `agent-brief`, read fields in this order:
+
+- `ips_status`: overall status, counts, group summary, and top risk contributors. Use `status_code` for branching and `status_label`/`status_description` for user-facing text.
+- `risk_flags`: data quality, missing ticker, risk contribution, or risk-over warnings. Use `type_code`/`severity_code` for branching and `type_label`/`severity_label` for user-facing text.
+- `review_queue`: thesis, risk, sell-review, and blocked items that need human review.
+- `dca_plan`: regular purchase increase, reduce/pause, or hold candidates.
+- `playbook`: current IPS review frame, confidence, reasons, and steps.
+- `guardrails`: confirms this is not investment advice and follows the no immediate buy/sell rule.
+
+For legacy `evaluate`, read these fields first:
 
 - `evaluation.playbook`: current review frame, confidence, reasons, and steps.
 - `evaluation.ips_actions`: primary IPS action table and action metadata.
@@ -72,6 +96,8 @@ Risk Flags should include rows from `rc_violations`, any `risk_over` rows, and n
 
 Data Quality Flags should include `missing_tickers`, `low_quality_rows`, `data_quality_low`, high `missing_ratio`, low `observation_count`, and `block_action` rows caused by data quality.
 
+For `agent-brief`, these buckets are already present as `dca_plan`, `review_queue`, and `risk_flags`. Use the table above only to explain or verify the classification.
+
 ## Response Contract
 
 Use this order for a normal review:
@@ -88,13 +114,44 @@ Use concise Korean by default when the user writes in Korean.
 ## Safety Rules
 
 - Do not call CLI output investment advice.
-- Do not generate buy or sell instructions.
+- Follow the no immediate buy/sell rule: do not generate buy or sell instructions.
 - Treat DCA Plan as "next regular-purchase adjustment candidates" only.
 - Keep Review Queue items as human verification tasks.
 - Treat `rebalance_sell_review` as review only, never as a sell instruction.
 - Treat immediate buy/sell language as exceptional and avoid it unless the CLI explicitly frames an item that way and the user asks for that framing.
 - Ask for confirmation before changing snapshots, config, journal entries, files, or persistent app state.
 - If data quality is weak, prefer hold, observe, thesis review, or data verification language.
+
+## Prompt Templates
+
+Monthly review:
+
+```text
+Run `uv run ips-pilot agent-brief --snapshot-id <id>`.
+Summarize IPS status in this order: risk_flags, review_queue, dca_plan, playbook.
+Do not give immediate buy/sell instructions. Frame any action as a regular purchase adjustment candidate or review item.
+```
+
+Weekly check:
+
+```text
+Run `uv run ips-pilot agent-brief --snapshot-id <id> --decision-context regular_review`.
+Look only for new risk flags, blocked items, or thesis review items. Avoid changing DCA language unless the brief explicitly shows DCA candidates.
+```
+
+Quarterly IPS review:
+
+```text
+Run `uv run ips-pilot agent-brief --snapshot-id <id> --decision-context rebalance_review`.
+Compare group_summary, risk_flags, review_queue, and dca_plan. Discuss whether IPS settings or thesis notes need review, without phrasing output as a trade order.
+```
+
+Sharp-drop review:
+
+```text
+Run `uv run ips-pilot agent-brief --snapshot-id <id> --decision-context sharp_drop_review`.
+Check whether the playbook and review_queue require thesis review before any DCA adjustment. Do not treat price drops as standalone buy reasons.
+```
 
 ## When Not To Use
 
