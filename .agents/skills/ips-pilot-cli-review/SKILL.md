@@ -41,7 +41,7 @@ uv run ips-pilot agent-brief --snapshot-id <snapshot_id> --decision-context regu
 
 If a requested context is not accepted by the CLI, rerun with the closest supported context and state the fallback.
 
-Use `evaluate` only when the user asks for full raw analysis, compatibility fields, CSV artifacts, or report generation:
+Use `evaluate` only when the user asks for full raw analysis, CSV artifacts, or report generation:
 
 ```bash
 uv run ips-pilot evaluate --snapshot-id <snapshot_id> --output-dir /tmp/ips_pilot_eval_<snapshot_id>
@@ -67,16 +67,16 @@ For `agent-brief`, read fields in this order:
 - `playbook`: current IPS review frame, confidence, reasons, and steps.
 - `guardrails`: confirms this is not investment advice and follows the no immediate buy/sell rule.
 
-For legacy `evaluate`, read these fields first:
+For raw `evaluate`, read these fields only as source data, not as an agent-facing decision contract:
 
 - `evaluation.playbook`: current review frame, confidence, reasons, and steps.
 - `evaluation.ips_actions`: primary IPS action table and action metadata.
 - `evaluation.proposal`: weights, target gaps, data quality, numeric candidates, and action reasons.
 - `evaluation.rc_violations`: explicit risk-contribution cap warnings.
-- `agent_summary.data_quality_warnings`: missing tickers and low-quality rows.
+- `analysis.missing_tickers`: tickers without usable price data.
 - `analysis.portfolio_metrics`: portfolio-level context only, not a trading directive.
 
-Prefer `evaluation.ips_actions` for action labels, summaries, next steps, reason codes, risk notes, and blocked reasons. Use `evaluation.proposal` to add current/target/gap context when useful.
+Prefer `agent-brief` and purpose-built commands for summaries. Use raw `evaluate` only to inspect source rows or generate artifacts; do not infer instructions from `proposal.should_execute`, `buy_list`, or `sell_list`.
 
 ## Interpretation Buckets
 
@@ -87,7 +87,7 @@ Build the user-facing summary from `ips_action` values:
 | `increase_dca` | DCA Plan / increase | "다음 정기매수에서 늘릴 후보" |
 | `reduce_or_pause_dca` | DCA Plan / reduce_or_pause | "다음 정기매수에서 줄이거나 멈출 후보" |
 | `hold_observe` | DCA Plan / hold | "유지/관찰" |
-| `review_before_action` | Review Queue | "실행 전 사람이 확인할 항목" |
+| `review_before_action` | Review Queue | "정기매수 반영 전 사람이 확인할 항목" |
 | `risk_control_review` | Review Queue and Risk Flags | "위험 관리 점검 항목" |
 | `rebalance_sell_review` | Review Queue | "예외적 리밸런싱 매도 검토 항목" |
 | `block_action` | Review Queue and Data Quality Flags | "행동 보류/차단 항목" |

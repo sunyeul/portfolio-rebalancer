@@ -154,8 +154,12 @@ def test_evaluate_text_outputs_agent_readable_json(monkeypatch):
     assert payload["input"]["source"] == "text"
     assert payload["input"]["decision_context"] == "market_correction"
     assert captured_kwargs["decision_context"] == "market_correction"
-    assert payload["agent_summary"]["rebalance_needed"] is True
-    assert payload["agent_summary"]["recommended_actions"][0]["ticker"] == "VOO"
+    assert payload["evaluation"]["proposal"][0]["ticker"] == "VOO"
+    assert payload["evaluation"]["proposal"][0]["should_execute"] is True
+    assert payload["saved"]["saved"] is False
+    assert "agent_summary" not in payload
+    assert "rebalance_needed" not in payload
+    assert "recommended_actions" not in payload
     assert payload["error"] is None
 
 

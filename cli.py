@@ -115,7 +115,7 @@ def _exit_with_error(command: str, exc: Exception) -> None:
     else:
         stage = "unexpected"
         message = str(exc)
-        hint = "명령 옵션과 입력 데이터를 확인한 뒤 다시 실행하세요."
+        hint = "명령 옵션과 입력 데이터를 확인한 뒤 다시 시도하세요."
     _emit_json(
         {
             "ok": False,
@@ -124,7 +124,6 @@ def _exit_with_error(command: str, exc: Exception) -> None:
             "warnings": [],
             "analysis": None,
             "evaluation": None,
-            "agent_summary": None,
             "artifacts": {},
             "saved": None,
             "error": {
@@ -255,47 +254,6 @@ def _records_to_csv(
     return str(path)
 
 
-def _agent_summary(
-    proposal: list[dict[str, Any]],
-    metrics: list[dict[str, Any]],
-    missing_tickers: list[str],
-) -> dict[str, Any]:
-    recommended = [row for row in proposal if row.get("should_execute") is True]
-    hold = [row for row in proposal if row.get("should_execute") is not True]
-    data_quality = [
-        row
-        for row in proposal
-        if row.get("data_quality_low")
-        or (row.get("missing_ratio") is not None and row.get("missing_ratio") > 0.2)
-        or (
-            row.get("observation_count") is not None
-            and row.get("observation_count") < 60
-        )
-    ]
-    top_risk = sorted(
-        metrics,
-        key=lambda row: row.get("risk_contribution") or 0,
-        reverse=True,
-    )[:5]
-    if missing_tickers or data_quality:
-        health = "data_insufficient"
-    elif recommended:
-        health = "needs_review"
-    else:
-        health = "ok"
-    return {
-        "portfolio_health": health,
-        "rebalance_needed": bool(recommended),
-        "recommended_actions": recommended,
-        "hold_actions": hold,
-        "data_quality_warnings": {
-            "missing_tickers": missing_tickers,
-            "low_quality_rows": data_quality,
-        },
-        "top_risk_contributors": top_risk,
-    }
-
-
 def _empty_agent_brief(
     command: str,
     error: dict[str, Any] | None = None,
@@ -317,7 +275,7 @@ def _exit_agent_brief_with_error(command: str, exc: Exception) -> None:
     else:
         stage = "unexpected"
         message = str(exc)
-        hint = "명령 옵션과 입력 데이터를 확인한 뒤 다시 실행하세요."
+        hint = "명령 옵션과 입력 데이터를 확인한 뒤 다시 시도하세요."
     _emit_json(
         _empty_agent_brief(
             command,
@@ -679,10 +637,6 @@ def evaluate(
                     "playbook": evaluation.playbook,
                 },
                 "simulation": simulation,
-                "agent_summary": {
-                    **_agent_summary(proposal, metrics, analysis.missing_tickers),
-                    "save_status": saved,
-                },
                 "artifacts": artifacts,
                 "saved": saved,
                 "error": None,
