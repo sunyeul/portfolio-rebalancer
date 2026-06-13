@@ -1,0 +1,4 @@
+interface:
+  display_name: "IPS Pilot CLI Review"
+  short_description: "Use IPS Pilot CLI for safe snapshot reviews"
+  default_prompt: "Use $ips-pilot-cli-review to review the latest IPS Pilot snapshot with conservative DCA Plan and Review Queue language."
