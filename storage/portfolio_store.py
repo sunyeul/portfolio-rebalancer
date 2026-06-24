@@ -321,13 +321,9 @@ def list_snapshots(portfolio_id: int) -> list[dict[str, Any]]:
                 s.note,
                 s.created_at,
                 s.updated_at,
-                COUNT(pos.id) AS position_count,
-                CASE WHEN ar.id IS NULL THEN 0 ELSE 1 END AS has_analysis,
-                CASE WHEN er.id IS NULL THEN 0 ELSE 1 END AS has_evaluation
+                COUNT(pos.id) AS position_count
             FROM portfolio_snapshots s
             LEFT JOIN snapshot_positions pos ON pos.snapshot_id = s.id
-            LEFT JOIN analysis_runs ar ON ar.snapshot_id = s.id
-            LEFT JOIN evaluation_runs er ON er.snapshot_id = s.id
             WHERE s.portfolio_id = ?
             GROUP BY s.id
             ORDER BY s.updated_at DESC, s.id DESC
@@ -346,8 +342,6 @@ def _snapshot_summary(row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "position_count": row["position_count"],
-        "has_analysis": bool(row["has_analysis"]),
-        "has_evaluation": bool(row["has_evaluation"]),
     }
 
 
@@ -374,8 +368,6 @@ def create_snapshot(
         )
         snapshot_id = int(cursor.lastrowid)
         _insert_positions(conn, snapshot_id, asset_rows)
-        _insert_analysis(conn, snapshot_id, session_data)
-        _insert_evaluation(conn, snapshot_id, session_data)
         conn.execute(
             "UPDATE portfolios SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (portfolio_id,),
@@ -409,14 +401,6 @@ def update_snapshot(
             (next_name, next_note, snapshot_id),
         )
         if asset_rows is not None:
-            conn.execute(
-                "DELETE FROM analysis_runs WHERE snapshot_id = ?",
-                (snapshot_id,),
-            )
-            conn.execute(
-                "DELETE FROM evaluation_runs WHERE snapshot_id = ?",
-                (snapshot_id,),
-            )
             conn.execute(
                 "DELETE FROM snapshot_positions WHERE snapshot_id = ?",
                 (snapshot_id,),
@@ -486,118 +470,6 @@ def _insert_positions(conn, snapshot_id: int, asset_rows: list[dict[str, Any]]) 
         )
 
 
-def _insert_analysis(
-    conn,
-    snapshot_id: int,
-    session_data: dict[str, Any],
-) -> int | None:
-    metrics_rows = session_data.get("metrics_df")
-    if not metrics_rows:
-        return None
-
-    settings = session_data.get("analysis_settings") or {}
-    cursor = conn.execute(
-        """
-        INSERT INTO analysis_runs (
-            snapshot_id,
-            period,
-            rf,
-            bench,
-            portfolio_metrics_json,
-            benchmark_metrics_json,
-            missing_tickers_json,
-            returns_smooth_json
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            snapshot_id,
-            str(settings.get("period")) if settings.get("period") is not None else None,
-            settings.get("rf"),
-            settings.get("bench"),
-            _json_dump(session_data.get("portfolio_metrics")),
-            _json_dump(session_data.get("benchmark_metrics")),
-            _json_dump(session_data.get("missing_tickers", [])),
-            _json_dump(session_data.get("returns_smooth")),
-        ),
-    )
-    analysis_run_id = int(cursor.lastrowid)
-    for row in metrics_rows:
-        ticker = row.get("ticker")
-        asset_id = _ensure_asset(conn, ticker) if ticker else None
-        conn.execute(
-            """
-            INSERT INTO analysis_metrics (
-                analysis_run_id,
-                asset_id,
-                ticker,
-                cagr,
-                volatility,
-                sharpe,
-                max_drawdown,
-                information_ratio,
-                beta,
-                alpha,
-                risk_contribution,
-                return_contribution,
-                weight,
-                efficiency_score,
-                return_total,
-                record_json
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                analysis_run_id,
-                asset_id,
-                ticker,
-                row.get("CAGR"),
-                row.get("변동성"),
-                row.get("샤프"),
-                row.get("최대낙폭"),
-                row.get("IR"),
-                row.get("베타"),
-                row.get("알파"),
-                row.get("위험기여도"),
-                row.get("수익기여도"),
-                row.get("가중치"),
-                row.get("E"),
-                row.get("return_total"),
-                _json_dump(row),
-            ),
-        )
-    return analysis_run_id
-
-
-def _insert_evaluation(
-    conn,
-    snapshot_id: int,
-    session_data: dict[str, Any],
-) -> None:
-    evaluation_v2 = session_data.get("evaluation_v2")
-    if not evaluation_v2:
-        return
-
-    settings = session_data.get("evaluation_settings") or {}
-    conn.execute(
-        """
-        INSERT INTO evaluation_runs (
-            snapshot_id,
-            target_weights_json,
-            ips_config_snapshot_json,
-            playbook_json
-        )
-        VALUES (?, ?, ?, ?)
-        """,
-        (
-            snapshot_id,
-            _json_dump(settings),
-            _json_dump(session_data.get("ips_config_snapshot")),
-            _json_dump({"schema": "evaluation_v2", "payload": evaluation_v2}),
-        ),
-    )
-
-
 def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
     initialize_database()
     with connect() as conn:
@@ -610,13 +482,9 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
                 s.note,
                 s.created_at,
                 s.updated_at,
-                COUNT(pos.id) AS position_count,
-                CASE WHEN ar.id IS NULL THEN 0 ELSE 1 END AS has_analysis,
-                CASE WHEN er.id IS NULL THEN 0 ELSE 1 END AS has_evaluation
+                COUNT(pos.id) AS position_count
             FROM portfolio_snapshots s
             LEFT JOIN snapshot_positions pos ON pos.snapshot_id = s.id
-            LEFT JOIN analysis_runs ar ON ar.snapshot_id = s.id
-            LEFT JOIN evaluation_runs er ON er.snapshot_id = s.id
             WHERE s.id = ?
             GROUP BY s.id
             """,
@@ -645,31 +513,6 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
             (snapshot_id,),
         ).fetchall()
 
-        analysis_run = conn.execute(
-            "SELECT * FROM analysis_runs WHERE snapshot_id = ?",
-            (snapshot_id,),
-        ).fetchone()
-        analysis_metrics = []
-        if analysis_run:
-            analysis_metrics = conn.execute(
-                """
-                SELECT record_json
-                FROM analysis_metrics
-                WHERE analysis_run_id = ?
-                ORDER BY id ASC
-                """,
-                (analysis_run["id"],),
-            ).fetchall()
-        evaluation_run = conn.execute(
-            "SELECT * FROM evaluation_runs WHERE snapshot_id = ?",
-            (snapshot_id,),
-        ).fetchone()
-        evaluation_v2_payload = None
-        if evaluation_run:
-            maybe_v2 = _json_load(evaluation_run["playbook_json"], None)
-            if isinstance(maybe_v2, dict) and maybe_v2.get("schema") == "evaluation_v2":
-                evaluation_v2_payload = maybe_v2.get("payload")
-
     session_state = {
         "asset_df": [
             {
@@ -685,46 +528,10 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
             for row in positions
         ]
     }
-    analysis_payload = None
-    if analysis_run:
-        session_state.update(
-            {
-                "metrics_df": [_json_load(row["record_json"]) for row in analysis_metrics],
-                "portfolio_metrics": _json_load(
-                    analysis_run["portfolio_metrics_json"], None
-                ),
-                "benchmark_metrics": _json_load(
-                    analysis_run["benchmark_metrics_json"], None
-                ),
-                "missing_tickers": _json_load(
-                    analysis_run["missing_tickers_json"], []
-                ),
-                "returns_smooth": _json_load(analysis_run["returns_smooth_json"], None),
-                "analysis_settings": {
-                    "period": analysis_run["period"],
-                    "rf": analysis_run["rf"],
-                    "bench": analysis_run["bench"],
-                },
-            }
-        )
-        analysis_payload = {
-            "metrics_df": session_state["metrics_df"],
-            "portfolio_metrics": session_state["portfolio_metrics"],
-            "benchmark_metrics": session_state["benchmark_metrics"],
-            "missing_tickers": session_state["missing_tickers"],
-        }
-
-    evaluation_payload = None
-    if evaluation_v2_payload:
-        session_state["evaluation_v2"] = evaluation_v2_payload
-        session_state["evaluation_settings"] = _json_load(
-            evaluation_run["target_weights_json"], {}
-        )
-        evaluation_payload = evaluation_v2_payload
 
     return {
         "summary": _snapshot_summary(summary_row),
         "session_state": session_state,
-        "analysis": analysis_payload,
-        "evaluation": evaluation_payload,
+        "analysis": None,
+        "evaluation": None,
     }

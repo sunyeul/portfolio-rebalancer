@@ -60,6 +60,10 @@ def initialize_database() -> None:
     with connect() as conn:
         conn.executescript(
             """
+            DROP TABLE IF EXISTS analysis_metrics;
+            DROP TABLE IF EXISTS evaluation_runs;
+            DROP TABLE IF EXISTS analysis_runs;
+
             CREATE TABLE IF NOT EXISTS portfolios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -114,48 +118,6 @@ def initialize_database() -> None:
                 thesis_status_id INTEGER NOT NULL REFERENCES thesis_statuses(id),
                 position_order INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(snapshot_id, asset_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS analysis_runs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                snapshot_id INTEGER NOT NULL UNIQUE REFERENCES portfolio_snapshots(id) ON DELETE CASCADE,
-                period TEXT,
-                rf REAL,
-                bench TEXT,
-                portfolio_metrics_json TEXT,
-                benchmark_metrics_json TEXT,
-                missing_tickers_json TEXT,
-                returns_smooth_json TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS analysis_metrics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                analysis_run_id INTEGER NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
-                asset_id INTEGER REFERENCES assets(id),
-                ticker TEXT NOT NULL,
-                cagr REAL,
-                volatility REAL,
-                sharpe REAL,
-                max_drawdown REAL,
-                information_ratio REAL,
-                beta REAL,
-                alpha REAL,
-                risk_contribution REAL,
-                return_contribution REAL,
-                weight REAL,
-                efficiency_score REAL,
-                return_total REAL,
-                record_json TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS evaluation_runs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                snapshot_id INTEGER NOT NULL UNIQUE REFERENCES portfolio_snapshots(id) ON DELETE CASCADE,
-                target_weights_json TEXT,
-                ips_config_snapshot_json TEXT,
-                playbook_json TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS ips_target_allocations (

@@ -88,6 +88,89 @@ def test_snapshot_persists_metadata_without_as_of_date_contract(portfolio_db):
     assert loaded["summary"]["created_at"]
     assert loaded["summary"]["updated_at"]
     assert "as_of_date" not in loaded["summary"]
+    assert "has_analysis" not in loaded["summary"]
+    assert "has_evaluation" not in loaded["summary"]
+
+
+def test_snapshot_does_not_persist_analysis_or_evaluation_payloads(portfolio_db):
+    portfolio = create_portfolio("Snapshot without run payloads")
+
+    snapshot = create_snapshot(
+        portfolio["id"],
+        "Position-only snapshot",
+        "",
+        {
+            "asset_df": [
+                {
+                    "ticker": "VOO",
+                    "allocation": 100.0,
+                    "weight": 1.0,
+                    "return_total": None,
+                    "layer": "core",
+                    "category": "core_market",
+                    "dca_enabled": True,
+                    "thesis_status": "valid",
+                }
+            ],
+            "metrics_df": [{"ticker": "VOO", "CAGR": 0.1}],
+            "portfolio_metrics": {"cagr": 0.1},
+            "benchmark_metrics": None,
+            "missing_tickers": [],
+            "returns_smooth": [{"Date": "2026-01-01", "VOO": 0.0}],
+            "analysis_settings": {"period": "3M", "rf": 0.025, "bench": "SPY"},
+            "evaluation_v2": {
+                "evaluation_period": {"label": "3M"},
+                "layer_evaluations": [],
+                "asset_evaluations": [],
+                "review_queue": [],
+                "journal_draft": [],
+                "warnings": [],
+                "guardrails": {"not_investment_advice": True},
+            },
+            "evaluation_settings": {"period": "3M", "bench": "SPY"},
+        },
+    )
+
+    loaded = get_snapshot(snapshot["id"])
+
+    assert loaded is not None
+    assert loaded["analysis"] is None
+    assert loaded["evaluation"] is None
+    assert loaded["session_state"] == {
+        "asset_df": [
+            {
+                "ticker": "VOO",
+                "allocation": 100.0,
+                "return_total": None,
+                "layer": "core",
+                "category": "core_market",
+                "dca_enabled": True,
+                "thesis_status": "valid",
+                "weight": 1.0,
+            }
+        ]
+    }
+
+
+def test_initialize_database_drops_legacy_run_tables(portfolio_db):
+    with connect() as conn:
+        conn.execute("CREATE TABLE analysis_runs (id INTEGER PRIMARY KEY)")
+        conn.execute("CREATE TABLE analysis_metrics (id INTEGER PRIMARY KEY)")
+        conn.execute("CREATE TABLE evaluation_runs (id INTEGER PRIMARY KEY)")
+
+    initialize_database()
+
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name IN ('analysis_runs', 'analysis_metrics', 'evaluation_runs')
+            """
+        ).fetchall()
+
+    assert rows == []
 
 
 def test_snapshot_update_persists_editable_metadata(portfolio_db):

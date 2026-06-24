@@ -132,7 +132,7 @@ Saved portfolios and snapshots:
 - `PATCH /api/v1/portfolios/snapshots/{snapshot_id}`
 - `DELETE /api/v1/portfolios/snapshots/{snapshot_id}`
 
-Config and journal endpoints remain available. Evaluation storage writes the v2 payload under `evaluation_v2`.
+Config and journal endpoints remain available. Saved snapshots store portfolio positions and metadata; analysis and v2 evaluation outputs are recomputed after loading a snapshot.
 
 CSV download supports only:
 
