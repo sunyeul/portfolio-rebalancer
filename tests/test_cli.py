@@ -80,10 +80,6 @@ def test_evaluate_outputs_v2_envelope(monkeypatch):
             "VOO 100",
             "--period",
             "YTD",
-            "--layer-benchmark",
-            "satellite=QQQ",
-            "--layer-benchmark",
-            "experiment=CASH",
         ],
     )
 
@@ -105,28 +101,31 @@ def test_evaluate_outputs_v2_envelope(monkeypatch):
     assert payload["ok"] is True
     assert payload["command"] == "evaluate"
     assert payload["evaluation_period"]["label"] == "YTD"
+    assert "rf" not in payload["input"]
     assert payload["input"]["bench"] == "SPY:80,QQQ:20"
     assert payload["input"]["layer_benchmarks"] == {
         "core": "SPY:80,QQQ:20",
         "satellite": "QQQ",
-        "experiment": "CASH",
+        "experiment": "QQQ",
     }
     assert payload["layer_evaluations"]
     assert payload["asset_evaluations"]
+    assert "sharpe" not in payload["asset_evaluations"][0]["output"]
+    assert "sortino" not in payload["asset_evaluations"][0]["output"]
     layer_benchmarks = {
         record["unit"]["name"]: record["unit"]["benchmark"]
         for record in payload["layer_evaluations"]
     }
     assert layer_benchmarks["core"] == "SPY:80,QQQ:20"
     assert layer_benchmarks["satellite"] == "QQQ"
-    assert layer_benchmarks["experiment"] == "CASH"
+    assert layer_benchmarks["experiment"] == "QQQ"
     benchmark_returns = {
         record["unit"]["name"]: record["output"]["benchmark_return"]
         for record in payload["layer_evaluations"]
     }
     assert benchmark_returns["core"] == pytest.approx(0.06)
     assert benchmark_returns["satellite"] == pytest.approx(0.2)
-    assert benchmark_returns["experiment"] == pytest.approx(0.0)
+    assert benchmark_returns["experiment"] == pytest.approx(0.2)
     assert payload["guardrails"]["no_immediate_order_instruction"] is True
 
 
@@ -162,6 +161,7 @@ def test_evaluate_help_uses_layer_benchmark_not_legacy_bench():
     assert result.exit_code == 0
     assert "--layer-benchmark" in result.stdout
     assert "--bench" not in result.stdout
+    assert "--rf" not in result.stdout
 
 
 def test_evaluate_rejects_one_sided_custom_dates():

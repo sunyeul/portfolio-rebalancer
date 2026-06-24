@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from api.v1.serialization import METRICS_COLUMNS, dataframe_records, safe_mapping
 from middleware.session import session_manager
 from services.analysis_service import DEFAULT_BENCH, DEFAULT_RF, AnalysisError, run_analysis
+from services.evaluation_units import DEFAULT_LAYER_BENCHMARKS
 
 router = APIRouter()
 
@@ -47,13 +48,21 @@ async def run_analysis_endpoint(payload: AnalysisRunRequest, request: Request):
         raise HTTPException(status_code=400, detail="먼저 포트폴리오를 입력해주세요.")
 
     asset_df = pd.DataFrame(asset_df_data)
+    layer_benchmarks = DEFAULT_LAYER_BENCHMARKS.copy()
+    layer_benchmarks.update(
+        {
+            str(layer).strip().lower(): str(value).strip().upper()
+            for layer, value in (payload.layer_benchmarks or {}).items()
+            if str(layer).strip() and str(value).strip()
+        }
+    )
     try:
         result = run_analysis(
             asset_df,
             _parse_period(payload.period),
             payload.rf,
             payload.bench.upper(),
-            extra_benchmarks=list((payload.layer_benchmarks or {}).values()),
+            extra_benchmarks=list(layer_benchmarks.values()),
         )
     except AnalysisError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

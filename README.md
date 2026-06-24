@@ -54,7 +54,7 @@ uv run ips-pilot evaluate --text "VOO 40
 QQQ 60" --period YTD
 uv run ips-pilot evaluate --snapshot-id 14 --period 3M
 uv run ips-pilot evaluate --snapshot-id 14 --start-date 2026-01-01 --end-date 2026-06-30
-uv run ips-pilot evaluate --snapshot-id 14 --layer-benchmark core=SPY:80,QQQ:20 --layer-benchmark satellite=QQQ --layer-benchmark experiment=CASH
+uv run ips-pilot evaluate --snapshot-id 14 --layer-benchmark core=SPY:80,QQQ:20 --layer-benchmark satellite=QQQ --layer-benchmark experiment=QQQ
 uv run ips-pilot evaluate --file portfolio.csv --output-dir out
 uv run ips-pilot agent-brief --snapshot-id 14
 uv run ips-pilot review-queue --snapshot-id 14
@@ -76,12 +76,11 @@ uv run ips-pilot snapshots list --portfolio-id 1
     "period": "3M",
     "start_date": "2026-03-24",
     "end_date": "2026-06-24",
-    "rf": 0.025,
     "bench": "SPY:80,QQQ:20",
     "layer_benchmarks": {
       "core": "SPY:80,QQQ:20",
       "satellite": "QQQ",
-      "experiment": "CASH"
+      "experiment": "QQQ"
     },
     "database_path": "data/portfolio_rebalancer.sqlite3"
   },
@@ -103,7 +102,7 @@ uv run ips-pilot snapshots list --portfolio-id 1
 }
 ```
 
-Layer benchmarks are the canonical CLI benchmark setting. Use repeated `--layer-benchmark layer=BENCHMARK` options for `core`, `satellite`, and `experiment`; omitted layers default to `SPY:80,QQQ:20`. The analysis benchmark is derived from the `core` layer benchmark. Each layer evaluation reports benchmark return and excess return against that layer's benchmark over the same evaluation period.
+Layer benchmarks are the canonical CLI benchmark setting. Use repeated `--layer-benchmark layer=BENCHMARK` options for `core`, `satellite`, and `experiment`; omitted layers default to `SPY:80,QQQ:20` for core and `QQQ` for satellite and experiment. The analysis benchmark is derived from the `core` layer benchmark. Each layer evaluation reports benchmark return and excess return against that layer's benchmark over the same evaluation period.
 
 Legacy experimental commands and scenario-comparison options have been removed from the product surface.
 

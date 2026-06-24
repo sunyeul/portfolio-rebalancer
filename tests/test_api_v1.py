@@ -86,13 +86,7 @@ def test_portfolio_analysis_and_v2_evaluation(monkeypatch):
         "/api/v1/evaluation/run",
         json={
             "period": "3M",
-            "rf": 0.025,
             "bench": "SPY",
-            "layer_benchmarks": {
-                "core": "SPY:80,QQQ:20",
-                "satellite": "QQQ",
-                "experiment": "CASH",
-            },
         },
     )
     assert evaluation_response.status_code == 200
@@ -109,17 +103,19 @@ def test_portfolio_analysis_and_v2_evaluation(monkeypatch):
     assert payload["evaluation_period"]["label"] == "3M"
     assert payload["layer_evaluations"]
     assert payload["asset_evaluations"]
+    assert "sharpe" not in payload["asset_evaluations"][0]["output"]
+    assert "sortino" not in payload["asset_evaluations"][0]["output"]
     layer_benchmarks = {record["unit"]["name"]: record["unit"]["benchmark"] for record in payload["layer_evaluations"]}
     assert layer_benchmarks["core"] == "SPY:80,QQQ:20"
     assert layer_benchmarks["satellite"] == "QQQ"
-    assert layer_benchmarks["experiment"] == "CASH"
+    assert layer_benchmarks["experiment"] == "QQQ"
     benchmark_returns = {
         record["unit"]["name"]: record["output"]["benchmark_return"]
         for record in payload["layer_evaluations"]
     }
     assert benchmark_returns["core"] == pytest.approx(0.06)
     assert benchmark_returns["satellite"] == pytest.approx(0.2)
-    assert benchmark_returns["experiment"] == pytest.approx(0.0)
+    assert benchmark_returns["experiment"] == pytest.approx(0.2)
 
 
 def test_v2_csv_download(monkeypatch):

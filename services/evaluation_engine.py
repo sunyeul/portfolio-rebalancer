@@ -12,7 +12,7 @@ from services.analysis_service import AnalysisResult
 from services.analysis_service import parse_benchmark
 from services.evaluation_status import classify_evaluation_status
 from services.evaluation_units import build_evaluation_units, normalize_layer_category
-from utils.efficiency_metrics import cagr_mdd_ratio, return_mdd_ratio, sharpe, sortino_ratio
+from utils.efficiency_metrics import cagr_mdd_ratio, return_mdd_ratio
 from utils.ips_config import load_ips_config
 from utils.performance_metrics import benchmark_excess_return, cagr, period_return
 from utils.risk_metrics import annualized_volatility, concentration, maximum_drawdown
@@ -163,7 +163,6 @@ def _asset_output(
     metrics: pd.DataFrame,
     analysis: AnalysisResult,
     benchmark_return: float | None,
-    rf: float,
 ) -> EvaluationOutput:
     row = metrics.loc[unit.name]
     current_weight = float(row.get("가중치", 0.0) or 0.0)
@@ -193,8 +192,6 @@ def _asset_output(
         risk_contribution=json_safe(row.get("위험기여도")),
         return_mdd_ratio=return_mdd_ratio(unit_return, unit_mdd),
         cagr_mdd_ratio=cagr_mdd_ratio(unit_cagr, unit_mdd),
-        sharpe=sharpe(unit_cagr, unit_vol, rf),
-        sortino=sortino_ratio(dr, rf),
         thesis_status=_normalize_thesis_status(row.get("thesis_status")),
         burden=_burden_for_unit(unit),
         status="OK",
@@ -210,7 +207,6 @@ def _layer_output(
     metrics: pd.DataFrame,
     analysis: AnalysisResult,
     benchmark_return: float | None,
-    rf: float,
 ) -> EvaluationOutput:
     rows = metrics.loc[metrics["layer"] == unit.name]
     weights = pd.to_numeric(rows.get("가중치", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
@@ -244,8 +240,6 @@ def _layer_output(
         risk_contribution=json_safe(rows.get("위험기여도", pd.Series(dtype=float)).sum()),
         return_mdd_ratio=return_mdd_ratio(unit_return, unit_mdd),
         cagr_mdd_ratio=cagr_mdd_ratio(unit_cagr, unit_mdd),
-        sharpe=sharpe(unit_cagr, unit_vol, rf),
-        sortino=sortino_ratio(daily_returns, rf),
         thesis_status=thesis_status,
         burden=_burden_for_unit(unit, rows),
         status="OK",
@@ -260,7 +254,6 @@ def run_evaluation(
     *,
     analysis: AnalysisResult,
     evaluation_period: EvaluationPeriod,
-    rf: float,
     bench: str,
     layer_benchmarks: dict[str, str] | None = None,
     ips_config: dict | None = None,
@@ -282,7 +275,7 @@ def run_evaluation(
 
     for unit in unit_set.layer_units:
         bench_return = _benchmark_return_for_unit(unit, analysis)
-        output = _layer_output(unit, metrics, analysis, bench_return, rf)
+        output = _layer_output(unit, metrics, analysis, bench_return)
         layer_records.append(_output_record(unit, output))
         item = _review_item(unit, output)
         if item is not None:
@@ -290,7 +283,7 @@ def run_evaluation(
 
     for unit in unit_set.asset_units:
         bench_return = _benchmark_return_for_unit(unit, analysis)
-        output = _asset_output(unit, metrics, analysis, bench_return, rf)
+        output = _asset_output(unit, metrics, analysis, bench_return)
         asset_records.append(_output_record(unit, output))
         item = _review_item(unit, output)
         if item is not None:

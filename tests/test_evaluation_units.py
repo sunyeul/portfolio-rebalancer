@@ -91,3 +91,31 @@ def test_build_evaluation_units_applies_layer_benchmarks_to_layers_and_assets():
     assert asset_units["VOO"].benchmark == "SPY:80,QQQ:20"
     assert asset_units["UFO"].benchmark == "QQQ"
     assert asset_units["QLD"].benchmark == "CASH"
+
+
+def test_build_evaluation_units_defaults_satellite_and_experiment_to_qqq():
+    metrics = pd.DataFrame(
+        {
+            "ticker": ["VOO", "UFO", "QLD"],
+            "layer": ["core", "satellite", "experiment"],
+            "category": ["core_market", "satellite_nextgen", "experiment_leverage"],
+            "가중치": [0.7, 0.25, 0.05],
+        }
+    ).set_index("ticker")
+
+    unit_set = build_evaluation_units(
+        metrics,
+        None,
+        _period(),
+        "",
+        layer_benchmarks={},
+    )
+
+    layer_units = {unit.name: unit for unit in unit_set.layer_units}
+    asset_units = {unit.name: unit for unit in unit_set.asset_units}
+    assert layer_units["core"].benchmark == "SPY:80,QQQ:20"
+    assert layer_units["satellite"].benchmark == "QQQ"
+    assert layer_units["experiment"].benchmark == "QQQ"
+    assert asset_units["VOO"].benchmark == "SPY:80,QQQ:20"
+    assert asset_units["UFO"].benchmark == "QQQ"
+    assert asset_units["QLD"].benchmark == "QQQ"

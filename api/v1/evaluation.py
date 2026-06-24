@@ -12,9 +12,10 @@ from pydantic import BaseModel, Field
 from api.v1.serialization import METRICS_COLUMNS, dataframe_records
 from core.evaluation import EvaluationPeriod
 from middleware.session import session_manager
-from services.analysis_service import DEFAULT_BENCH, DEFAULT_RF, AnalysisResult
+from services.analysis_service import DEFAULT_BENCH, AnalysisResult
 from services.evaluation_engine import run_evaluation
 from services.evaluation_period import EvaluationPeriodError, resolve_evaluation_period
+from services.evaluation_units import DEFAULT_LAYER_BENCHMARKS
 
 router = APIRouter()
 
@@ -23,7 +24,6 @@ class EvaluationRunRequest(BaseModel):
     period: str | None = Field(default=None, description="1M, 3M, 6M, YTD, 1Y, Max")
     start_date: date | None = None
     end_date: date | None = None
-    rf: float | None = None
     bench: str | None = None
     layer_benchmarks: dict[str, str] | None = None
 
@@ -89,7 +89,7 @@ def _period_for_request(
 def _analysis_result_for_session(
     session_id: str,
     payload: EvaluationRunRequest,
-) -> tuple[AnalysisResult, EvaluationPeriod, float, str, dict[str, str] | None]:
+) -> tuple[AnalysisResult, EvaluationPeriod, str, dict[str, str]]:
     metrics_df = _metrics_df_for_session(session_id)
     prices = _frame_from_session(session_id, "prices")
     returns = _frame_from_session(session_id, "returns")
@@ -101,17 +101,14 @@ def _analysis_result_for_session(
         )
 
     analysis_settings = session_manager.get(session_id, "analysis_settings") or {}
-    rf = DEFAULT_RF if payload.rf is None else payload.rf
-    rf = float(analysis_settings.get("rf", rf) if payload.rf is None else rf)
     bench = str(payload.bench or analysis_settings.get("bench") or DEFAULT_BENCH).upper()
-    layer_benchmarks = (
+    layer_benchmarks = DEFAULT_LAYER_BENCHMARKS.copy()
+    layer_benchmarks.update(
         {
             str(layer).strip().lower(): str(value).strip().upper()
-            for layer, value in payload.layer_benchmarks.items()
+            for layer, value in (payload.layer_benchmarks or {}).items()
             if str(layer).strip() and str(value).strip()
         }
-        if payload.layer_benchmarks is not None
-        else None
     )
     evaluation_period = _period_for_request(payload, session_id, prices)
     weights = metrics_df.get("가중치", pd.Series(dtype=float)).astype(float)
@@ -134,7 +131,6 @@ def _analysis_result_for_session(
             missing_tickers=session_manager.get(session_id, "missing_tickers") or [],
         ),
         evaluation_period,
-        rf,
         bench,
         layer_benchmarks,
     )
@@ -148,11 +144,10 @@ def _csv_from_records(records: list[dict[str, Any]]) -> str:
 async def run_evaluation_endpoint(payload: EvaluationRunRequest, request: Request):
     """Run Evaluation Framework v2 for the current session."""
     session_id = request.state.session_id
-    analysis, evaluation_period, rf, bench, layer_benchmarks = _analysis_result_for_session(session_id, payload)
+    analysis, evaluation_period, bench, layer_benchmarks = _analysis_result_for_session(session_id, payload)
     result = run_evaluation(
         analysis=analysis,
         evaluation_period=evaluation_period,
-        rf=rf,
         bench=bench,
         layer_benchmarks=layer_benchmarks,
     )
@@ -165,7 +160,6 @@ async def run_evaluation_endpoint(payload: EvaluationRunRequest, request: Reques
             "period": evaluation_period.label,
             "start_date": evaluation_period.start_date.isoformat(),
             "end_date": evaluation_period.end_date.isoformat(),
-            "rf": rf,
             "bench": bench,
             "layer_benchmarks": layer_benchmarks,
         },

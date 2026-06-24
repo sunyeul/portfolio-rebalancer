@@ -72,8 +72,6 @@ class EvaluationOutput(BaseModel):
     risk_contribution: float | None = None
     return_mdd_ratio: float | None = None
     cagr_mdd_ratio: float | None = None
-    sharpe: float | None = None
-    sortino: float | None = None
     thesis_status: ThesisStatus = "unknown"
     burden: BurdenLevel = "medium"
     status: EvaluationStatus

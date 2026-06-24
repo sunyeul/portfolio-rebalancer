@@ -11,13 +11,14 @@ from typing import Annotated, Any
 import pandas as pd
 import typer
 
-from services.analysis_service import DEFAULT_BENCH, DEFAULT_RF, AnalysisError, run_analysis
+from services.analysis_service import DEFAULT_RF, AnalysisError, run_analysis
 from services.evaluation_engine import run_evaluation
 from services.evaluation_period import (
     EvaluationPeriodError,
     analysis_period_value,
     resolve_evaluation_period,
 )
+from services.evaluation_units import DEFAULT_LAYER_BENCHMARKS
 from services.portfolio_service import (
     PortfolioInputError,
     normalize_and_validate_assets,
@@ -38,7 +39,6 @@ from api.v1.serialization import safe_mapping
 
 
 LAYER_BENCHMARK_LAYERS = ("core", "satellite", "experiment")
-DEFAULT_LAYER_BENCHMARKS = {layer: DEFAULT_BENCH for layer in LAYER_BENCHMARK_LAYERS}
 LAYER_BENCHMARK_HELP = "Layer benchmark override as layer=BENCHMARK. Repeat for core, satellite, or experiment."
 
 app = typer.Typer(
@@ -235,7 +235,6 @@ def _run_v2(
     period: str,
     start_date: str | None,
     end_date: str | None,
-    rf: float,
     layer_benchmark: list[str] | None,
 ) -> tuple[dict[str, Any], pd.DataFrame, Any, dict[str, Any], int | None]:
     asset_df, warnings, input_meta, source_portfolio_id = _load_asset_df(
@@ -259,7 +258,7 @@ def _run_v2(
         analysis = run_analysis(
             asset_df,
             analysis_period_value(evaluation_period),
-            rf,
+            DEFAULT_RF,
             bench_ticker,
             extra_benchmarks=list(layer_benchmarks.values()),
         )
@@ -269,7 +268,6 @@ def _run_v2(
     result = run_evaluation(
         analysis=analysis,
         evaluation_period=evaluation_period,
-        rf=rf,
         bench=bench_ticker,
         layer_benchmarks=layer_benchmarks,
     )
@@ -283,7 +281,6 @@ def _run_v2(
                 "period": evaluation_period.label,
                 "start_date": evaluation_period.start_date.isoformat(),
                 "end_date": evaluation_period.end_date.isoformat(),
-                "rf": rf,
                 "bench": bench_ticker,
                 "layer_benchmarks": layer_benchmarks,
                 "database_path": str(db_path()),
@@ -308,7 +305,7 @@ def _session_data(asset_df: pd.DataFrame, analysis, evaluation_payload: dict[str
         "missing_tickers": analysis.missing_tickers,
         "analysis_settings": {
             "period": evaluation_payload["input"]["period"],
-            "rf": evaluation_payload["input"]["rf"],
+            "rf": DEFAULT_RF,
             "bench": evaluation_payload["input"]["bench"],
         },
         "evaluation_v2": {
@@ -327,7 +324,6 @@ def _session_data(asset_df: pd.DataFrame, analysis, evaluation_payload: dict[str
             "period": evaluation_payload["input"]["period"],
             "start_date": evaluation_payload["input"]["start_date"],
             "end_date": evaluation_payload["input"]["end_date"],
-            "rf": evaluation_payload["input"]["rf"],
             "bench": evaluation_payload["input"]["bench"],
             "layer_benchmarks": evaluation_payload["input"]["layer_benchmarks"],
         },
@@ -343,7 +339,6 @@ def evaluate(
     period: Annotated[str, typer.Option("--period")] = "3M",
     start_date: Annotated[str | None, typer.Option("--start-date")] = None,
     end_date: Annotated[str | None, typer.Option("--end-date")] = None,
-    rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
     layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
     output_dir: Annotated[Path | None, typer.Option("--output-dir")] = None,
     save: Annotated[bool, typer.Option("--save")] = False,
@@ -362,7 +357,6 @@ def evaluate(
             period=period,
             start_date=start_date,
             end_date=end_date,
-            rf=rf,
             layer_benchmark=layer_benchmark,
         )
 
@@ -407,7 +401,6 @@ def agent_brief(
     portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
     period: Annotated[str, typer.Option("--period")] = "3M",
-    rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
     layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
 ) -> None:
     """Emit a compact v2 IPS brief for agents."""
@@ -421,7 +414,6 @@ def agent_brief(
             period=period,
             start_date=None,
             end_date=None,
-            rf=rf,
             layer_benchmark=layer_benchmark,
         )
         _emit_json(
@@ -457,7 +449,6 @@ def review_queue(
     portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
     period: Annotated[str, typer.Option("--period")] = "3M",
-    rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
     layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
 ) -> None:
     """Emit v2 review queue only."""
@@ -471,7 +462,6 @@ def review_queue(
             period=period,
             start_date=None,
             end_date=None,
-            rf=rf,
             layer_benchmark=layer_benchmark,
         )
         _emit_json(
@@ -497,7 +487,6 @@ def risk(
     portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
     period: Annotated[str, typer.Option("--period")] = "3M",
-    rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
     layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
 ) -> None:
     """Emit v2 units with risk-related triggers."""
@@ -511,7 +500,6 @@ def risk(
             period=period,
             start_date=None,
             end_date=None,
-            rf=rf,
             layer_benchmark=layer_benchmark,
         )
         risk_items = [

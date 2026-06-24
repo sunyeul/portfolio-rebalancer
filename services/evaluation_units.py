@@ -30,7 +30,7 @@ DEFAULT_LAYER_LIMITS = {
         "allowed_volatility": 0.55,
         "max_weight": 0.30,
         "min_efficiency": 0.00,
-        "benchmark": "SPY:80,QQQ:20",
+        "benchmark": "QQQ",
         "check_frequency": "monthly",
         "manual_intervention_allowed": True,
     },
@@ -39,10 +39,14 @@ DEFAULT_LAYER_LIMITS = {
         "allowed_volatility": 0.70,
         "max_weight": 0.05,
         "min_efficiency": 0.20,
-        "benchmark": "SPY:80,QQQ:20",
+        "benchmark": "QQQ",
         "check_frequency": "weekly",
         "manual_intervention_allowed": True,
     },
+}
+
+DEFAULT_LAYER_BENCHMARKS = {
+    layer: str(limits["benchmark"]) for layer, limits in DEFAULT_LAYER_LIMITS.items()
 }
 
 
