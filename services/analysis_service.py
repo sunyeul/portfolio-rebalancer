@@ -15,7 +15,8 @@ from utils.data_fetcher import (
     fetch_prices,
     compute_ytd_returns,
 )
-from core.asset import DEFAULT_GROUP
+from core.evaluation import EvaluationPeriod
+from core.asset import CATEGORY_LAYERS, DEFAULT_CATEGORY, DEFAULT_LAYER
 from utils.metrics import (
     annualize_cov,
     cagr_from_series,
@@ -25,7 +26,6 @@ from utils.metrics import (
     information_ratio,
     max_drawdown,
     moving_average,
-    normalize_weights,
     price_to_nav,
     risk_contributions,
     sharpe_ratio,
@@ -164,7 +164,7 @@ def _price_data_quality(prices_raw: pd.DataFrame, ticker: str) -> dict[str, obje
 
 def run_analysis(
     asset_df: pd.DataFrame,
-    period: int | str,
+    period: int | str | EvaluationPeriod,
     rf: float,
     bench: str,
 ) -> AnalysisResult:
@@ -172,7 +172,7 @@ def run_analysis(
 
     Args:
         asset_df: 정규화된 자산 데이터프레임 (ticker, allocation, weight 컬럼 포함)
-        period: 평가 기간 (정수: 개월 수 또는 문자열: 'YTD', 'Max')
+        period: 평가 기간 (정수: 개월 수, 'YTD'/'Max', 또는 EvaluationPeriod)
         rf: 무위험 수익률 (연간, 소수)
         bench: 벤치마크 티커 또는 'SPY:80,QQQ:20' 형식의 복합 벤치마크
 
@@ -185,7 +185,10 @@ def run_analysis(
     # 날짜 범위 설정
     end = datetime.today()
     # AIDEV-NOTE: flexible-period-handling; 개월 수를 timedelta로 변환 (정수 입력 지원)
-    if isinstance(period, int):
+    if isinstance(period, EvaluationPeriod):
+        start = datetime.combine(period.start_date, datetime.min.time())
+        end = datetime.combine(period.end_date, datetime.min.time())
+    elif isinstance(period, int):
         # 개월 수 기반 계산: 대략 30일/월 사용 (더 정확한 달력 계산도 가능)
         start = end - timedelta(days=period * 30)
     elif period == "YTD":
@@ -354,15 +357,31 @@ def run_analysis(
     )
 
     # IPS 메타데이터 병합
-    meta_cols = ["group", "dca_enabled", "thesis_status"]
+    meta_cols = ["layer", "category", "dca_enabled", "thesis_status"]
     asset_meta = asset_df.set_index("ticker")
     for col in meta_cols:
         if col in asset_meta.columns:
             metrics_df[col] = asset_meta[col].reindex(metrics_df.index)
 
-    metrics_df["group"] = metrics_df.get(
-        "group", pd.Series(index=metrics_df.index)
-    ).fillna(DEFAULT_GROUP)
+    if "layer" not in metrics_df.columns:
+        metrics_df["layer"] = pd.NA
+    if "category" not in metrics_df.columns:
+        metrics_df["category"] = pd.NA
+    for ticker, row in metrics_df.iterrows():
+        category = row.get("category")
+        if pd.isna(category) or str(category).strip() == "":
+            category = DEFAULT_CATEGORY
+        category = str(category).strip().lower()
+        if category not in CATEGORY_LAYERS:
+            category = DEFAULT_CATEGORY
+        layer = row.get("layer")
+        if pd.isna(layer) or str(layer).strip() == "":
+            layer = CATEGORY_LAYERS.get(category, DEFAULT_LAYER)
+        layer = str(layer).strip().lower()
+        if category in CATEGORY_LAYERS:
+            layer = CATEGORY_LAYERS[category]
+        metrics_df.at[ticker, "layer"] = layer
+        metrics_df.at[ticker, "category"] = category
     metrics_df["dca_enabled"] = (
         metrics_df.get("dca_enabled", pd.Series(True, index=metrics_df.index))
         .fillna(True)

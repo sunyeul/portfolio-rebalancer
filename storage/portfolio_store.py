@@ -7,7 +7,14 @@ import re
 from typing import Any
 
 from api.v1.serialization import json_safe
-from core.asset import DEFAULT_GROUP, VALID_GROUPS
+from core.asset import (
+    ASSET_CATEGORIES,
+    CATEGORY_LAYERS,
+    DEFAULT_CATEGORY,
+    DEFAULT_CATEGORY_BY_LAYER,
+    DEFAULT_LAYER,
+    LAYER_TYPES,
+)
 from storage.database import connect, initialize_database
 
 
@@ -58,9 +65,18 @@ def _ensure_lookup(conn, table: str, code: str, default_code: str) -> int:
     return int(cursor.lastrowid)
 
 
-def _fixed_group(value: Any) -> str:
-    code = _normalize_code(value, DEFAULT_GROUP)
-    return code if code in VALID_GROUPS else DEFAULT_GROUP
+def _fixed_layer(value: Any, category: str | None = None) -> str:
+    if category in CATEGORY_LAYERS:
+        return CATEGORY_LAYERS[category]
+    code = _normalize_code(value, DEFAULT_LAYER)
+    return code if code in LAYER_TYPES else DEFAULT_LAYER
+
+
+def _fixed_category(value: Any, layer: str | None = None) -> str:
+    code = _normalize_code(value, "")
+    if code in ASSET_CATEGORIES:
+        return code
+    return DEFAULT_CATEGORY_BY_LAYER.get(layer or DEFAULT_LAYER, DEFAULT_CATEGORY)
 
 
 def _ensure_asset(conn, ticker: str) -> int:
@@ -88,15 +104,8 @@ def _state_payload(session_state: dict[str, Any]) -> tuple[dict[str, Any], dict[
         }
 
     evaluation_payload = None
-    if session_state.get("proposal_df"):
-        evaluation_payload = {
-            "proposal_df": session_state.get("proposal_df") or [],
-            "ips_action_df": session_state.get("ips_action_df") or [],
-            "group_summary_df": session_state.get("group_summary_df") or [],
-            "rc_violations": session_state.get("rc_violations") or [],
-            "ips_config_snapshot": session_state.get("ips_config_snapshot"),
-            "playbook": session_state.get("playbook"),
-        }
+    if session_state.get("evaluation_v2"):
+        evaluation_payload = session_state.get("evaluation_v2")
 
     return session_state, analysis_payload, evaluation_payload
 
@@ -165,6 +174,7 @@ def list_portfolios() -> list[dict[str, Any]]:
                 s.id AS latest_snapshot_id,
                 s.name AS latest_snapshot_name,
                 s.created_at AS latest_snapshot_created_at,
+                s.updated_at AS latest_snapshot_updated_at,
                 COUNT(pos.id) AS latest_position_count
             FROM portfolios p
             LEFT JOIN portfolio_snapshots s
@@ -172,7 +182,7 @@ def list_portfolios() -> list[dict[str, Any]]:
                     SELECT id
                     FROM portfolio_snapshots
                     WHERE portfolio_id = p.id
-                    ORDER BY created_at DESC, id DESC
+                    ORDER BY updated_at DESC, id DESC
                     LIMIT 1
                 )
             LEFT JOIN snapshot_positions pos ON pos.snapshot_id = s.id
@@ -198,6 +208,7 @@ def get_portfolio(portfolio_id: int) -> dict[str, Any] | None:
                 s.id AS latest_snapshot_id,
                 s.name AS latest_snapshot_name,
                 s.created_at AS latest_snapshot_created_at,
+                s.updated_at AS latest_snapshot_updated_at,
                 COUNT(pos.id) AS latest_position_count
             FROM portfolios p
             LEFT JOIN portfolio_snapshots s
@@ -205,7 +216,7 @@ def get_portfolio(portfolio_id: int) -> dict[str, Any] | None:
                     SELECT id
                     FROM portfolio_snapshots
                     WHERE portfolio_id = p.id
-                    ORDER BY created_at DESC, id DESC
+                    ORDER BY updated_at DESC, id DESC
                     LIMIT 1
                 )
             LEFT JOIN snapshot_positions pos ON pos.snapshot_id = s.id
@@ -289,6 +300,7 @@ def _portfolio_row(row) -> dict[str, Any]:
                 "id": row["latest_snapshot_id"],
                 "name": row["latest_snapshot_name"],
                 "created_at": row["latest_snapshot_created_at"],
+                "updated_at": row["latest_snapshot_updated_at"],
                 "position_count": row["latest_position_count"],
             }
             if row["latest_snapshot_id"] is not None
@@ -308,6 +320,7 @@ def list_snapshots(portfolio_id: int) -> list[dict[str, Any]]:
                 s.name,
                 s.note,
                 s.created_at,
+                s.updated_at,
                 COUNT(pos.id) AS position_count,
                 CASE WHEN ar.id IS NULL THEN 0 ELSE 1 END AS has_analysis,
                 CASE WHEN er.id IS NULL THEN 0 ELSE 1 END AS has_evaluation
@@ -317,7 +330,7 @@ def list_snapshots(portfolio_id: int) -> list[dict[str, Any]]:
             LEFT JOIN evaluation_runs er ON er.snapshot_id = s.id
             WHERE s.portfolio_id = ?
             GROUP BY s.id
-            ORDER BY s.created_at DESC, s.id DESC
+            ORDER BY s.updated_at DESC, s.id DESC
             """,
             (portfolio_id,),
         ).fetchall()
@@ -331,6 +344,7 @@ def _snapshot_summary(row) -> dict[str, Any]:
         "name": row["name"],
         "note": row["note"],
         "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
         "position_count": row["position_count"],
         "has_analysis": bool(row["has_analysis"]),
         "has_evaluation": bool(row["has_evaluation"]),
@@ -389,7 +403,7 @@ def update_snapshot(
         conn.execute(
             """
             UPDATE portfolio_snapshots
-            SET name = ?, note = ?
+            SET name = ?, note = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
             (next_name, next_note, snapshot_id),
@@ -439,7 +453,7 @@ def _insert_positions(conn, snapshot_id: int, asset_rows: list[dict[str, Any]]) 
     for position_order, row in enumerate(asset_rows):
         asset_id = _ensure_asset(conn, row["ticker"])
         thesis_id = _ensure_lookup(
-            conn, "thesis_statuses", row.get("thesis_status"), "unknown"
+            conn, "thesis_statuses", row.get("thesis_status"), "valid"
         )
         conn.execute(
             """
@@ -449,12 +463,13 @@ def _insert_positions(conn, snapshot_id: int, asset_rows: list[dict[str, Any]]) 
                 allocation,
                 weight,
                 return_total,
-                "group",
+                layer,
+                category,
                 dca_enabled,
                 thesis_status_id,
                 position_order
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 snapshot_id,
@@ -462,7 +477,8 @@ def _insert_positions(conn, snapshot_id: int, asset_rows: list[dict[str, Any]]) 
                 row.get("allocation", 0),
                 row.get("weight", 0),
                 row.get("return_total"),
-                _fixed_group(row.get("group")),
+                _fixed_layer(row.get("layer"), _fixed_category(row.get("category"), row.get("layer"))),
+                _fixed_category(row.get("category"), row.get("layer")),
                 1 if row.get("dca_enabled", True) else 0,
                 thesis_id,
                 position_order,
@@ -558,122 +574,28 @@ def _insert_evaluation(
     snapshot_id: int,
     session_data: dict[str, Any],
 ) -> None:
-    proposal_rows = session_data.get("proposal_df")
-    if not proposal_rows:
+    evaluation_v2 = session_data.get("evaluation_v2")
+    if not evaluation_v2:
         return
 
     settings = session_data.get("evaluation_settings") or {}
-    cursor = conn.execute(
+    conn.execute(
         """
         INSERT INTO evaluation_runs (
             snapshot_id,
-            rc_over_thresh_pct,
-            e_thresh,
             target_weights_json,
             ips_config_snapshot_json,
             playbook_json
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?)
         """,
         (
             snapshot_id,
-            settings.get("rc_over_thresh_pct"),
-            settings.get("e_thresh"),
-            _json_dump(settings.get("target_weights")),
+            _json_dump(settings),
             _json_dump(session_data.get("ips_config_snapshot")),
-            _json_dump(session_data.get("playbook")),
+            _json_dump({"schema": "evaluation_v2", "payload": evaluation_v2}),
         ),
     )
-    evaluation_run_id = int(cursor.lastrowid)
-    for row in proposal_rows:
-        ticker = row.get("ticker")
-        asset_id = _ensure_asset(conn, ticker) if ticker else None
-        conn.execute(
-            """
-            INSERT INTO evaluation_rows (
-                evaluation_run_id,
-                asset_id,
-                ticker,
-                current_weight_pct,
-                target_weight_pct,
-                gap_pct,
-                adjusted_gap_pct,
-                rc_over_pct,
-                rc_target_pct,
-                should_execute,
-                record_json
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                evaluation_run_id,
-                asset_id,
-                ticker,
-                row.get("현재%"),
-                row.get("목표%"),
-                row.get("갭%"),
-                row.get("제안조정%"),
-                row.get("RC_Over%"),
-                row.get("RC_Target%"),
-                1 if row.get("실행") else 0,
-                _json_dump(row),
-            ),
-        )
-    _insert_json_rows(
-        conn,
-        "ips_action_rows",
-        evaluation_run_id,
-        session_data.get("ips_action_df") or [],
-        "ticker",
-    )
-    _insert_json_rows(
-        conn,
-        "group_summary_rows",
-        evaluation_run_id,
-        session_data.get("group_summary_df") or [],
-        "group",
-    )
-    _insert_json_rows(
-        conn,
-        "rc_violation_rows",
-        evaluation_run_id,
-        session_data.get("rc_violations") or [],
-        "ticker",
-    )
-
-
-def _insert_json_rows(
-    conn,
-    table: str,
-    evaluation_run_id: int,
-    rows: list[dict[str, Any]],
-    key_name: str,
-) -> None:
-    for row in rows:
-        if table == "group_summary_rows":
-            conn.execute(
-                """
-                INSERT INTO group_summary_rows (
-                    evaluation_run_id,
-                    "group",
-                    record_json
-                )
-                VALUES (?, ?, ?)
-                """,
-                (
-                    evaluation_run_id,
-                    row.get("group"),
-                    _json_dump(row),
-                ),
-            )
-        else:
-            conn.execute(
-                f"""
-                INSERT INTO {table} (evaluation_run_id, ticker, record_json)
-                VALUES (?, ?, ?)
-                """,
-                (evaluation_run_id, row.get(key_name), _json_dump(row)),
-            )
 
 
 def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
@@ -687,6 +609,7 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
                 s.name,
                 s.note,
                 s.created_at,
+                s.updated_at,
                 COUNT(pos.id) AS position_count,
                 CASE WHEN ar.id IS NULL THEN 0 ELSE 1 END AS has_analysis,
                 CASE WHEN er.id IS NULL THEN 0 ELSE 1 END AS has_evaluation
@@ -709,7 +632,8 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
                 pos.allocation,
                 pos.weight,
                 pos.return_total,
-                pos."group" AS "group",
+                pos.layer,
+                pos.category,
                 pos.dca_enabled,
                 ts.code AS thesis_status_code
             FROM snapshot_positions pos
@@ -736,52 +660,15 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
                 """,
                 (analysis_run["id"],),
             ).fetchall()
-
         evaluation_run = conn.execute(
             "SELECT * FROM evaluation_runs WHERE snapshot_id = ?",
             (snapshot_id,),
         ).fetchone()
-        evaluation_rows = []
-        ips_action_rows = []
-        group_summary_rows = []
-        rc_violation_rows = []
+        evaluation_v2_payload = None
         if evaluation_run:
-            evaluation_rows = conn.execute(
-                """
-                SELECT record_json
-                FROM evaluation_rows
-                WHERE evaluation_run_id = ?
-                ORDER BY id ASC
-                """,
-                (evaluation_run["id"],),
-            ).fetchall()
-            ips_action_rows = conn.execute(
-                """
-                SELECT record_json
-                FROM ips_action_rows
-                WHERE evaluation_run_id = ?
-                ORDER BY id ASC
-                """,
-                (evaluation_run["id"],),
-            ).fetchall()
-            group_summary_rows = conn.execute(
-                """
-                SELECT record_json
-                FROM group_summary_rows
-                WHERE evaluation_run_id = ?
-                ORDER BY id ASC
-                """,
-                (evaluation_run["id"],),
-            ).fetchall()
-            rc_violation_rows = conn.execute(
-                """
-                SELECT record_json
-                FROM rc_violation_rows
-                WHERE evaluation_run_id = ?
-                ORDER BY id ASC
-                """,
-                (evaluation_run["id"],),
-            ).fetchall()
+            maybe_v2 = _json_load(evaluation_run["playbook_json"], None)
+            if isinstance(maybe_v2, dict) and maybe_v2.get("schema") == "evaluation_v2":
+                evaluation_v2_payload = maybe_v2.get("payload")
 
     session_state = {
         "asset_df": [
@@ -789,7 +676,8 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
                 "ticker": row["ticker"],
                 "allocation": row["allocation"],
                 "return_total": row["return_total"],
-                "group": row["group"],
+                "layer": row["layer"],
+                "category": row["category"],
                 "dca_enabled": bool(row["dca_enabled"]),
                 "thesis_status": row["thesis_status_code"],
                 "weight": row["weight"],
@@ -827,40 +715,12 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
         }
 
     evaluation_payload = None
-    if evaluation_run:
-        session_state.update(
-            {
-                "proposal_df": [_json_load(row["record_json"]) for row in evaluation_rows],
-                "ips_action_df": [
-                    _json_load(row["record_json"]) for row in ips_action_rows
-                ],
-                "group_summary_df": [
-                    _json_load(row["record_json"]) for row in group_summary_rows
-                ],
-                "rc_violations": [
-                    _json_load(row["record_json"]) for row in rc_violation_rows
-                ],
-                "evaluation_settings": {
-                    "rc_over_thresh_pct": evaluation_run["rc_over_thresh_pct"],
-                    "e_thresh": evaluation_run["e_thresh"],
-                    "target_weights": _json_load(
-                        evaluation_run["target_weights_json"], None
-                    ),
-                },
-                "ips_config_snapshot": _json_load(
-                    evaluation_run["ips_config_snapshot_json"], None
-                ),
-                "playbook": _json_load(evaluation_run["playbook_json"], None),
-            }
+    if evaluation_v2_payload:
+        session_state["evaluation_v2"] = evaluation_v2_payload
+        session_state["evaluation_settings"] = _json_load(
+            evaluation_run["target_weights_json"], {}
         )
-        evaluation_payload = {
-            "proposal_df": session_state["proposal_df"],
-            "ips_action_df": session_state["ips_action_df"],
-            "group_summary_df": session_state["group_summary_df"],
-            "rc_violations": session_state["rc_violations"],
-            "ips_config_snapshot": session_state["ips_config_snapshot"],
-            "playbook": session_state["playbook"],
-        }
+        evaluation_payload = evaluation_v2_payload
 
     return {
         "summary": _snapshot_summary(summary_row),

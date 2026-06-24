@@ -6,18 +6,12 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from core.asset import DEFAULT_GROUP
 from api.v1.serialization import (
-    GROUP_SUMMARY_COLUMNS,
     METRICS_COLUMNS,
-    PROPOSAL_COLUMNS,
-    RC_VIOLATION_COLUMNS,
     dataframe_records,
     safe_mapping,
 )
-from utils.ips import fixed_group
 from middleware.session import session_manager
-from services.evaluation_view import build_evaluation_view
 from services.portfolio_service import (
     PortfolioInputError,
     normalize_and_validate_assets,
@@ -47,13 +41,10 @@ SESSION_KEYS = [
     "missing_tickers",
     "returns_smooth",
     "analysis_settings",
-    "proposal_df",
-    "ips_action_df",
-    "group_summary_df",
-    "rc_violations",
+    "prices",
+    "returns",
+    "evaluation_v2",
     "evaluation_settings",
-    "ips_config_snapshot",
-    "playbook",
 ]
 
 
@@ -71,7 +62,8 @@ class SnapshotPortfolioRowIn(BaseModel):
     ticker: str = ""
     allocation: float | str | None = None
     return_total: float | str | None = None
-    group: str | None = None
+    layer: str | None = None
+    category: str | None = None
     dca_enabled: bool | str | None = True
     thesis_status: str | None = None
 
@@ -277,46 +269,9 @@ def _session_data(session_id: str) -> dict:
     return {key: session_manager.get(session_id, key) for key in SESSION_KEYS}
 
 
-def _proposal_frame(rows: list[dict] | None) -> pd.DataFrame:
-    proposal_df = pd.DataFrame(rows or [])
-    if proposal_df.empty:
-        return proposal_df
-
-    defaults = {
-        "RC_Gap%": proposal_df["갭%"] if "갭%" in proposal_df else 0.0,
-        "제안조정%": 0.0,
-        "참고조정%": proposal_df["제안조정%"] if "제안조정%" in proposal_df else 0.0,
-        "판단사유": "",
-        "수치후보": proposal_df["실행"] if "실행" in proposal_df else False,
-        "히스테리시스제외": False,
-        "최소거래미만": False,
-        "실행": False,
-        "IPS적합도": None,
-        "IPS등급": None,
-        "efficiency_warning": False,
-    }
-    for column, default in defaults.items():
-        if column not in proposal_df.columns:
-            proposal_df[column] = default
-
-    if "갭%" in proposal_df.columns:
-        proposal_df["RC_Gap%"] = proposal_df["RC_Gap%"].fillna(proposal_df["갭%"])
-    else:
-        proposal_df["RC_Gap%"] = proposal_df["RC_Gap%"].fillna(0.0)
-    proposal_df["제안조정%"] = proposal_df["제안조정%"].fillna(0.0)
-    proposal_df["참고조정%"] = proposal_df["참고조정%"].fillna(proposal_df["제안조정%"])
-    proposal_df["판단사유"] = proposal_df["판단사유"].fillna("")
-    for column in ["히스테리시스제외", "최소거래미만", "수치후보", "실행", "efficiency_warning"]:
-        proposal_df[column] = proposal_df[column].where(proposal_df[column].notna(), False).astype(bool)
-
-    return proposal_df
-
-
 def _state_response(state: dict) -> dict:
     session_state = state["session_state"]
     asset_df = pd.DataFrame(session_state.get("asset_df") or [])
-    if not asset_df.empty:
-        asset_df["group"] = asset_df.get("group", DEFAULT_GROUP).fillna(DEFAULT_GROUP).map(fixed_group)
     response = {
         "portfolio": {
             "assets": dataframe_records(asset_df),
@@ -342,59 +297,8 @@ def _state_response(state: dict) -> dict:
             "missing_tickers": state["analysis"]["missing_tickers"],
         }
 
-    if state["evaluation"]:
-        proposal_df = _proposal_frame(state["evaluation"]["proposal_df"])
-        ips_action_df = pd.DataFrame(state["evaluation"]["ips_action_df"])
-        group_summary_df = pd.DataFrame(state["evaluation"]["group_summary_df"])
-        rc_violations_df = pd.DataFrame(state["evaluation"]["rc_violations"])
-        metrics_for_view = pd.DataFrame(
-            state["analysis"]["metrics_df"] if state["analysis"] else []
-        )
-        if not metrics_for_view.empty and "ticker" in metrics_for_view.columns:
-            metrics_for_view = metrics_for_view.set_index("ticker")
-        proposal = dataframe_records(proposal_df, PROPOSAL_COLUMNS)
-        ips_actions = dataframe_records(ips_action_df)
-        group_summary = dataframe_records(group_summary_df, GROUP_SUMMARY_COLUMNS)
-        rc_violations = dataframe_records(rc_violations_df, RC_VIOLATION_COLUMNS)
-        operating_view = build_evaluation_view(
-            metrics=dataframe_records(
-                metrics_for_view,
-                METRICS_COLUMNS,
-                include_index=True,
-            ),
-            proposal=proposal,
-            ips_actions=ips_actions,
-            group_summary=group_summary,
-            rc_violations=rc_violations,
-            missing_tickers=state["analysis"]["missing_tickers"] if state["analysis"] else [],
-            playbook=state["evaluation"].get("playbook"),
-        )
-        gap = proposal_df.get("갭%", pd.Series(dtype=float))
-        should_execute = proposal_df.get("실행", pd.Series(dtype=bool)).astype(bool)
-        response["evaluation"] = {
-            "proposal": proposal,
-            "ips_actions": ips_actions,
-            "group_summary": group_summary,
-            "sell_list": dataframe_records(
-                proposal_df[(gap < 0) & should_execute],
-                PROPOSAL_COLUMNS,
-            ),
-            "buy_list": dataframe_records(
-                proposal_df[(gap > 0) & should_execute],
-                PROPOSAL_COLUMNS,
-            ),
-            "fine_tune_list": dataframe_records(
-                proposal_df[should_execute & (gap.abs() <= 1.0)],
-                PROPOSAL_COLUMNS,
-            ),
-            "rc_violations": dataframe_records(
-                rc_violations_df,
-                RC_VIOLATION_COLUMNS,
-            ),
-            "ips_config_snapshot": state["evaluation"].get("ips_config_snapshot"),
-            "playbook": state["evaluation"].get("playbook"),
-            **operating_view,
-        }
+    if state["evaluation"] and "layer_evaluations" in state["evaluation"]:
+        response["evaluation"] = state["evaluation"]
 
     return response
 
@@ -402,8 +306,6 @@ def _state_response(state: dict) -> dict:
 def _snapshot_response(snapshot: dict) -> dict:
     session_state = snapshot["session_state"]
     asset_df = pd.DataFrame(session_state.get("asset_df") or [])
-    if not asset_df.empty:
-        asset_df["group"] = asset_df.get("group", DEFAULT_GROUP).fillna(DEFAULT_GROUP).map(fixed_group)
     response = {
         "snapshot": snapshot["summary"],
         "portfolio": {
@@ -429,58 +331,7 @@ def _snapshot_response(snapshot: dict) -> dict:
             "missing_tickers": snapshot["analysis"]["missing_tickers"],
         }
 
-    if snapshot["evaluation"]:
-        proposal_df = _proposal_frame(snapshot["evaluation"]["proposal_df"])
-        ips_action_df = pd.DataFrame(snapshot["evaluation"]["ips_action_df"])
-        group_summary_df = pd.DataFrame(snapshot["evaluation"]["group_summary_df"])
-        rc_violations_df = pd.DataFrame(snapshot["evaluation"]["rc_violations"])
-        metrics_for_view = pd.DataFrame(
-            snapshot["analysis"]["metrics_df"] if snapshot["analysis"] else []
-        )
-        if not metrics_for_view.empty and "ticker" in metrics_for_view.columns:
-            metrics_for_view = metrics_for_view.set_index("ticker")
-        proposal = dataframe_records(proposal_df, PROPOSAL_COLUMNS)
-        ips_actions = dataframe_records(ips_action_df)
-        group_summary = dataframe_records(group_summary_df, GROUP_SUMMARY_COLUMNS)
-        rc_violations = dataframe_records(rc_violations_df, RC_VIOLATION_COLUMNS)
-        operating_view = build_evaluation_view(
-            metrics=dataframe_records(
-                metrics_for_view,
-                METRICS_COLUMNS,
-                include_index=True,
-            ),
-            proposal=proposal,
-            ips_actions=ips_actions,
-            group_summary=group_summary,
-            rc_violations=rc_violations,
-            missing_tickers=snapshot["analysis"]["missing_tickers"] if snapshot["analysis"] else [],
-            playbook=snapshot["evaluation"].get("playbook"),
-        )
-        gap = proposal_df.get("갭%", pd.Series(dtype=float))
-        should_execute = proposal_df.get("실행", pd.Series(dtype=bool)).astype(bool)
-        response["evaluation"] = {
-            "proposal": proposal,
-            "ips_actions": ips_actions,
-            "group_summary": group_summary,
-            "sell_list": dataframe_records(
-                proposal_df[(gap < 0) & should_execute],
-                PROPOSAL_COLUMNS,
-            ),
-            "buy_list": dataframe_records(
-                proposal_df[(gap > 0) & should_execute],
-                PROPOSAL_COLUMNS,
-            ),
-            "fine_tune_list": dataframe_records(
-                proposal_df[should_execute & (gap.abs() <= 1.0)],
-                PROPOSAL_COLUMNS,
-            ),
-            "rc_violations": dataframe_records(
-                rc_violations_df,
-                RC_VIOLATION_COLUMNS,
-            ),
-            "ips_config_snapshot": snapshot["evaluation"].get("ips_config_snapshot"),
-            "playbook": snapshot["evaluation"].get("playbook"),
-            **operating_view,
-        }
+    if snapshot["evaluation"] and "layer_evaluations" in snapshot["evaluation"]:
+        response["evaluation"] = snapshot["evaluation"]
 
     return response

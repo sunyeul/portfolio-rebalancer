@@ -11,16 +11,15 @@ DEFAULT_DB_PATH = Path("data") / "portfolio_rebalancer.sqlite3"
 
 THESIS_STATUS_SEEDS = [
     ("unknown", "미정", 0),
-    ("intact", "유효", 10),
+    ("valid", "유효", 10),
     ("watch", "관찰", 20),
     ("broken", "훼손", 30),
 ]
 
 TARGET_ALLOCATION_SEEDS = [
     ("core", 0.70, 0.80, 0.90),
-    ("satellite_ai_infra", 0.00, 0.08, 0.15),
-    ("satellite_ai_software", 0.00, 0.04, 0.10),
-    ("satellite_nextgen", 0.00, 0.08, 0.15),
+    ("satellite", 0.10, 0.20, 0.30),
+    ("experiment", 0.00, 0.00, 0.05),
 ]
 
 ACTION_PRIORITY_SEEDS = [
@@ -92,7 +91,9 @@ def initialize_database() -> None:
                 portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),
                 name TEXT NOT NULL,
                 note TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                as_of_date TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS portfolio_current_states (
@@ -108,7 +109,8 @@ def initialize_database() -> None:
                 allocation REAL NOT NULL,
                 weight REAL NOT NULL,
                 return_total REAL,
-                "group" TEXT NOT NULL DEFAULT 'core',
+                layer TEXT NOT NULL DEFAULT 'core',
+                category TEXT NOT NULL DEFAULT 'core_market',
                 dca_enabled INTEGER NOT NULL DEFAULT 1,
                 thesis_status_id INTEGER NOT NULL REFERENCES thesis_statuses(id),
                 position_order INTEGER NOT NULL DEFAULT 0,
@@ -151,8 +153,6 @@ def initialize_database() -> None:
             CREATE TABLE IF NOT EXISTS evaluation_runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 snapshot_id INTEGER NOT NULL UNIQUE REFERENCES portfolio_snapshots(id) ON DELETE CASCADE,
-                rc_over_thresh_pct REAL,
-                e_thresh REAL,
                 target_weights_json TEXT,
                 ips_config_snapshot_json TEXT,
                 playbook_json TEXT,
@@ -160,7 +160,7 @@ def initialize_database() -> None:
             );
 
             CREATE TABLE IF NOT EXISTS ips_target_allocations (
-                "group" TEXT PRIMARY KEY,
+                layer TEXT PRIMARY KEY,
                 min REAL NOT NULL,
                 target REAL NOT NULL,
                 max REAL NOT NULL
@@ -178,42 +178,6 @@ def initialize_database() -> None:
                 value_json TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS evaluation_rows (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                evaluation_run_id INTEGER NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
-                asset_id INTEGER REFERENCES assets(id),
-                ticker TEXT NOT NULL,
-                current_weight_pct REAL,
-                target_weight_pct REAL,
-                gap_pct REAL,
-                adjusted_gap_pct REAL,
-                rc_over_pct REAL,
-                rc_target_pct REAL,
-                should_execute INTEGER,
-                record_json TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS ips_action_rows (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                evaluation_run_id INTEGER NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
-                ticker TEXT,
-                record_json TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS group_summary_rows (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                evaluation_run_id INTEGER NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
-                "group" TEXT,
-                record_json TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS rc_violation_rows (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                evaluation_run_id INTEGER NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
-                ticker TEXT,
-                record_json TEXT NOT NULL
-            );
-
             CREATE TABLE IF NOT EXISTS journal_entries (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 snapshot_id INTEGER NOT NULL UNIQUE REFERENCES portfolio_snapshots(id) ON DELETE CASCADE,
@@ -228,45 +192,68 @@ def initialize_database() -> None:
             );
             """
         )
-        _ensure_column(conn, "evaluation_runs", "ips_config_snapshot_json", "TEXT")
-        _ensure_column(conn, "evaluation_runs", "playbook_json", "TEXT")
-        _ensure_target_allocation_table(conn)
+        _migrate_thesis_status_codes(conn)
         _seed_lookup(conn, "thesis_statuses", THESIS_STATUS_SEEDS)
         _seed_target_allocations(conn)
         _seed_action_priorities(conn)
         _seed_ips_rules(conn)
+        _ensure_schema(conn)
 
 
-def _ensure_column(
-    conn: sqlite3.Connection,
-    table: str,
-    column: str,
-    definition: str,
-) -> bool:
-    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
-    if column not in columns:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-        return True
-    return False
-
-
-def _ensure_target_allocation_table(conn: sqlite3.Connection) -> None:
+def _ensure_schema(conn: sqlite3.Connection) -> None:
     columns = {
-        row["name"] for row in conn.execute("PRAGMA table_info(ips_target_allocations)")
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(portfolio_snapshots)").fetchall()
     }
-    if "group" in columns:
-        return
-    conn.execute("DROP TABLE IF EXISTS ips_target_allocations")
+    if "as_of_date" not in columns:
+        conn.execute("ALTER TABLE portfolio_snapshots ADD COLUMN as_of_date TEXT")
+        conn.execute(
+            """
+            UPDATE portfolio_snapshots
+            SET as_of_date = substr(created_at, 1, 10)
+            WHERE as_of_date IS NULL OR as_of_date = ''
+            """
+        )
+    if "updated_at" not in columns:
+        conn.execute("ALTER TABLE portfolio_snapshots ADD COLUMN updated_at TEXT")
     conn.execute(
         """
-        CREATE TABLE ips_target_allocations (
-            "group" TEXT PRIMARY KEY,
-            min REAL NOT NULL,
-            target REAL NOT NULL,
-            max REAL NOT NULL
-        )
+        UPDATE portfolio_snapshots
+        SET updated_at = created_at
+        WHERE updated_at IS NULL OR updated_at = ''
         """
     )
+
+
+def _migrate_thesis_status_codes(conn: sqlite3.Connection) -> None:
+    intact = conn.execute(
+        "SELECT id FROM thesis_statuses WHERE code = 'intact'"
+    ).fetchone()
+    if intact is None:
+        return
+
+    valid = conn.execute(
+        "SELECT id FROM thesis_statuses WHERE code = 'valid'"
+    ).fetchone()
+    if valid is None:
+        conn.execute(
+            """
+            UPDATE thesis_statuses
+            SET code = 'valid', label = '유효', sort_order = 10, is_active = 1
+            WHERE code = 'intact'
+            """
+        )
+        return
+
+    conn.execute(
+        """
+        UPDATE snapshot_positions
+        SET thesis_status_id = ?
+        WHERE thesis_status_id = ?
+        """,
+        (valid["id"], intact["id"]),
+    )
+    conn.execute("DELETE FROM thesis_statuses WHERE id = ?", (intact["id"],))
 
 
 def _seed_lookup(
@@ -279,27 +266,30 @@ def _seed_lookup(
             f"""
             INSERT INTO {table} (code, label, sort_order, is_active)
             VALUES (?, ?, ?, 1)
-            ON CONFLICT(code) DO NOTHING
+            ON CONFLICT(code) DO UPDATE SET
+                label = excluded.label,
+                sort_order = excluded.sort_order,
+                is_active = 1
             """,
             (code, label, sort_order),
         )
 
 
 def _seed_target_allocations(conn: sqlite3.Connection) -> None:
-    active_groups = [group for group, _, _, _ in TARGET_ALLOCATION_SEEDS]
-    placeholders = ",".join("?" for _ in active_groups)
+    active_layers = [layer for layer, _, _, _ in TARGET_ALLOCATION_SEEDS]
+    placeholders = ",".join("?" for _ in active_layers)
     conn.execute(
-        f'DELETE FROM ips_target_allocations WHERE "group" NOT IN ({placeholders})',
-        active_groups,
+        f"DELETE FROM ips_target_allocations WHERE layer NOT IN ({placeholders})",
+        active_layers,
     )
-    for group, min_value, target_value, max_value in TARGET_ALLOCATION_SEEDS:
+    for layer, min_value, target_value, max_value in TARGET_ALLOCATION_SEEDS:
         conn.execute(
             """
-            INSERT INTO ips_target_allocations ("group", min, target, max)
+            INSERT INTO ips_target_allocations (layer, min, target, max)
             VALUES (?, ?, ?, ?)
-            ON CONFLICT("group") DO NOTHING
+            ON CONFLICT(layer) DO NOTHING
             """,
-            (group, min_value, target_value, max_value),
+            (layer, min_value, target_value, max_value),
         )
 
 

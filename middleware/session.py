@@ -1,7 +1,4 @@
-"""세션 관리 미들웨어.
-
-# AIDEV-NOTE: session-management; Redis 기반 세션 (개발 환경에서는 메모리 기반 폴백)
-"""
+"""세션 관리 미들웨어."""
 
 import os
 import uuid
@@ -14,8 +11,7 @@ from itsdangerous import BadSignature, Signer
 class SessionManager:
     """세션 관리자.
 
-    개발 환경에서는 메모리 기반 딕셔너리를 사용하고,
-    프로덕션 환경에서는 Redis를 사용합니다.
+    메모리 기반 딕셔너리를 사용합니다.
     """
 
     def __init__(self, secret_key: str | None = None):

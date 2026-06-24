@@ -1,25 +1,34 @@
 from typing import List
-from pydantic import BaseModel, field_validator, Field
+from pydantic import BaseModel, field_validator, Field, model_validator
 import re
 
-VALID_GROUPS = {
-    "core",
+LAYER_TYPES = {"core", "satellite", "experiment"}
+ASSET_CATEGORIES = {
+    "core_market",
+    "core_gold",
     "satellite_ai_infra",
     "satellite_ai_software",
+    "satellite_space",
     "satellite_nextgen",
+    "experiment_leverage",
+    "experiment_momentum",
 }
-DEFAULT_GROUP = "core"
-GROUP_LABELS = {
-    "core": "코어",
-    "satellite_ai_infra": "위성_AI인프라",
-    "satellite_ai_software": "위성_AI소프트웨어",
-    "satellite_nextgen": "위성_차세대",
-}
-GROUP_ROLES = {
-    "core": "core",
+CATEGORY_LAYERS = {
+    "core_market": "core",
+    "core_gold": "core",
     "satellite_ai_infra": "satellite",
     "satellite_ai_software": "satellite",
+    "satellite_space": "satellite",
     "satellite_nextgen": "satellite",
+    "experiment_leverage": "experiment",
+    "experiment_momentum": "experiment",
+}
+DEFAULT_CATEGORY = "core_market"
+DEFAULT_LAYER = "core"
+DEFAULT_CATEGORY_BY_LAYER = {
+    "core": "core_market",
+    "satellite": "satellite_ai_infra",
+    "experiment": "experiment_leverage",
 }
 
 
@@ -34,9 +43,10 @@ class Asset(BaseModel):
     return_total: float | None = Field(
         None, description="누적 수익률 (0.1234 = 12.34%, 선택)"
     )
-    group: str = Field(DEFAULT_GROUP, description="IPS 고정 그룹 분류")
+    layer: str | None = Field(None, description="v2 평가 계층")
+    category: str | None = Field(None, description="v2 자산 카테고리")
     dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
-    thesis_status: str = Field("unknown", description="투자 논리 상태")
+    thesis_status: str = Field("valid", description="투자 논리 상태")
 
     @field_validator("ticker", mode="before")
     @classmethod
@@ -81,22 +91,32 @@ class Asset(BaseModel):
         except (TypeError, ValueError) as e:
             raise ValueError(f"return_total는 숫자로 변환 불가: {v}") from e
 
-    @field_validator("group", mode="before")
+    @field_validator("layer", mode="before")
     @classmethod
-    def normalize_group(cls, v: str | None) -> str:
-        """그룹은 고정 분류값만 허용하고 그 외 값은 코어로 정규화합니다."""
+    def normalize_layer(cls, v: str | None) -> str | None:
+        """v2 layer는 지원 목록만 유지하고 비어 있으면 보강합니다."""
         if v is None or str(v).strip() == "":
-            return DEFAULT_GROUP
+            return None
         normalized = str(v).strip().lower()
-        return normalized if normalized in VALID_GROUPS else DEFAULT_GROUP
+        return normalized if normalized in LAYER_TYPES else None
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_category(cls, v: str | None) -> str | None:
+        """v2 category는 지원 목록만 유지하고 비어 있으면 보강합니다."""
+        if v is None or str(v).strip() == "":
+            return None
+        normalized = str(v).strip().lower()
+        return normalized if normalized in ASSET_CATEGORIES else None
 
     @field_validator("thesis_status", mode="before")
     @classmethod
     def normalize_text_field(cls, v: str | None) -> str:
-        """IPS 텍스트 필드는 비어 있으면 unknown으로 정규화합니다."""
+        """IPS 텍스트 필드는 비어 있으면 valid로 정규화합니다."""
         if v is None or str(v).strip() == "":
-            return "unknown"
-        return str(v).strip().lower()
+            return "valid"
+        normalized = str(v).strip().lower()
+        return "valid" if normalized == "intact" else normalized
 
     @field_validator("dca_enabled", mode="before")
     @classmethod
@@ -108,6 +128,19 @@ class Asset(BaseModel):
             return v
         s = str(v).strip().lower()
         return s in {"true", "1", "yes", "y", "on", "정기", "가능"}
+
+    @model_validator(mode="after")
+    def fill_layer_category(self):
+        """Fill the current v2 layer/category model."""
+        layer = self.layer if self.layer in LAYER_TYPES else DEFAULT_LAYER
+        category = self.category
+        if category in ASSET_CATEGORIES:
+            layer = CATEGORY_LAYERS[category]
+        else:
+            category = DEFAULT_CATEGORY_BY_LAYER.get(layer, DEFAULT_CATEGORY)
+        self.layer = layer
+        self.category = category
+        return self
 
     class Config:
         """Pydantic 설정."""
@@ -144,7 +177,9 @@ def parse_text_to_assets(text: str) -> List[Asset]:
         ticker = parts[0].upper()
         allocation = None
         return_total = None
-        text_tokens: list[str] = []
+        layer = None
+        category = None
+        thesis_status = "valid"
 
         num_count = 0
         for p in parts[1:]:
@@ -157,8 +192,13 @@ def parse_text_to_assets(text: str) -> List[Asset]:
                     return_total = num / 100.0  # % → 소수 변환
                 num_count += 1
             except ValueError:
-                if p:
-                    text_tokens.append(p)
+                token = p.strip().lower()
+                if token in LAYER_TYPES:
+                    layer = token
+                elif token in ASSET_CATEGORIES:
+                    category = token
+                elif token:
+                    thesis_status = token
 
         if allocation is None:
             # AIDEV-NOTE: silent-skip; Streamlit 경고 제거, 파싱 실패는 무시하고 계속 진행
@@ -169,8 +209,9 @@ def parse_text_to_assets(text: str) -> List[Asset]:
                 ticker=ticker,
                 allocation=allocation,
                 return_total=return_total,
-                group=text_tokens[0] if len(text_tokens) > 0 else DEFAULT_GROUP,
-                thesis_status=text_tokens[1] if len(text_tokens) > 1 else "unknown",
+                layer=layer,
+                category=category,
+                thesis_status=thesis_status,
             )
             assets.append(asset)
         except ValueError:

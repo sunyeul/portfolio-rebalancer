@@ -4,7 +4,8 @@ export type AssetRow = {
   ticker: string;
   allocation: number;
   return_total: number | null;
-  group: string;
+  layer?: string | null;
+  category?: string | null;
   dca_enabled: boolean;
   thesis_status: string;
   weight: number;
@@ -28,7 +29,8 @@ export type MetricRow = {
   weight: number;
   efficiency_score: number | null;
   return_total: number | null;
-  group: string;
+  layer?: string | null;
+  category?: string | null;
   dca_enabled: boolean;
   thesis_status: string;
 };
@@ -40,258 +42,76 @@ export type MetricsSummary = {
   max_drawdown?: number | null;
 };
 
-export type ProposalRow = {
-  ticker: string;
-  current_weight_pct: number;
-  target_weight_pct: number;
-  gap_pct: number;
-  efficiency_score: number | null;
-  rc_gap_pct: number;
-  rc_over_pct: number;
-  rc_target_pct: number;
-  return_total_pct: number | null;
-  ips_fit_score: number | null;
-  ips_fit_band: string | null;
-  ips_score_role: number | null;
-  ips_score_allocation: number | null;
-  ips_score_thesis: number | null;
-  ips_score_risk: number | null;
-  ips_score_action: number | null;
-  ips_score_efficiency: number | null;
-  ips_score_data_quality: number | null;
-  group: string;
-  dca_enabled: boolean;
-  thesis_status: string;
-  risk_over: boolean;
-  efficiency_warning: boolean;
-  within_hysteresis: boolean;
-  below_min_trade: boolean;
-  numeric_candidate: boolean;
-  reference_trade_pct: number;
-  should_execute: boolean;
-  suggested_trade_pct: number;
-  action_reason: string;
+export type EvaluationStatus = 'OK' | 'Watch' | 'Review' | 'Action';
+
+export type EvaluationPeriod = {
+  label: '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'Max' | 'custom';
+  start_date: string;
+  end_date: string;
+};
+
+export type EvaluationUnit = {
+  level: 'layer' | 'asset';
+  name: string;
+  parent_layer: string | null;
+  benchmark?: unknown;
+  target_weight: number | null;
+  allowed_mdd: number | null;
+  allowed_volatility: number | null;
+  max_weight: number | null;
+  min_efficiency: number | null;
+};
+
+export type EvaluationOutput = {
+  current_weight: number;
+  weight_gap: number | null;
+  layer_internal_weight: number | null;
+  period_return: number | null;
+  cagr: number | null;
+  benchmark_return: number | null;
+  benchmark_excess_return: number | null;
+  mdd: number | null;
+  volatility: number | null;
+  concentration: number | null;
+  risk_contribution: number | null;
+  return_mdd_ratio: number | null;
+  cagr_mdd_ratio: number | null;
+  sharpe: number | null;
+  sortino: number | null;
+  thesis_status: 'valid' | 'watch' | 'broken' | 'unknown';
+  burden: 'low' | 'medium' | 'high';
+  status: EvaluationStatus;
+  triggered_by: string[];
+};
+
+export type EvaluationRecord = {
+  unit: EvaluationUnit;
+  output: EvaluationOutput;
+};
+
+export type ReviewItem = {
+  level: 'layer' | 'asset';
+  name: string;
+  parent_layer: string | null;
+  status: Exclude<EvaluationStatus, 'OK'>;
+  triggered_by: string[];
+  metrics_snapshot: Record<string, unknown>;
+  thesis: string | null;
+  counter_scenario: string | null;
+  suggested_next_step: string;
 };
 
 export type EvaluationResponse = {
-  proposal: ProposalRow[];
-  ips_actions: Array<Record<string, unknown>>;
-  group_summary: Array<Record<string, unknown>>;
-  sell_list: ProposalRow[];
-  buy_list: ProposalRow[];
-  fine_tune_list: ProposalRow[];
-  rc_violations: Array<Record<string, unknown>>;
-  ips_config_snapshot?: Record<string, unknown> | null;
-  playbook?: PlaybookRecommendation | null;
-  ips_status?: IpsStatus | null;
-  dca_plan?: DcaPlan;
-  review_queue?: ReviewQueue;
-  risk_flags?: RiskFlag[];
-  guardrails?: Guardrails;
-  not_advice_notice?: string;
-};
-
-export type PlaybookRecommendation = {
-  code: DecisionContext;
-  label: string;
-  confidence: 'high' | 'medium' | 'low';
-  reasons: string[];
-  steps: string[];
-  manual_context: DecisionContext;
-  is_manual_override: boolean;
-};
-
-export type OperatingItem = {
-  ticker: string | null;
-  ips_action: string | null;
-  label: string | null;
-  family: string | null;
-  execution_type: string | null;
-  current_weight_pct: number | null;
-  target_weight_pct: number | null;
-  gap_pct: number | null;
-  group: string | null;
-  ips_fit_score: number | null;
-  ips_fit_band: string | null;
-  risk_over: boolean | null;
-  data_quality_low: boolean | null;
-  decision_summary: string | null;
-  decision_reasons: string[];
-  risk_notes: string[];
-  next_step: string | null;
-  blocked_reason: string | null;
-};
-
-export type DcaPlan = {
-  increase: OperatingItem[];
-  reduce_or_pause: OperatingItem[];
-  hold: OperatingItem[];
-};
-
-export type ReviewQueue = {
-  thesis_review: OperatingItem[];
-  risk_review: OperatingItem[];
-  sell_review: OperatingItem[];
-  blocked: OperatingItem[];
-};
-
-export type RiskFlag = {
-  type: string;
-  type_code?: string;
-  type_label?: string;
-  ticker?: string | null;
-  severity: string;
-  severity_code?: string;
-  severity_label?: string;
-  message: string;
-  current_rc_pct?: number | null;
-  rc_cap_pct?: number | null;
-  rc_over_pct?: number | null;
-  missing_ratio?: number | null;
-  observation_count?: number | null;
-};
-
-export type IpsStatus = {
-  status: string;
-  status_code?: string;
-  status_label?: string;
-  status_description?: string;
-  summary: {
-    dca_increase_count: number;
-    dca_reduce_or_pause_count: number;
-    hold_count: number;
-    review_count: number;
-    risk_flag_count: number;
-  };
-  group_summary: Array<Record<string, unknown>>;
-  top_risk_contributors: MetricRow[];
-};
-
-export type Guardrails = {
-  not_investment_advice: boolean;
-  no_immediate_order_instruction: boolean;
-};
-
-export type CounterfactualScenario =
-  | 'current_proposal'
-  | 'core_reinforcement'
-  | 'pause_satellite_new_buys'
-  | 'dca_shift_to_core';
-
-export type DecisionContext =
-  | 'regular_review'
-  | 'market_correction'
-  | 'sharp_drop_review'
-  | 'rebalance_review';
-
-export type CounterfactualAssetDelta = {
-  ticker: string;
-  baseline_weight: number;
-  scenario_weight: number;
-  delta_weight_pct: number;
-  baseline_risk_contribution: number;
-  scenario_risk_contribution: number;
-  delta_risk_contribution_pct: number;
-  baseline_gap_pct: number;
-  scenario_gap_pct: number;
-};
-
-export type CounterfactualResponse = {
-  baseline: {
-    weights: Record<string, number>;
-    risk_contributions: Record<string, number>;
-    target_gaps_pct: Record<string, number>;
-    group_weights: Record<string, number>;
-    actions: Record<string, string>;
-    action_labels: Record<string, string>;
-  };
-  scenario: {
-    weights: Record<string, number>;
-    risk_contributions: Record<string, number>;
-    target_gaps_pct: Record<string, number>;
-    group_weights: Record<string, number>;
-    actions: Record<string, string>;
-    action_labels: Record<string, string>;
-  };
-  deltas: {
-    assets: CounterfactualAssetDelta[];
-    groups: Record<string, { baseline: number; scenario: number; delta_pct: number }>;
-  };
-  action_changes: Array<{
-    ticker: string;
-    baseline_action: string;
-    scenario_action: string;
-    baseline_label: string;
-    scenario_label: string;
-  }>;
+  evaluation_period: EvaluationPeriod;
+  layer_evaluations: EvaluationRecord[];
+  asset_evaluations: EvaluationRecord[];
+  review_queue: ReviewItem[];
+  journal_draft: Array<Record<string, unknown>>;
   warnings: string[];
-  interpretation: string[];
-};
-
-export type BacktestStrategy =
-  | 'current_ips'
-  | 'core_first_dca'
-  | 'pause_overweight_satellite'
-  | 'return_chasing_reference';
-
-export type BacktestStrategySummary = {
-  strategy: string;
-  strategy_label: string;
-  decision_context: string;
-  cagr: number | null;
-  volatility: number | null;
-  max_drawdown: number | null;
-  sharpe: number | null;
-  ips_violation_count: number;
-  satellite_over_periods: number;
-  risk_contribution_over_count: number;
-  adjustment_count: number;
-  avg_core_gap: number;
-  months_to_core_target_recovery: number | null;
-};
-
-export type BacktestResponse = {
-  strategy_summaries: BacktestStrategySummary[];
-  ips_fit_summary: Array<Record<string, unknown>>;
-  performance_summary: Array<Record<string, unknown>>;
-  timeline: Array<Record<string, unknown>>;
-};
-
-export type ConfigOption = {
-  value: string;
-  label: string;
-  is_active: boolean;
-  sort_order: number;
-};
-
-export type ConfigOptionsResponse = {
-  thesis_statuses: ConfigOption[];
-};
-
-export type TargetAllocation = {
-  group: string;
-  min: number;
-  target: number;
-  max: number;
-};
-
-export type ActionPriority = {
-  action_code: string;
-  label: string;
-  priority: number;
-  is_active: boolean;
-};
-
-export type IpsRule = {
-  key: string;
-  value: unknown;
-};
-
-export type IpsConfigResponse = {
-  target_allocations: TargetAllocation[];
-  action_priorities: ActionPriority[];
-  rules: IpsRule[];
-  ips_config: Record<string, unknown>;
+  guardrails: {
+    not_investment_advice: boolean;
+    no_immediate_order_instruction: boolean;
+  };
 };
 
 export type PortfolioResponse = {
@@ -311,7 +131,8 @@ export type SnapshotSummary = {
   portfolio_id: number;
   name: string;
   note: string;
-  created_at: string;
+  created_at: string | null;
+  updated_at: string | null;
   position_count: number;
   has_analysis: boolean;
   has_evaluation: boolean;
@@ -326,7 +147,8 @@ export type SavedPortfolio = {
   latest_snapshot: {
     id: number;
     name: string;
-    created_at: string;
+    created_at: string | null;
+    updated_at: string | null;
     position_count: number;
   } | null;
 };
@@ -336,19 +158,6 @@ export type SnapshotLoadResponse = {
   portfolio: PortfolioResponse;
   analysis: AnalysisResponse | null;
   evaluation: EvaluationResponse | null;
-};
-
-export type JournalEntry = {
-  id: number;
-  snapshot_id: number;
-  date: string;
-  decision_context: DecisionContext;
-  playbook_code: string | null;
-  dca_changes_considered: OperatingItem[];
-  review_items: OperatingItem[];
-  decision_note: string;
-  created_at: string;
-  updated_at: string;
 };
 
 export type CurrentStateResponse = {
@@ -371,19 +180,18 @@ async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function normalizePortfolioRows(rows: PortfolioRowInput[]) {
+  return rows.map((row) => ({
+    ...row,
+    ticker: String(row.ticker ?? '').trim().toUpperCase(),
+    thesis_status: row.thesis_status || 'valid'
+  }));
+}
+
 export function submitPortfolio(rows: PortfolioRowInput[]) {
   return requestJson<PortfolioResponse>('/api/v1/portfolio/manual', {
     method: 'POST',
-    body: JSON.stringify({ rows })
-  });
-}
-
-export function uploadPortfolioCsv(file: File) {
-  const body = new FormData();
-  body.append('file', file);
-  return requestJson<PortfolioResponse>('/api/v1/portfolio/csv', {
-    method: 'POST',
-    body
+    body: JSON.stringify({ rows: normalizePortfolioRows(rows) })
   });
 }
 
@@ -399,43 +207,15 @@ export function runAnalysis(payload: {
 }
 
 export function runEvaluation(payload: {
-  rc_over_thresh_pct: number;
-  e_thresh: number;
-  decision_context: DecisionContext;
-  target_weights?: Record<string, number>;
+  period?: '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'Max';
+  rf?: number;
+  bench?: string;
+  layer_benchmarks?: Record<string, string>;
 }) {
   return requestJson<EvaluationResponse>('/api/v1/evaluation/run', {
     method: 'POST',
     body: JSON.stringify(payload)
   });
-}
-
-export function runCounterfactual(payload: {
-  scenario: CounterfactualScenario;
-  rc_over_thresh_pct: number;
-  e_thresh: number;
-  decision_context: DecisionContext;
-}) {
-  return requestJson<CounterfactualResponse>('/api/v1/simulation/counterfactual', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
-}
-
-export function runBacktest(payload: {
-  strategies: BacktestStrategy[];
-  frequency: 'monthly';
-  decision_context: DecisionContext;
-  rf?: number;
-}) {
-  return requestJson<BacktestResponse>('/api/v1/simulation/backtest', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
-}
-
-export function csvDownloadUrl(type: 'metrics' | 'proposal' | 'ips_actions' | 'group_summary') {
-  return `/api/v1/evaluation/download-csv?type=${type}`;
 }
 
 export function listPortfolios() {
@@ -475,29 +255,10 @@ export function saveSnapshot(
 ) {
   return requestJson<{ snapshot: SnapshotSummary }>(`/api/v1/portfolios/${portfolioId}/snapshots`, {
     method: 'POST',
-    body: JSON.stringify(payload)
-  });
-}
-
-export function updateSnapshot(
-  snapshotId: number,
-  payload: { name?: string; note?: string; rows?: PortfolioRowInput[] }
-) {
-  return requestJson<{ snapshot: SnapshotSummary }>(`/api/v1/portfolios/snapshots/${snapshotId}`, {
-    method: 'PATCH',
-    body: JSON.stringify(payload)
-  });
-}
-
-export function getSnapshot(snapshotId: number) {
-  return requestJson<SnapshotLoadResponse>(`/api/v1/portfolios/snapshots/${snapshotId}`, {
-    method: 'GET'
-  });
-}
-
-export function deleteSnapshot(snapshotId: number) {
-  return requestJson<{ ok: true }>(`/api/v1/portfolios/snapshots/${snapshotId}`, {
-    method: 'DELETE'
+    body: JSON.stringify({
+      ...payload,
+      rows: payload.rows ? normalizePortfolioRows(payload.rows) : undefined
+    })
   });
 }
 
@@ -507,58 +268,21 @@ export function loadSnapshot(snapshotId: number) {
   });
 }
 
-export function getJournal(snapshotId: number) {
-  return requestJson<{ journal: JournalEntry | null }>(`/api/v1/journal/snapshots/${snapshotId}`, {
-    method: 'GET'
+export function deleteSnapshot(snapshotId: number) {
+  return requestJson<{ ok: boolean }>(`/api/v1/portfolios/snapshots/${snapshotId}`, {
+    method: 'DELETE'
   });
 }
 
-export function saveJournal(
+export function updateSnapshot(
   snapshotId: number,
-  payload: {
-    date: string;
-    decision_context: DecisionContext;
-    playbook_code?: string | null;
-    dca_changes_considered: OperatingItem[];
-    review_items: OperatingItem[];
-    decision_note: string;
-  }
+  payload: { name?: string; note?: string; rows?: PortfolioRowInput[] }
 ) {
-  return requestJson<{ journal: JournalEntry }>(`/api/v1/journal/snapshots/${snapshotId}`, {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
-}
-
-export function getConfigOptions() {
-  return requestJson<ConfigOptionsResponse>('/api/v1/config/options', {
-    method: 'GET'
-  });
-}
-
-export function getIpsConfig() {
-  return requestJson<IpsConfigResponse>('/api/v1/config/ips', {
-    method: 'GET'
-  });
-}
-
-export function saveTargetAllocations(rows: TargetAllocation[]) {
-  return requestJson<{ target_allocations: TargetAllocation[] }>('/api/v1/config/ips/target-allocations', {
-    method: 'PUT',
-    body: JSON.stringify(rows)
-  });
-}
-
-export function saveActionPriorities(rows: ActionPriority[]) {
-  return requestJson<{ action_priorities: ActionPriority[] }>('/api/v1/config/ips/action-priorities', {
-    method: 'PUT',
-    body: JSON.stringify(rows)
-  });
-}
-
-export function saveIpsRules(rows: IpsRule[]) {
-  return requestJson<{ rules: IpsRule[] }>('/api/v1/config/ips/rules', {
-    method: 'PUT',
-    body: JSON.stringify(rows)
+  return requestJson<{ snapshot: SnapshotSummary }>(`/api/v1/portfolios/snapshots/${snapshotId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      ...payload,
+      rows: payload.rows ? normalizePortfolioRows(payload.rows) : undefined
+    })
   });
 }

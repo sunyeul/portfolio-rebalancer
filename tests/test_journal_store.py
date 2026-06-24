@@ -18,9 +18,10 @@ def _create_snapshot() -> dict:
                     "allocation": 100.0,
                     "weight": 1.0,
                     "return_total": None,
-                    "group": "core",
+                    "layer": "core",
+                    "category": "core_market",
                     "dca_enabled": True,
-                    "thesis_status": "intact",
+                    "thesis_status": "valid",
                 }
             ]
         },

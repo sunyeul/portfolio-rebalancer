@@ -27,60 +27,11 @@ METRICS_COLUMNS = {
     "가중치": "weight",
     "E": "efficiency_score",
     "return_total": "return_total",
-    "group": "group",
+    "layer": "layer",
+    "category": "category",
     "dca_enabled": "dca_enabled",
     "thesis_status": "thesis_status",
 }
-
-PROPOSAL_COLUMNS = {
-    "ticker": "ticker",
-    "현재%": "current_weight_pct",
-    "목표%": "target_weight_pct",
-    "갭%": "gap_pct",
-    "E": "efficiency_score",
-    "RC_Gap%": "rc_gap_pct",
-    "RC_Over%": "rc_over_pct",
-    "RC_Target%": "rc_target_pct",
-    "return_total%": "return_total_pct",
-    "IPS적합도": "ips_fit_score",
-    "IPS등급": "ips_fit_band",
-    "IPS점수_역할": "ips_score_role",
-    "IPS점수_비중": "ips_score_allocation",
-    "IPS점수_논리": "ips_score_thesis",
-    "IPS점수_위험": "ips_score_risk",
-    "IPS점수_실행": "ips_score_action",
-    "IPS점수_E": "ips_score_efficiency",
-    "IPS점수_데이터": "ips_score_data_quality",
-    "group": "group",
-    "dca_enabled": "dca_enabled",
-    "thesis_status": "thesis_status",
-    "risk_over": "risk_over",
-    "efficiency_warning": "efficiency_warning",
-    "히스테리시스제외": "within_hysteresis",
-    "최소거래미만": "below_min_trade",
-    "수치후보": "numeric_candidate",
-    "참고조정%": "reference_trade_pct",
-    "실행": "should_execute",
-    "제안조정%": "suggested_trade_pct",
-    "판단사유": "action_reason",
-}
-
-RC_VIOLATION_COLUMNS = {
-    "ticker": "ticker",
-    "현재RC%": "current_rc_pct",
-    "RC상한%": "rc_cap_pct",
-    "상태": "status",
-}
-
-GROUP_SUMMARY_COLUMNS = {
-    "group": "group",
-    "weight": "weight",
-    "risk_contribution": "risk_contribution",
-    "avg_efficiency": "avg_efficiency",
-    "avg_missing_ratio": "avg_missing_ratio",
-    "min_observation_count": "min_observation_count",
-}
-
 
 def json_safe(value: Any) -> Any:
     """Convert pandas/numpy scalar values into JSON-safe Python values."""

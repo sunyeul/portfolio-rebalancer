@@ -3,18 +3,14 @@ target_allocation:
     min: 0.70
     target: 0.80
     max: 0.90
-  satellite_ai_infra:
+  satellite:
+    min: 0.10
+    target: 0.20
+    max: 0.30
+  experiment:
     min: 0.00
-    target: 0.08
-    max: 0.15
-  satellite_ai_software:
-    min: 0.00
-    target: 0.04
-    max: 0.10
-  satellite_nextgen:
-    min: 0.00
-    target: 0.08
-    max: 0.15
+    target: 0.00
+    max: 0.05
 
 action_priority:
   block_action: 1
@@ -45,12 +41,11 @@ ips_fit_scoring:
     efficiency: 5
     data_quality: 5
   thesis_score:
-    intact: 1.0
+    valid: 1.0
     watch: 0.65
     unknown: 0.5
     broken: 0.0
   role_score:
     core: 1.0
-    satellite_ai_infra: 0.85
-    satellite_ai_software: 0.85
-    satellite_nextgen: 0.85
+    satellite: 0.85
+    experiment: 0.65
