@@ -1,0 +1,4 @@
+interface:
+  display_name: "IPS Pilot Frontend Workbench"
+  short_description: "Frontend workbench guardrails"
+  default_prompt: "Use this when changing the IPS Pilot frontend workbench."

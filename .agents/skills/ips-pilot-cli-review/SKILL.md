@@ -69,6 +69,23 @@ For raw `evaluate`, read:
 
 Do not infer buy, sell, execute, or regular-purchase instructions. The v2 schema intentionally has no execution flag or order-sized output.
 
+## V2 CLI Contract
+
+Treat the CLI as an agent-facing JSON interface. Successful commands should produce one JSON object with `ok`, `command`, `input`, evaluation or brief fields, `warnings`, `guardrails`, and `error`; failures should stay machine-readable.
+
+The raw evaluation envelope includes:
+
+- `evaluation_period`
+- `layer_evaluations`
+- `asset_evaluations`
+- `review_queue`
+- `journal_draft`
+- `warnings`
+- `guardrails`
+- `error`
+
+Review Queue items should be interpreted from `level`, `name`, `parent_layer`, `status`, `triggered_by`, `metrics_snapshot`, and `suggested_next_step`. Never add or expect `buy`, `sell`, `execute`, or order-sized fields in v2 inspection outputs.
+
 ## Interpretation Buckets
 
 Build the user-facing summary from v2 status labels:

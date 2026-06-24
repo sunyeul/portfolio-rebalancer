@@ -13,6 +13,15 @@ The central question is:
 
 > Given the current portfolio, does the user's investment policy say to adjust future buying, wait, recheck the thesis, or only exceptionally consider immediate buy/sell action?
 
+## V2 Inspection Frame
+
+IPS Pilot v2 evaluates both layers and assets as inspection units. Keep `core`, `satellite`, and `experiment` as first-class layers, and use only the status vocabulary `OK`, `Watch`, `Review`, and `Action`.
+
+- `OK`: no material threshold, data, thesis, or burden warning.
+- `Watch`: soft warning such as thesis uncertainty, target-gap tolerance, weak efficiency, or elevated burden.
+- `Review`: hard threshold breach, risk overage, broken thesis, or insufficient data that blocks judgment.
+- `Action`: broken thesis plus a hard limit breach; inspect possible exceptional intervention, not permission to trade.
+
 ## Default Posture
 
 The default adjustment mechanism is regular purchase allocation, not immediate trading.
