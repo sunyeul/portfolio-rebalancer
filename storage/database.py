@@ -11,7 +11,7 @@ DEFAULT_DB_PATH = Path("data") / "portfolio_rebalancer.sqlite3"
 
 THESIS_STATUS_SEEDS = [
     ("unknown", "미정", 0),
-    ("intact", "유효", 10),
+    ("valid", "유효", 10),
     ("watch", "관찰", 20),
     ("broken", "훼손", 30),
 ]
@@ -192,6 +192,7 @@ def initialize_database() -> None:
             );
             """
         )
+        _migrate_thesis_status_codes(conn)
         _seed_lookup(conn, "thesis_statuses", THESIS_STATUS_SEEDS)
         _seed_target_allocations(conn)
         _seed_action_priorities(conn)
@@ -215,13 +216,44 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         )
     if "updated_at" not in columns:
         conn.execute("ALTER TABLE portfolio_snapshots ADD COLUMN updated_at TEXT")
+    conn.execute(
+        """
+        UPDATE portfolio_snapshots
+        SET updated_at = created_at
+        WHERE updated_at IS NULL OR updated_at = ''
+        """
+    )
+
+
+def _migrate_thesis_status_codes(conn: sqlite3.Connection) -> None:
+    intact = conn.execute(
+        "SELECT id FROM thesis_statuses WHERE code = 'intact'"
+    ).fetchone()
+    if intact is None:
+        return
+
+    valid = conn.execute(
+        "SELECT id FROM thesis_statuses WHERE code = 'valid'"
+    ).fetchone()
+    if valid is None:
         conn.execute(
             """
-            UPDATE portfolio_snapshots
-            SET updated_at = created_at
-            WHERE updated_at IS NULL OR updated_at = ''
+            UPDATE thesis_statuses
+            SET code = 'valid', label = '유효', sort_order = 10, is_active = 1
+            WHERE code = 'intact'
             """
         )
+        return
+
+    conn.execute(
+        """
+        UPDATE snapshot_positions
+        SET thesis_status_id = ?
+        WHERE thesis_status_id = ?
+        """,
+        (valid["id"], intact["id"]),
+    )
+    conn.execute("DELETE FROM thesis_statuses WHERE id = ?", (intact["id"],))
 
 
 def _seed_lookup(
@@ -234,7 +266,10 @@ def _seed_lookup(
             f"""
             INSERT INTO {table} (code, label, sort_order, is_active)
             VALUES (?, ?, ?, 1)
-            ON CONFLICT(code) DO NOTHING
+            ON CONFLICT(code) DO UPDATE SET
+                label = excluded.label,
+                sort_order = excluded.sort_order,
+                is_active = 1
             """,
             (code, label, sort_order),
         )

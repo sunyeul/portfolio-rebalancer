@@ -18,7 +18,7 @@ def test_parse_csv_uses_current_shape_defaults():
     assert assets[0].layer == "core"
     assert assets[0].category == "core_market"
     assert assets[0].dca_enabled is True
-    assert assets[0].thesis_status == "unknown"
+    assert assets[0].thesis_status == "valid"
 
 
 def test_korean_yfinance_tickers_are_accepted_across_input_paths():
@@ -66,10 +66,10 @@ def test_parse_csv_reads_ips_metadata_and_percent_return_total():
 
 def test_layer_and_category_are_preserved_across_input_paths():
     text_assets = parse_text_to_assets(
-        "SMH 8 satellite satellite_ai_infra intact\n"
+        "SMH 8 satellite satellite_ai_infra valid\n"
         "UFO 3 satellite satellite_nextgen watch\n"
-        "069500.KS 5 satellite satellite_ai_software intact\n"
-        "BND 5 core core_market intact"
+        "069500.KS 5 satellite satellite_ai_software valid\n"
+        "BND 5 core core_market valid"
     )
     manual_assets, manual_warnings = parse_manual_edit_to_assets(
         [
@@ -151,7 +151,7 @@ def test_parse_csv_maps_korean_current_spec_columns():
                 "계층": "core",
                 "카테고리": "core_market",
                 "정기매수": "yes",
-                "투자논리": "intact",
+                "투자논리": "valid",
             }
         ]
     )
@@ -162,7 +162,7 @@ def test_parse_csv_maps_korean_current_spec_columns():
     assert assets[0].layer == "core"
     assert assets[0].category == "core_market"
     assert assets[0].dca_enabled is True
-    assert assets[0].thesis_status == "intact"
+    assert assets[0].thesis_status == "valid"
 
 
 def test_normalize_warns_on_duplicate_metadata_conflicts():
@@ -236,3 +236,43 @@ def test_parse_manual_edit_preserves_metadata_and_percent_return_total():
     assert assets[0].layer == "satellite"
     assert assets[0].category == "satellite_ai_infra"
     assert assets[0].thesis_status == "watch"
+
+
+def test_normalize_uses_valid_as_standard_thesis_code():
+    assets, warnings = parse_manual_edit_to_assets(
+        [
+            {
+                "ticker": "VOO",
+                "allocation": "100",
+                "layer": "core",
+                "category": "core_market",
+                "thesis_status": "valid",
+            }
+        ]
+    )
+
+    asset_df, validation_warnings = normalize_and_validate_assets(assets)
+
+    assert warnings == []
+    assert validation_warnings == []
+    assert asset_df.loc[0, "thesis_status"] == "valid"
+
+
+def test_normalize_accepts_legacy_intact_thesis_as_valid():
+    assets, warnings = parse_manual_edit_to_assets(
+        [
+            {
+                "ticker": "VOO",
+                "allocation": "100",
+                "layer": "core",
+                "category": "core_market",
+                "thesis_status": "intact",
+            }
+        ]
+    )
+
+    asset_df, validation_warnings = normalize_and_validate_assets(assets)
+
+    assert warnings == []
+    assert validation_warnings == []
+    assert asset_df.loc[0, "thesis_status"] == "valid"

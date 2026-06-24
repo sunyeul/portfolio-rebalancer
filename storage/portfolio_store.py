@@ -453,7 +453,7 @@ def _insert_positions(conn, snapshot_id: int, asset_rows: list[dict[str, Any]]) 
     for position_order, row in enumerate(asset_rows):
         asset_id = _ensure_asset(conn, row["ticker"])
         thesis_id = _ensure_lookup(
-            conn, "thesis_statuses", row.get("thesis_status"), "unknown"
+            conn, "thesis_statuses", row.get("thesis_status"), "valid"
         )
         conn.execute(
             """

@@ -41,6 +41,13 @@ def _normalize_optional_code(
     return None
 
 
+def _normalize_thesis_status(value) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "intact":
+        return "valid"
+    return normalized or "valid"
+
+
 def parse_text_to_assets_service(text: str) -> tuple[List[Asset], List[str]]:
     """텍스트를 자산 목록으로 파싱합니다.
 
@@ -116,7 +123,7 @@ def parse_csv_to_assets(df: pd.DataFrame) -> tuple[List[Asset], List[str]]:
                         _get_attr(r, "category"), ASSET_CATEGORIES, "category", ticker, warnings
                     ),
                     dca_enabled=_get_attr(r, "dca_enabled", True),
-                    thesis_status=_get_attr(r, "thesis_status", "unknown"),
+                    thesis_status=_normalize_thesis_status(_get_attr(r, "thesis_status", "valid")),
                 )
                 asset_list.append(asset)
             except ValidationError as e:
@@ -165,7 +172,7 @@ def parse_manual_edit_to_assets(
                     row.get("category"), ASSET_CATEGORIES, "category", normalized_ticker, warnings
                 ),
                 dca_enabled=row.get("dca_enabled", True),
-                thesis_status=row.get("thesis_status", "unknown"),
+                thesis_status=_normalize_thesis_status(row.get("thesis_status", "valid")),
             )
             asset_list.append(asset)
         except (ValueError, ValidationError) as e:

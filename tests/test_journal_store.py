@@ -21,7 +21,7 @@ def _create_snapshot() -> dict:
                     "layer": "core",
                     "category": "core_market",
                     "dca_enabled": True,
-                    "thesis_status": "intact",
+                    "thesis_status": "valid",
                 }
             ]
         },

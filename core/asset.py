@@ -46,7 +46,7 @@ class Asset(BaseModel):
     layer: str | None = Field(None, description="v2 평가 계층")
     category: str | None = Field(None, description="v2 자산 카테고리")
     dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
-    thesis_status: str = Field("unknown", description="투자 논리 상태")
+    thesis_status: str = Field("valid", description="투자 논리 상태")
 
     @field_validator("ticker", mode="before")
     @classmethod
@@ -112,10 +112,11 @@ class Asset(BaseModel):
     @field_validator("thesis_status", mode="before")
     @classmethod
     def normalize_text_field(cls, v: str | None) -> str:
-        """IPS 텍스트 필드는 비어 있으면 unknown으로 정규화합니다."""
+        """IPS 텍스트 필드는 비어 있으면 valid로 정규화합니다."""
         if v is None or str(v).strip() == "":
-            return "unknown"
-        return str(v).strip().lower()
+            return "valid"
+        normalized = str(v).strip().lower()
+        return "valid" if normalized == "intact" else normalized
 
     @field_validator("dca_enabled", mode="before")
     @classmethod
@@ -178,7 +179,7 @@ def parse_text_to_assets(text: str) -> List[Asset]:
         return_total = None
         layer = None
         category = None
-        thesis_status = "unknown"
+        thesis_status = "valid"
 
         num_count = 0
         for p in parts[1:]:

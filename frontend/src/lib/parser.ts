@@ -61,7 +61,7 @@ export function blankRow(): PortfolioRowInput {
     layer: '',
     category: '',
     dca_enabled: true,
-    thesis_status: 'intact'
+    thesis_status: 'valid'
   };
 }
 
@@ -85,6 +85,7 @@ function normalizeCategory(value: unknown): CategoryType | '' {
 
 function normalizeThesisStatus(value: unknown): ThesisStatusInput | '' {
   const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'intact') return 'valid';
   if (normalized === '유지' || normalized === '유효') return 'valid';
   if (normalized === '관찰') return 'watch';
   if (normalized === '훼손') return 'broken';
@@ -132,7 +133,7 @@ function parseFreeLine(line: string): PortfolioRowInput | null {
   row.return_total = numericTokens[1] ?? '';
 
   const thesisIndex = textTokens.findIndex((token) =>
-    ['intact', 'watch', 'broken', 'unknown', '유지', '관찰', '훼손'].includes(
+    ['valid', 'intact', 'watch', 'broken', 'unknown', '유지', '유효', '관찰', '훼손'].includes(
       token.toLowerCase()
     )
   );

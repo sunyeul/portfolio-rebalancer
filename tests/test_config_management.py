@@ -21,7 +21,7 @@ def test_config_options_and_ips_are_seeded_from_defaults(monkeypatch, tmp_path):
     assert set(options) == {"thesis_statuses"}
     assert [row["value"] for row in options["thesis_statuses"]] == [
         "unknown",
-        "intact",
+        "valid",
         "watch",
         "broken",
     ]
@@ -45,7 +45,7 @@ def test_app_defined_config_values_are_read_only(monkeypatch, tmp_path):
     client = _client_with_db(monkeypatch, tmp_path)
 
     thesis_response = client.patch(
-        "/api/v1/config/thesis_statuses/intact/active",
+        "/api/v1/config/thesis_statuses/valid/active",
         json={"is_active": False},
     )
     assert thesis_response.status_code == 405

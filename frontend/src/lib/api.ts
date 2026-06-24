@@ -1,4 +1,4 @@
-import type { PortfolioRowInput, ThesisStatusInput } from './schemas';
+import type { PortfolioRowInput } from './schemas';
 
 export type AssetRow = {
   ticker: string;
@@ -131,8 +131,8 @@ export type SnapshotSummary = {
   portfolio_id: number;
   name: string;
   note: string;
-  created_at: string;
-  updated_at: string;
+  created_at: string | null;
+  updated_at: string | null;
   position_count: number;
   has_analysis: boolean;
   has_evaluation: boolean;
@@ -147,8 +147,8 @@ export type SavedPortfolio = {
   latest_snapshot: {
     id: number;
     name: string;
-    created_at: string;
-    updated_at: string;
+    created_at: string | null;
+    updated_at: string | null;
     position_count: number;
   } | null;
 };
@@ -180,15 +180,11 @@ async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function thesisStatusForApi(status: PortfolioRowInput['thesis_status']): Exclude<ThesisStatusInput, 'valid'> {
-  return status === 'valid' ? 'intact' : (status || 'unknown') as Exclude<ThesisStatusInput, 'valid'>;
-}
-
 function normalizePortfolioRows(rows: PortfolioRowInput[]) {
   return rows.map((row) => ({
     ...row,
     ticker: String(row.ticker ?? '').trim().toUpperCase(),
-    thesis_status: thesisStatusForApi(row.thesis_status)
+    thesis_status: row.thesis_status || 'valid'
   }));
 }
 
@@ -259,7 +255,10 @@ export function saveSnapshot(
 ) {
   return requestJson<{ snapshot: SnapshotSummary }>(`/api/v1/portfolios/${portfolioId}/snapshots`, {
     method: 'POST',
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      ...payload,
+      rows: payload.rows ? normalizePortfolioRows(payload.rows) : undefined
+    })
   });
 }
 
@@ -281,6 +280,9 @@ export function updateSnapshot(
 ) {
   return requestJson<{ snapshot: SnapshotSummary }>(`/api/v1/portfolios/snapshots/${snapshotId}`, {
     method: 'PATCH',
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      ...payload,
+      rows: payload.rows ? normalizePortfolioRows(payload.rows) : undefined
+    })
   });
 }

@@ -42,7 +42,7 @@ def _fake_analysis(asset_df, period, rf, bench):
             "layer": ["core"],
             "category": ["core_market"],
             "dca_enabled": [True],
-            "thesis_status": ["intact"],
+            "thesis_status": ["valid"],
         }
     ).set_index("ticker")
     returns = pd.DataFrame({"VOO": [0.01, -0.01, 0.02]})

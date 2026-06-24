@@ -11,7 +11,7 @@ export const categoryValues = [
   'experiment_leverage',
   'experiment_momentum'
 ] as const;
-export const thesisStatusValues = ['valid', 'watch', 'broken', 'unknown', 'intact'] as const;
+export const thesisStatusValues = ['valid', 'watch', 'broken', 'unknown'] as const;
 
 export type LayerType = (typeof layerValues)[number];
 export type CategoryType = (typeof categoryValues)[number];

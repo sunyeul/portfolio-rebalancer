@@ -12,7 +12,7 @@ from storage.database import connect, initialize_database
 TARGET_LAYERS = LAYER_TYPES
 OPTION_TABLES = {
     "thesis_statuses": {
-        "default": "unknown",
+        "default": "valid",
     },
 }
 

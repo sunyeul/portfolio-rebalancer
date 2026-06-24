@@ -65,8 +65,7 @@ const thesisLabels: Record<ThesisStatusInput, string> = {
   valid: '유효',
   watch: '관찰',
   broken: '훼손',
-  unknown: '미정',
-  intact: '유효'
+  unknown: '미정'
 };
 
 const statusLabels: Record<string, string> = {
@@ -105,7 +104,7 @@ type PortfolioInputRow = {
   allocation: string;
   layer: LayerType;
   category: CategoryType;
-  thesis_status: Exclude<ThesisStatusInput, 'intact'>;
+  thesis_status: ThesisStatusInput;
 };
 
 type WorkflowPending = 'portfolio' | 'analysis' | 'evaluation' | null;
@@ -251,7 +250,8 @@ function todayIsoDate() {
   return offsetDate.toISOString().slice(0, 10);
 }
 
-function formatSnapshotTimestamp(value: string) {
+function formatSnapshotTimestamp(value: string | null | undefined) {
+  if (!value) return 'N/A';
   return value.replace('T', ' ').slice(0, 16);
 }
 
@@ -441,7 +441,7 @@ function PortfolioInputTable({
                         value={row.thesis_status}
                         onChange={(event) => onChange(row.id, { thesis_status: event.target.value as PortfolioInputRow['thesis_status'] })}
                       >
-                        {thesisStatusValues.filter((value) => value !== 'intact').map((value) => (
+                        {thesisStatusValues.map((value) => (
                           <option key={value} value={value}>
                             {thesisLabels[value]}
                           </option>
@@ -912,6 +912,87 @@ function CreatePortfolioModal({
   );
 }
 
+function DeleteSnapshotConfirmModal({
+  isOpen,
+  pending,
+  snapshot,
+  onCancel,
+  onConfirm
+}: {
+  isOpen: boolean;
+  pending: ManagementPending;
+  snapshot: SnapshotSummary | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!isOpen || snapshot === null) return null;
+  const isBusy = pending === 'delete';
+
+  return (
+    <div
+      aria-labelledby="delete-snapshot-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4"
+      role="dialog"
+      onClick={() => {
+        if (!isBusy) onCancel();
+      }}
+    >
+      <div
+        className="w-full max-w-md rounded-xl bg-white shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start gap-4 border-b border-slate-200 p-5">
+          <div className="inline-grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-red-50 text-red-600">
+            <AlertCircle className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 id="delete-snapshot-title" className="text-lg font-bold text-slate-950">
+              스냅샷을 정말 삭제할까요?
+            </h2>
+            <p className="mt-1 text-sm font-semibold text-slate-500">
+              삭제하면 이 스냅샷과 저장된 분석/평가 데이터를 되돌릴 수 없습니다.
+            </p>
+          </div>
+          <button
+            aria-label="스냅샷 삭제 확인 닫기"
+            className="inline-grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-300"
+            disabled={isBusy}
+            type="button"
+            onClick={onCancel}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-5">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-800">
+            {snapshot.name}
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 p-5">
+          <button
+            className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300"
+            disabled={isBusy}
+            type="button"
+            onClick={onCancel}
+          >
+            취소
+          </button>
+          <button
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isBusy}
+            type="button"
+            onClick={onConfirm}
+          >
+            {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            삭제
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SnapshotModal({
   allocationTotal,
   allocationWarning,
@@ -1226,6 +1307,7 @@ export function App() {
   const [snapshotModalNote, setSnapshotModalNote] = useState('');
   const [snapshotRows, setSnapshotRows] = useState<PortfolioInputRow[]>(initialRows);
   const [nextSnapshotRowId, setNextSnapshotRowId] = useState(1);
+  const [snapshotPendingDelete, setSnapshotPendingDelete] = useState<SnapshotSummary | null>(null);
   const [managementPending, setManagementPending] = useState<ManagementPending>(null);
   const [managementError, setManagementError] = useState<string | null>(null);
   const [managementNotice, setManagementNotice] = useState<string | null>(null);
@@ -1364,6 +1446,7 @@ export function App() {
       : null;
   const canSubmitSnapshot =
     managementPending === null && snapshotModalName.trim() !== '' && snapshotMeaningfulRows.length > 0 && snapshotRowErrors.size === 0;
+  const canCreateSnapshot = selectedPortfolioId !== null && meaningfulRows.length > 0;
   const workflowButtonLabel =
     pending === 'portfolio'
       ? '포트폴리오 적용 중'
@@ -1481,6 +1564,8 @@ export function App() {
             : null;
 
       if (response === null) return;
+      const loadedResponse = await loadSnapshot(response.snapshot.id);
+      applyLoadedState(loadedResponse);
       await refreshSnapshots(selectedPortfolioId);
       await refreshPortfolioList(selectedPortfolioId);
       setSelectedSnapshotId(response.snapshot.id);
@@ -1512,8 +1597,6 @@ export function App() {
   }
 
   async function deleteSavedSnapshot(snapshot: SnapshotSummary) {
-    if (!window.confirm(`${snapshot.name} 스냅샷을 삭제할까요?`)) return;
-
     setManagementPending('delete');
     setManagementError(null);
     setManagementNotice(null);
@@ -1523,6 +1606,7 @@ export function App() {
       await refreshSnapshots(snapshot.portfolio_id);
       await refreshPortfolioList(snapshot.portfolio_id);
       setSelectedSnapshotId(null);
+      setSnapshotPendingDelete(null);
       setToastMessage(`${snapshot.name}을 삭제했습니다.`);
     } catch (err) {
       setManagementError(err instanceof Error ? err.message : '스냅샷을 삭제하지 못했습니다.');
@@ -1630,13 +1714,17 @@ export function App() {
         <ErrorBanner message={error} />
 
         <PortfolioContextBar
-          canCreateSnapshot={selectedPortfolioId !== null && portfolio.length > 0}
+          canCreateSnapshot={canCreateSnapshot}
           managementPending={managementPending}
           savedPortfolios={savedPortfolios}
           selectedPortfolioId={selectedPortfolioId}
           selectedSnapshotId={selectedSnapshotId}
           snapshots={snapshots}
-          onDeleteSnapshot={deleteSavedSnapshot}
+          onDeleteSnapshot={(snapshot) => {
+            setManagementError(null);
+            setManagementNotice(null);
+            setSnapshotPendingDelete(snapshot);
+          }}
           onEditSnapshot={openSnapshotEditModal}
           onOpenCreatePortfolio={() => {
             setManagementError(null);
@@ -1644,6 +1732,7 @@ export function App() {
           }}
           onOpenSnapshotCreate={openSnapshotCreateModal}
           onSelectPortfolio={(id) => {
+            setSnapshotPendingDelete(null);
             setSelectedPortfolioId(id);
             setSelectedSnapshotId(null);
           }}
@@ -1774,6 +1863,15 @@ export function App() {
         onNameChange={setSnapshotModalName}
         onNoteChange={setSnapshotModalNote}
         onSubmit={submitSnapshotModal}
+      />
+      <DeleteSnapshotConfirmModal
+        isOpen={snapshotPendingDelete !== null}
+        pending={managementPending}
+        snapshot={snapshotPendingDelete}
+        onCancel={() => setSnapshotPendingDelete(null)}
+        onConfirm={() => {
+          if (snapshotPendingDelete) deleteSavedSnapshot(snapshotPendingDelete);
+        }}
       />
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
     </main>

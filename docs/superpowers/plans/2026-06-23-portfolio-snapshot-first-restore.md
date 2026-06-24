@@ -21,7 +21,7 @@ Use `useEffect` alongside the existing state hooks, and import the existing save
 
 - [ ] **Step 2: Add helpers for loaded asset rows**
 
-Create a helper that converts `AssetRow[]` into `PortfolioInputRow[]`, mapping `intact` and `valid` to editable `valid`.
+Create a helper that converts `AssetRow[]` into `PortfolioInputRow[]`, mapping legacy `intact` and current `valid` to editable `valid`.
 
 - [ ] **Step 3: Add management state and refresh functions**
 

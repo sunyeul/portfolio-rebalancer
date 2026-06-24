@@ -137,7 +137,7 @@ CSV/TSV and manual rows support:
 - `return_total`
 - `layer`: `core`, `satellite`, `experiment`
 - `category`: for example `core_market`, `satellite_ai_infra`, `experiment_leverage`
-- `thesis_status`: `unknown`, `valid`, `intact`, `watch`, `broken`
+- `thesis_status`: `valid`, `watch`, `broken`, `unknown`
 
 ## Evaluation Status
 
