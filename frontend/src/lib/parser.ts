@@ -1,12 +1,21 @@
 import Papa from 'papaparse';
 
-import type { PortfolioRowInput } from './schemas';
+import {
+  categoryValues,
+  layerValues,
+  thesisStatusValues,
+  type CategoryType,
+  type LayerType,
+  type PortfolioRowInput,
+  type ThesisStatusInput
+} from './schemas';
 
 const fields = [
   'ticker',
   'allocation',
   'return_total',
-  'group',
+  'layer',
+  'category',
   'dca_enabled',
   'thesis_status'
 ] as const;
@@ -26,10 +35,12 @@ const headerMap: Record<string, keyof PortfolioRowInput> = {
   누적수익률: 'return_total',
   수익률: 'return_total',
   현재수익률: 'return_total',
-  group: 'group',
-  그룹: 'group',
-  관리그룹: 'group',
-  자산군: 'group',
+  layer: 'layer',
+  계층: 'layer',
+  레이어: 'layer',
+  category: 'category',
+  카테고리: 'category',
+  분류: 'category',
   dcaenabled: 'dca_enabled',
   dca_enabled: 'dca_enabled',
   dca: 'dca_enabled',
@@ -47,7 +58,8 @@ export function blankRow(): PortfolioRowInput {
     ticker: '',
     allocation: '',
     return_total: '',
-    group: 'core',
+    layer: '',
+    category: '',
     dca_enabled: true,
     thesis_status: 'intact'
   };
@@ -59,6 +71,24 @@ function normalizeHeader(value: unknown) {
 
 function normalizeNumber(value: unknown) {
   return String(value ?? '').trim().replace(/%/g, '').replace(/,/g, '');
+}
+
+function normalizeLayer(value: unknown): LayerType | '' {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return layerValues.includes(normalized as LayerType) ? normalized as LayerType : '';
+}
+
+function normalizeCategory(value: unknown): CategoryType | '' {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return categoryValues.includes(normalized as CategoryType) ? normalized as CategoryType : '';
+}
+
+function normalizeThesisStatus(value: unknown): ThesisStatusInput | '' {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === '유지' || normalized === '유효') return 'valid';
+  if (normalized === '관찰') return 'watch';
+  if (normalized === '훼손') return 'broken';
+  return thesisStatusValues.includes(normalized as ThesisStatusInput) ? normalized as ThesisStatusInput : '';
 }
 
 function booleanValue(value: unknown) {
@@ -107,10 +137,13 @@ function parseFreeLine(line: string): PortfolioRowInput | null {
     )
   );
   if (thesisIndex !== -1) {
-    row.thesis_status = textTokens.splice(thesisIndex, 1)[0].toLowerCase();
+    row.thesis_status = normalizeThesisStatus(textTokens.splice(thesisIndex, 1)[0]);
   }
 
-  row.group = textTokens[0] ?? '';
+  const layerToken = textTokens.find((token) => normalizeLayer(token) !== '');
+  const categoryToken = textTokens.find((token) => normalizeCategory(token) !== '');
+  if (layerToken) row.layer = normalizeLayer(layerToken);
+  if (categoryToken) row.category = normalizeCategory(categoryToken);
   return row;
 }
 
@@ -130,7 +163,9 @@ function mapDelimitedRows(rows: string[][]) {
         if (field === 'dca_enabled') row[field] = booleanValue(value);
         else if (field === 'allocation' || field === 'return_total') row[field] = normalizeNumber(value);
         else if (field === 'ticker') row[field] = String(value ?? '').trim().toUpperCase();
-        else row[field] = String(value ?? '').trim();
+        else if (field === 'layer') row.layer = normalizeLayer(value);
+        else if (field === 'category') row.category = normalizeCategory(value);
+        else if (field === 'thesis_status') row.thesis_status = normalizeThesisStatus(value);
       });
       return row;
     })
