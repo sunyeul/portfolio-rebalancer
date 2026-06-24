@@ -76,8 +76,6 @@ export type EvaluationOutput = {
   risk_contribution: number | null;
   return_mdd_ratio: number | null;
   cagr_mdd_ratio: number | null;
-  sharpe: number | null;
-  sortino: number | null;
   thesis_status: 'valid' | 'watch' | 'broken' | 'unknown';
   burden: 'low' | 'medium' | 'high';
   status: EvaluationStatus;
@@ -209,7 +207,6 @@ export function runAnalysis(payload: {
 
 export function runEvaluation(payload: {
   period?: '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'Max';
-  rf?: number;
   bench?: string;
   layer_benchmarks?: Record<string, string>;
 }) {

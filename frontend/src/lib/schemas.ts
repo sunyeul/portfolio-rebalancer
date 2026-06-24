@@ -29,7 +29,6 @@ export const portfolioRowSchema = z.object({
 
 export const settingsSchema = z.object({
   period: z.enum(['1M', '3M', '6M', 'YTD', '1Y', 'Max']),
-  rfPct: z.coerce.number(),
   bench: z.string().trim().min(1)
 });
 

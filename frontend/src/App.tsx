@@ -97,9 +97,10 @@ const defaultCategoryByLayer: Record<LayerType, CategoryType> = {
 
 const DEFAULT_LAYER_BENCHMARKS: Record<LayerType, string> = {
   core: DEFAULT_BENCHMARK,
-  satellite: DEFAULT_BENCHMARK,
-  experiment: DEFAULT_BENCHMARK
+  satellite: 'QQQ',
+  experiment: 'QQQ'
 };
+const ANALYSIS_DEFAULT_RF = 0.025;
 
 type PortfolioInputRow = {
   id: string;
@@ -713,7 +714,7 @@ function MetricsStrip({ analysis }: { analysis: AnalysisResponse | null }) {
   const metrics = [
     ['포트폴리오 CAGR', pct(analysis.portfolio_metrics.cagr)],
     ['변동성', pct(analysis.portfolio_metrics.volatility)],
-    ['샤프', num(analysis.portfolio_metrics.sharpe)],
+    ['최대낙폭', pct(analysis.portfolio_metrics.max_drawdown ?? null)],
     ['누락 티커', String(analysis.missing_tickers.length)]
   ];
   return (
@@ -1430,7 +1431,6 @@ export function App() {
   const [nextRowId, setNextRowId] = useState(1);
   const [period, setPeriod] = useState<'1M' | '3M' | '6M' | 'YTD' | '1Y' | 'Max'>('3M');
   const [asOfDate, setAsOfDate] = useState(todayIsoDate);
-  const [rfPct, setRfPct] = useState(2.5);
   const [layerBenchmarks, setLayerBenchmarks] = useState<Record<LayerType, string>>(DEFAULT_LAYER_BENCHMARKS);
   const [portfolio, setPortfolio] = useState<AssetRow[]>([]);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
@@ -1775,7 +1775,7 @@ export function App() {
       setPending('analysis');
       const analysisData = await runAnalysis({
         period: analysisPeriodFromEvaluationPeriod(period),
-        rf: rfPct / 100,
+        rf: ANALYSIS_DEFAULT_RF,
         bench: analysisBenchmark,
         layer_benchmarks: evaluationLayerBenchmarks
       });
@@ -1785,7 +1785,6 @@ export function App() {
       setPending('evaluation');
       const evaluationData = await runEvaluation({
         period,
-        rf: rfPct / 100,
         bench: analysisBenchmark,
         layer_benchmarks: evaluationLayerBenchmarks
       });
@@ -1814,7 +1813,7 @@ export function App() {
       setPending('analysis');
       const analysisData = await runAnalysis({
         period: analysisPeriodFromEvaluationPeriod(period),
-        rf: rfPct / 100,
+        rf: ANALYSIS_DEFAULT_RF,
         bench: analysisBenchmark,
         layer_benchmarks: evaluationLayerBenchmarks
       });
@@ -1824,7 +1823,6 @@ export function App() {
       setPending('evaluation');
       const evaluationData = await runEvaluation({
         period,
-        rf: rfPct / 100,
         bench: analysisBenchmark,
         layer_benchmarks: evaluationLayerBenchmarks
       });
@@ -1910,10 +1908,6 @@ export function App() {
             <label className="mt-4 block text-sm font-bold text-slate-700">
               기준일
               <input className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" type="date" value={asOfDate} onChange={(event) => setAsOfDate(event.target.value)} />
-            </label>
-            <label className="mt-4 block text-sm font-bold text-slate-700">
-              무위험 수익률(%)
-              <input className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" type="number" value={rfPct} onChange={(event) => setRfPct(Number(event.target.value))} />
             </label>
             <div className="mt-4 grid gap-3">
               <div className="text-sm font-bold text-slate-700">벤치마크</div>
