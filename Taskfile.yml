@@ -1,0 +1,50 @@
+version: '3'
+
+silent: true
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  run:
+    desc: Run FastAPI API server
+    cmds:
+      - uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+  frontend-dev:
+    desc: Run Vite frontend dev server
+    dir: frontend
+    cmds:
+      - bun run dev
+
+  dev:
+    desc: Run API and frontend dev servers
+    deps:
+      - run
+      - frontend-dev
+
+  build-frontend:
+    desc: Build React frontend
+    dir: frontend
+    cmds:
+      - bun run build
+
+  format:
+    desc: Format Python code with ruff
+    cmds:
+      - uv run ruff format .
+
+  lint:
+    desc: Lint Python code with ruff
+    cmds:
+      - uv run ruff check . --fix
+
+  clean:
+    desc: Remove cache and build files
+    cmds:
+      - 'find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true'
+      - 'find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true'
+      - 'find . -type f -name "*.pyc" -delete 2>/dev/null || true'
+      - echo "Cleaned up cache files"
