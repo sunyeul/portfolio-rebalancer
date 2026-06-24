@@ -122,24 +122,6 @@ def risk_contributions(weights: pd.Series, cov: pd.DataFrame) -> pd.Series:
     return result.replace([np.inf, -np.inf], np.nan)
 
 
-def compute_rc_target(
-    target_weights: pd.Series, cov_matrix: pd.DataFrame
-) -> pd.Series:
-    """목표 포트폴리오의 이론적 위험 기여도를 계산합니다.
-
-    # AIDEV-NOTE: geometric-rc-target; 공분산 행렬을 고려한 기하학적 RC_Target 계산
-    # RC_Target_i = w_target_i * (Σ @ w_target)_i / sqrt(w_target^T @ Σ @ w_target)
-
-    Args:
-        target_weights: 목표 포트폴리오 가중치 시리즈
-        cov_matrix: 연율화된 공분산 행렬
-
-    Returns:
-        목표 포트폴리오의 위험 기여도 시리즈
-    """
-    return risk_contributions(target_weights, cov_matrix)
-
-
 def price_to_nav(price: pd.Series) -> pd.Series:
     """가격을 순자산가치(NAV)로 정규화합니다.
 
@@ -333,22 +315,3 @@ def alpha(asset_cagr: float, asset_beta: float, bench_cagr: float, rf: float) ->
     expected_return = rf + asset_beta * (bench_cagr - rf)
     return asset_cagr - expected_return
 
-
-def compute_ytd_return(prices: pd.Series) -> float:
-    """연초누적 수익률(YTD)를 계산합니다.
-
-    # AIDEV-NOTE: ytd-proxy-computation; 가격 시리즈의 첫 거래일(연초) 대비 마지막 거래일의 수익률
-
-    Args:
-        prices: 가격 시리즈
-
-    Returns:
-        YTD 수익률 (소수점 형식, 예: 0.1234 = 12.34%)
-    """
-    if prices.empty or len(prices) < 2:
-        return np.nan
-    first_price = prices.iloc[0]
-    last_price = prices.iloc[-1]
-    if first_price <= 0:
-        return np.nan
-    return (last_price - first_price) / first_price

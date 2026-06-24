@@ -6,7 +6,7 @@ IPS Pilot is an IPS inspection workbench built around a single v2 evaluation fra
 
 - Backend: FastAPI, pandas, numpy, scipy, yfinance, Pydantic
 - Frontend: Bun, Vite, React, TypeScript
-- Frontend libraries: TanStack Query, TanStack Table, React Hook Form, Zod, PapaParse, Recharts, lucide-react
+- Frontend libraries: TanStack Query, Zod, lucide-react
 - Storage: SQLite
 
 ## Product Shape

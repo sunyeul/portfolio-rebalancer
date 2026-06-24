@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
 import pandas as pd
 
-from utils.metrics import daily_to_annual_vol, max_drawdown, risk_contributions
+from utils.metrics import daily_to_annual_vol, max_drawdown
 
 
 def maximum_drawdown(price_or_nav: pd.Series) -> float | None:
@@ -43,10 +42,3 @@ def concentration(weights: pd.Series) -> float | None:
     if not math.isfinite(value):
         return None
     return value
-
-
-def risk_contribution(weights: pd.Series, cov_matrix: pd.DataFrame | None) -> pd.Series:
-    """Return risk contributions when covariance is available."""
-    if cov_matrix is None:
-        return pd.Series(np.nan, index=weights.index)
-    return risk_contributions(weights, cov_matrix)

@@ -158,13 +158,6 @@ export type SnapshotLoadResponse = {
   evaluation: EvaluationResponse | null;
 };
 
-export type CurrentStateResponse = {
-  portfolio: PortfolioResponse;
-  analysis: AnalysisResponse | null;
-  evaluation: EvaluationResponse | null;
-  updated_at: string;
-};
-
 async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
   const response = await fetch(path, {
     credentials: 'include',
@@ -226,18 +219,6 @@ export function createPortfolio(payload: { name: string; description?: string })
   return requestJson<{ portfolio: SavedPortfolio }>('/api/v1/portfolios', {
     method: 'POST',
     body: JSON.stringify(payload)
-  });
-}
-
-export function getCurrentState(portfolioId: number) {
-  return requestJson<CurrentStateResponse>(`/api/v1/portfolios/${portfolioId}/current-state`, {
-    method: 'GET'
-  });
-}
-
-export function saveCurrentState(portfolioId: number) {
-  return requestJson<CurrentStateResponse>(`/api/v1/portfolios/${portfolioId}/current-state`, {
-    method: 'POST'
   });
 }
 

@@ -91,7 +91,6 @@ def initialize_database() -> None:
                 portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),
                 name TEXT NOT NULL,
                 note TEXT NOT NULL DEFAULT '',
-                as_of_date TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
@@ -192,68 +191,10 @@ def initialize_database() -> None:
             );
             """
         )
-        _migrate_thesis_status_codes(conn)
         _seed_lookup(conn, "thesis_statuses", THESIS_STATUS_SEEDS)
         _seed_target_allocations(conn)
         _seed_action_priorities(conn)
         _seed_ips_rules(conn)
-        _ensure_schema(conn)
-
-
-def _ensure_schema(conn: sqlite3.Connection) -> None:
-    columns = {
-        row["name"]
-        for row in conn.execute("PRAGMA table_info(portfolio_snapshots)").fetchall()
-    }
-    if "as_of_date" not in columns:
-        conn.execute("ALTER TABLE portfolio_snapshots ADD COLUMN as_of_date TEXT")
-        conn.execute(
-            """
-            UPDATE portfolio_snapshots
-            SET as_of_date = substr(created_at, 1, 10)
-            WHERE as_of_date IS NULL OR as_of_date = ''
-            """
-        )
-    if "updated_at" not in columns:
-        conn.execute("ALTER TABLE portfolio_snapshots ADD COLUMN updated_at TEXT")
-    conn.execute(
-        """
-        UPDATE portfolio_snapshots
-        SET updated_at = created_at
-        WHERE updated_at IS NULL OR updated_at = ''
-        """
-    )
-
-
-def _migrate_thesis_status_codes(conn: sqlite3.Connection) -> None:
-    intact = conn.execute(
-        "SELECT id FROM thesis_statuses WHERE code = 'intact'"
-    ).fetchone()
-    if intact is None:
-        return
-
-    valid = conn.execute(
-        "SELECT id FROM thesis_statuses WHERE code = 'valid'"
-    ).fetchone()
-    if valid is None:
-        conn.execute(
-            """
-            UPDATE thesis_statuses
-            SET code = 'valid', label = '유효', sort_order = 10, is_active = 1
-            WHERE code = 'intact'
-            """
-        )
-        return
-
-    conn.execute(
-        """
-        UPDATE snapshot_positions
-        SET thesis_status_id = ?
-        WHERE thesis_status_id = ?
-        """,
-        (valid["id"], intact["id"]),
-    )
-    conn.execute("DELETE FROM thesis_statuses WHERE id = ?", (intact["id"],))
 
 
 def _seed_lookup(
