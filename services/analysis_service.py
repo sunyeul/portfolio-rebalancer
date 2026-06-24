@@ -37,6 +37,7 @@ from utils.metrics import (
 
 DEFAULT_RF = 0.025
 DEFAULT_BENCH = "SPY:80,QQQ:20"
+CASH_BENCHMARK = "CASH"
 
 
 class AnalysisResult(NamedTuple):
@@ -103,6 +104,48 @@ def parse_benchmark(bench: str) -> BenchmarkSpec | None:
     return BenchmarkSpec(normalized, weights / weights.sum())
 
 
+def _unique_benchmark_specs(*benchmarks: str | None) -> list[BenchmarkSpec]:
+    specs: list[BenchmarkSpec] = []
+    seen: set[str] = set()
+    for bench in benchmarks:
+        if bench is None:
+            continue
+        spec = parse_benchmark(bench)
+        if spec is None or spec.label in seen:
+            continue
+        specs.append(spec)
+        seen.add(spec.label)
+    return specs
+
+
+def _benchmark_component_tickers(specs: list[BenchmarkSpec]) -> list[str]:
+    tickers: list[str] = []
+    for spec in specs:
+        for ticker in spec.components.index:
+            if ticker == CASH_BENCHMARK:
+                continue
+            if ticker not in tickers:
+                tickers.append(str(ticker))
+    return tickers
+
+
+def _add_cash_benchmark(
+    prices: pd.DataFrame,
+    returns: pd.DataFrame,
+    specs: list[BenchmarkSpec],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if not any(CASH_BENCHMARK in spec.components.index for spec in specs):
+        return prices, returns
+
+    prices_with_cash = prices.copy()
+    returns_with_cash = returns.copy()
+    if CASH_BENCHMARK not in prices_with_cash.columns:
+        prices_with_cash[CASH_BENCHMARK] = 1.0
+    if CASH_BENCHMARK not in returns_with_cash.columns:
+        returns_with_cash[CASH_BENCHMARK] = 0.0
+    return prices_with_cash, returns_with_cash
+
+
 def _add_composite_benchmark(
     prices: pd.DataFrame,
     returns: pd.DataFrame,
@@ -133,6 +176,23 @@ def _add_composite_benchmark(
     prices_with_benchmark[benchmark.label] = bench_nav.reindex(prices.index).ffill()
     returns_with_benchmark[benchmark.label] = bench_returns
     return prices_with_benchmark, returns_with_benchmark
+
+
+def _add_benchmark_columns(
+    prices: pd.DataFrame,
+    returns: pd.DataFrame,
+    specs: list[BenchmarkSpec],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    prices_with_benchmarks, returns_with_benchmarks = _add_cash_benchmark(
+        prices, returns, specs
+    )
+    for spec in specs:
+        prices_with_benchmarks, returns_with_benchmarks = _add_composite_benchmark(
+            prices_with_benchmarks,
+            returns_with_benchmarks,
+            spec,
+        )
+    return prices_with_benchmarks, returns_with_benchmarks
 
 
 def _price_data_quality(prices_raw: pd.DataFrame, ticker: str) -> dict[str, object]:
@@ -167,6 +227,7 @@ def run_analysis(
     period: int | str | EvaluationPeriod,
     rf: float,
     bench: str,
+    extra_benchmarks: list[str] | None = None,
 ) -> AnalysisResult:
     """데이터 조회 & 보강을 실행합니다.
 
@@ -196,9 +257,10 @@ def run_analysis(
     else:  # Max
         start = end - timedelta(days=365 * 15)
 
-    benchmark = parse_benchmark(bench)
+    benchmark_specs = _unique_benchmark_specs(bench, *(extra_benchmarks or []))
+    benchmark = benchmark_specs[0] if benchmark_specs else None
     bench_label = benchmark.label if benchmark else ""
-    benchmark_tickers = list(benchmark.components.index) if benchmark else []
+    benchmark_tickers = _benchmark_component_tickers(benchmark_specs)
 
     all_tickers = asset_df["ticker"].tolist()
     for ticker in benchmark_tickers:
@@ -225,7 +287,7 @@ def run_analysis(
 
     # 일일 수익률 계산
     returns = prices.pct_change(fill_method=None).dropna(how="all")
-    prices, returns = _add_composite_benchmark(prices, returns, benchmark)
+    prices, returns = _add_benchmark_columns(prices, returns, benchmark_specs)
 
     # AIDEV-NOTE: return-smoothing; 수익률을 윈저라이즈 + 3-window MA로 스무딩하여 이상치 완화 및 공분산 안정화
     returns_smooth = winsorize_returns(returns)

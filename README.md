@@ -14,7 +14,7 @@ IPS Pilot is an IPS inspection workbench built around a single v2 evaluation fra
 - First-class layers: `core`, `satellite`, `experiment`
 - Asset categories under layers, represented directly as `layer` and `category`
 - Evaluation period support: `1M`, `3M`, `6M`, `YTD`, `1Y`, `Max`, or custom start/end dates
-- Shared layer/asset outputs: weight, return, CAGR, MDD, volatility, concentration, risk contribution, efficiency, thesis status, burden, status
+- Shared layer/asset outputs: weight, target gap, return, layer benchmark return, benchmark excess return, CAGR, MDD, volatility, concentration, risk contribution, efficiency, thesis status, burden, status
 - Main result surfaces: Layer Dashboard, Asset Evaluation Table, Review Queue, Journal Draft
 - Guardrails: no automatic buy/sell output, no execution flags, and no order-sizing recommendation surface
 
@@ -103,7 +103,7 @@ uv run ips-pilot snapshots list --portfolio-id 1
 }
 ```
 
-Layer benchmarks are the canonical CLI benchmark setting. Use repeated `--layer-benchmark layer=BENCHMARK` options for `core`, `satellite`, and `experiment`; omitted layers default to `SPY:80,QQQ:20`. The analysis benchmark is derived from the `core` layer benchmark.
+Layer benchmarks are the canonical CLI benchmark setting. Use repeated `--layer-benchmark layer=BENCHMARK` options for `core`, `satellite`, and `experiment`; omitted layers default to `SPY:80,QQQ:20`. The analysis benchmark is derived from the `core` layer benchmark. Each layer evaluation reports benchmark return and excess return against that layer's benchmark over the same evaluation period.
 
 Legacy experimental commands and scenario-comparison options have been removed from the product surface.
 

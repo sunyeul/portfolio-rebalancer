@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
 from main import app
@@ -8,7 +9,7 @@ from services.analysis_service import AnalysisResult
 client = TestClient(app)
 
 
-def _fake_analysis(asset_df, period, rf, bench):
+def _fake_analysis(asset_df, period, rf, bench, extra_benchmarks=None):
     metrics_df = pd.DataFrame(
         {
             "ticker": ["VOO"],
@@ -34,9 +35,17 @@ def _fake_analysis(asset_df, period, rf, bench):
             "thesis_status": ["valid"],
         }
     ).set_index("ticker")
-    returns = pd.DataFrame({"VOO": [0.01, -0.01, 0.02]})
+    prices = pd.DataFrame(
+        {
+            "VOO": [100.0, 101.0, 103.0],
+            "SPY:80,QQQ:20": [1.0, 1.03, 1.06],
+            "QQQ": [100.0, 110.0, 120.0],
+            "CASH": [1.0, 1.0, 1.0],
+        }
+    )
+    returns = prices.pct_change(fill_method=None).dropna(how="all")
     return AnalysisResult(
-        prices=pd.DataFrame({"VOO": [100.0, 101.0, 103.0]}),
+        prices=prices,
         returns=returns,
         returns_smooth=returns,
         weights_no_bench=pd.Series({"VOO": 1.0}),
@@ -104,6 +113,13 @@ def test_portfolio_analysis_and_v2_evaluation(monkeypatch):
     assert layer_benchmarks["core"] == "SPY:80,QQQ:20"
     assert layer_benchmarks["satellite"] == "QQQ"
     assert layer_benchmarks["experiment"] == "CASH"
+    benchmark_returns = {
+        record["unit"]["name"]: record["output"]["benchmark_return"]
+        for record in payload["layer_evaluations"]
+    }
+    assert benchmark_returns["core"] == pytest.approx(0.06)
+    assert benchmark_returns["satellite"] == pytest.approx(0.2)
+    assert benchmark_returns["experiment"] == pytest.approx(0.0)
 
 
 def test_v2_csv_download(monkeypatch):

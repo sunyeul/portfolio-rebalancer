@@ -22,6 +22,7 @@ class AnalysisRunRequest(BaseModel):
     period: int | str = Field(12, description="Month count, YTD, or Max")
     rf: float = DEFAULT_RF
     bench: str = DEFAULT_BENCH
+    layer_benchmarks: dict[str, str] | None = None
 
 
 def _parse_period(period: int | str) -> int | str:
@@ -52,6 +53,7 @@ async def run_analysis_endpoint(payload: AnalysisRunRequest, request: Request):
             _parse_period(payload.period),
             payload.rf,
             payload.bench.upper(),
+            extra_benchmarks=list((payload.layer_benchmarks or {}).values()),
         )
     except AnalysisError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

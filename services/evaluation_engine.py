@@ -9,6 +9,7 @@ import pandas as pd
 from api.v1.serialization import json_safe
 from core.evaluation import EvaluationOutput, EvaluationPeriod, EvaluationUnit, ReviewItem
 from services.analysis_service import AnalysisResult
+from services.analysis_service import parse_benchmark
 from services.evaluation_status import classify_evaluation_status
 from services.evaluation_units import build_evaluation_units, normalize_layer_category
 from utils.efficiency_metrics import cagr_mdd_ratio, return_mdd_ratio, sharpe, sortino_ratio
@@ -89,6 +90,26 @@ def _output_record(unit: EvaluationUnit, output: EvaluationOutput) -> dict[str, 
         "unit": unit.model_dump(mode="json"),
         "output": output.model_dump(mode="json"),
     }
+
+
+def _benchmark_label(unit: EvaluationUnit) -> str | None:
+    benchmark = unit.benchmark
+    if benchmark is None:
+        return None
+    if hasattr(benchmark, "label"):
+        return str(benchmark.label).strip().upper()
+    spec = parse_benchmark(str(benchmark))
+    return spec.label if spec is not None else None
+
+
+def _benchmark_return_for_unit(
+    unit: EvaluationUnit,
+    analysis: AnalysisResult,
+) -> float | None:
+    label = _benchmark_label(unit)
+    if label is None or label not in analysis.prices.columns:
+        return None
+    return period_return(analysis.prices[label])
 
 
 def _review_item(unit: EvaluationUnit, output: EvaluationOutput) -> ReviewItem | None:
@@ -254,13 +275,13 @@ def run_evaluation(
         bench,
         layer_benchmarks=layer_benchmarks,
     )
-    bench_return = period_return(analysis.bench_nav) if analysis.bench_nav is not None else None
 
     layer_records: list[dict[str, Any]] = []
     asset_records: list[dict[str, Any]] = []
     review_items: list[ReviewItem] = []
 
     for unit in unit_set.layer_units:
+        bench_return = _benchmark_return_for_unit(unit, analysis)
         output = _layer_output(unit, metrics, analysis, bench_return, rf)
         layer_records.append(_output_record(unit, output))
         item = _review_item(unit, output)
@@ -268,6 +289,7 @@ def run_evaluation(
             review_items.append(item)
 
     for unit in unit_set.asset_units:
+        bench_return = _benchmark_return_for_unit(unit, analysis)
         output = _asset_output(unit, metrics, analysis, bench_return, rf)
         asset_records.append(_output_record(unit, output))
         item = _review_item(unit, output)

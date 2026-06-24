@@ -261,6 +261,7 @@ def _run_v2(
             analysis_period_value(evaluation_period),
             rf,
             bench_ticker,
+            extra_benchmarks=list(layer_benchmarks.values()),
         )
     except AnalysisError as exc:
         raise CliError("analysis", str(exc)) from exc
