@@ -63,7 +63,20 @@ def _fake_analysis(asset_df, period, rf, bench):
 def test_evaluate_outputs_v2_envelope(monkeypatch):
     monkeypatch.setattr("cli.run_analysis", _fake_analysis)
 
-    result = runner.invoke(app, ["evaluate", "--text", "VOO 100", "--period", "YTD"])
+    result = runner.invoke(
+        app,
+        [
+            "evaluate",
+            "--text",
+            "VOO 100",
+            "--period",
+            "YTD",
+            "--layer-benchmark",
+            "satellite=QQQ",
+            "--layer-benchmark",
+            "experiment=CASH",
+        ],
+    )
 
     assert result.exit_code == 0
     payload = _payload(result)
@@ -83,8 +96,21 @@ def test_evaluate_outputs_v2_envelope(monkeypatch):
     assert payload["ok"] is True
     assert payload["command"] == "evaluate"
     assert payload["evaluation_period"]["label"] == "YTD"
+    assert payload["input"]["bench"] == "SPY:80,QQQ:20"
+    assert payload["input"]["layer_benchmarks"] == {
+        "core": "SPY:80,QQQ:20",
+        "satellite": "QQQ",
+        "experiment": "CASH",
+    }
     assert payload["layer_evaluations"]
     assert payload["asset_evaluations"]
+    layer_benchmarks = {
+        record["unit"]["name"]: record["unit"]["benchmark"]
+        for record in payload["layer_evaluations"]
+    }
+    assert layer_benchmarks["core"] == "SPY:80,QQQ:20"
+    assert layer_benchmarks["satellite"] == "QQQ"
+    assert layer_benchmarks["experiment"] == "CASH"
     assert payload["guardrails"]["no_immediate_order_instruction"] is True
 
 
@@ -114,10 +140,32 @@ def test_cli_help_lists_v2_commands():
         assert command in result.stdout
 
 
+def test_evaluate_help_uses_layer_benchmark_not_legacy_bench():
+    result = runner.invoke(app, ["evaluate", "--help"])
+
+    assert result.exit_code == 0
+    assert "--layer-benchmark" in result.stdout
+    assert "--bench" not in result.stdout
+
+
 def test_evaluate_rejects_one_sided_custom_dates():
     result = runner.invoke(
         app,
         ["evaluate", "--text", "VOO 100", "--start-date", "2026-01-01"],
+    )
+
+    assert result.exit_code == 1
+    payload = _payload(result)
+    assert payload["ok"] is False
+    assert payload["error"]["stage"] == "input"
+
+
+def test_evaluate_rejects_invalid_layer_benchmark(monkeypatch):
+    monkeypatch.setattr("cli.run_analysis", _fake_analysis)
+
+    result = runner.invoke(
+        app,
+        ["evaluate", "--text", "VOO 100", "--layer-benchmark", "income=AGG"],
     )
 
     assert result.exit_code == 1

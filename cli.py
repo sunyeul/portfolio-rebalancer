@@ -37,6 +37,10 @@ from storage.portfolio_store import (
 from api.v1.serialization import safe_mapping
 
 
+LAYER_BENCHMARK_LAYERS = ("core", "satellite", "experiment")
+DEFAULT_LAYER_BENCHMARKS = {layer: DEFAULT_BENCH for layer in LAYER_BENCHMARK_LAYERS}
+LAYER_BENCHMARK_HELP = "Layer benchmark override as layer=BENCHMARK. Repeat for core, satellite, or experiment."
+
 app = typer.Typer(
     help="IPS Pilot CLI for Evaluation Framework v2.",
     no_args_is_help=True,
@@ -105,6 +109,42 @@ def _exit_with_error(command: str, exc: Exception) -> None:
 
 def _selected_sources(*values: Any) -> int:
     return sum(value is not None for value in values)
+
+
+def _parse_layer_benchmarks(values: list[str] | None) -> dict[str, str]:
+    layer_benchmarks = DEFAULT_LAYER_BENCHMARKS.copy()
+    seen: set[str] = set()
+    for raw_value in values or []:
+        if "=" not in raw_value:
+            raise CliError(
+                "input",
+                "--layer-benchmark은 layer=BENCHMARK 형식이어야 합니다.",
+                "예: --layer-benchmark core=SPY:80,QQQ:20",
+            )
+        layer, benchmark = raw_value.split("=", 1)
+        layer = layer.strip().lower()
+        benchmark = benchmark.strip().upper()
+        if layer not in LAYER_BENCHMARK_LAYERS:
+            raise CliError(
+                "input",
+                f"지원하지 않는 layer benchmark 계층입니다: {layer}",
+                "core, satellite, experiment 중 하나를 사용하세요.",
+            )
+        if layer in seen:
+            raise CliError(
+                "input",
+                f"--layer-benchmark {layer}=... 옵션이 중복되었습니다.",
+                "계층별 벤치마크는 계층마다 한 번만 지정하세요.",
+            )
+        if not benchmark:
+            raise CliError(
+                "input",
+                f"{layer} 계층의 벤치마크가 비어 있습니다.",
+                "예: --layer-benchmark core=SPY:80,QQQ:20",
+            )
+        layer_benchmarks[layer] = benchmark
+        seen.add(layer)
+    return layer_benchmarks
 
 
 def _load_asset_df(
@@ -196,7 +236,7 @@ def _run_v2(
     start_date: str | None,
     end_date: str | None,
     rf: float,
-    bench: str,
+    layer_benchmark: list[str] | None,
 ) -> tuple[dict[str, Any], pd.DataFrame, Any, dict[str, Any], int | None]:
     asset_df, warnings, input_meta, source_portfolio_id = _load_asset_df(
         file_path=file_path,
@@ -213,7 +253,8 @@ def _run_v2(
     except EvaluationPeriodError as exc:
         raise CliError("input", str(exc)) from exc
 
-    bench_ticker = bench.upper()
+    layer_benchmarks = _parse_layer_benchmarks(layer_benchmark)
+    bench_ticker = layer_benchmarks["core"]
     try:
         analysis = run_analysis(
             asset_df,
@@ -229,6 +270,7 @@ def _run_v2(
         evaluation_period=evaluation_period,
         rf=rf,
         bench=bench_ticker,
+        layer_benchmarks=layer_benchmarks,
     )
     payload = result.to_payload()
     payload.update(
@@ -242,6 +284,7 @@ def _run_v2(
                 "end_date": evaluation_period.end_date.isoformat(),
                 "rf": rf,
                 "bench": bench_ticker,
+                "layer_benchmarks": layer_benchmarks,
                 "database_path": str(db_path()),
             },
             "warnings": warnings + payload["warnings"],
@@ -285,6 +328,7 @@ def _session_data(asset_df: pd.DataFrame, analysis, evaluation_payload: dict[str
             "end_date": evaluation_payload["input"]["end_date"],
             "rf": evaluation_payload["input"]["rf"],
             "bench": evaluation_payload["input"]["bench"],
+            "layer_benchmarks": evaluation_payload["input"]["layer_benchmarks"],
         },
     }
 
@@ -299,7 +343,7 @@ def evaluate(
     start_date: Annotated[str | None, typer.Option("--start-date")] = None,
     end_date: Annotated[str | None, typer.Option("--end-date")] = None,
     rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
-    bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
+    layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
     output_dir: Annotated[Path | None, typer.Option("--output-dir")] = None,
     save: Annotated[bool, typer.Option("--save")] = False,
     save_to_portfolio_id: Annotated[int | None, typer.Option("--save-to-portfolio-id")] = None,
@@ -318,7 +362,7 @@ def evaluate(
             start_date=start_date,
             end_date=end_date,
             rf=rf,
-            bench=bench,
+            layer_benchmark=layer_benchmark,
         )
 
         artifacts: dict[str, str] = {}
@@ -363,7 +407,7 @@ def agent_brief(
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
     period: Annotated[str, typer.Option("--period")] = "3M",
     rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
-    bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
+    layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
 ) -> None:
     """Emit a compact v2 IPS brief for agents."""
     try:
@@ -377,7 +421,7 @@ def agent_brief(
             start_date=None,
             end_date=None,
             rf=rf,
-            bench=bench,
+            layer_benchmark=layer_benchmark,
         )
         _emit_json(
             {
@@ -413,7 +457,7 @@ def review_queue(
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
     period: Annotated[str, typer.Option("--period")] = "3M",
     rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
-    bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
+    layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
 ) -> None:
     """Emit v2 review queue only."""
     try:
@@ -427,7 +471,7 @@ def review_queue(
             start_date=None,
             end_date=None,
             rf=rf,
-            bench=bench,
+            layer_benchmark=layer_benchmark,
         )
         _emit_json(
             {
@@ -453,7 +497,7 @@ def risk(
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
     period: Annotated[str, typer.Option("--period")] = "3M",
     rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
-    bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
+    layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
 ) -> None:
     """Emit v2 units with risk-related triggers."""
     try:
@@ -467,7 +511,7 @@ def risk(
             start_date=None,
             end_date=None,
             rf=rf,
-            bench=bench,
+            layer_benchmark=layer_benchmark,
         )
         risk_items = [
             item
