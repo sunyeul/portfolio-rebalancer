@@ -199,6 +199,7 @@ export function runAnalysis(payload: {
   period: number | 'YTD' | 'Max';
   rf: number;
   bench: string;
+  layer_benchmarks?: Record<string, string>;
 }) {
   return requestJson<AnalysisResponse>('/api/v1/analysis/run', {
     method: 'POST',

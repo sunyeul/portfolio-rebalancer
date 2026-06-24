@@ -728,17 +728,24 @@ function MetricsStrip({ analysis }: { analysis: AnalysisResponse | null }) {
   );
 }
 
-function layerWeightGapForDisplay(output: EvaluationRecord['output']) {
-  return output.weight_gap == null ? output.weight_gap : -output.weight_gap;
-}
-
-type LayerDashboardColumnId = 'layer' | 'current' | 'gap' | 'return' | 'mdd' | 'efficiency' | 'status';
+type LayerDashboardColumnId =
+  | 'layer'
+  | 'current'
+  | 'gap'
+  | 'return'
+  | 'benchmarkReturn'
+  | 'excessReturn'
+  | 'mdd'
+  | 'efficiency'
+  | 'status';
 
 const layerDashboardColumns: Array<SortableColumn<EvaluationRecord, LayerDashboardColumnId>> = [
   { id: 'layer', label: '계층', getValue: (row) => layerLabel(row.unit.name) },
   { id: 'current', label: '현재', getValue: (row) => row.output.current_weight },
-  { id: 'gap', label: '차이', getValue: (row) => layerWeightGapForDisplay(row.output) },
+  { id: 'gap', label: '목표-현재', getValue: (row) => row.output.weight_gap },
   { id: 'return', label: '수익률', getValue: (row) => row.output.period_return },
+  { id: 'benchmarkReturn', label: '벤치', getValue: (row) => row.output.benchmark_return },
+  { id: 'excessReturn', label: '초과', getValue: (row) => row.output.benchmark_excess_return },
   { id: 'mdd', label: 'MDD', getValue: (row) => row.output.mdd },
   { id: 'efficiency', label: '효율', getValue: (row) => row.output.cagr_mdd_ratio },
   { id: 'status', label: '상태', getValue: (row) => statusLabel(row.output.status) }
@@ -800,8 +807,10 @@ function LayerDashboard({ rows }: { rows: EvaluationRecord[] }) {
               <tr key={unit.name} className="border-t border-slate-100">
                 <td className="px-2 py-2 font-bold text-slate-900">{layerLabel(unit.name)}</td>
                 <td className="px-2 py-2">{pct(output.current_weight)}</td>
-                <td className="px-2 py-2">{pct(layerWeightGapForDisplay(output))}</td>
+                <td className="px-2 py-2">{pct(output.weight_gap)}</td>
                 <td className="px-2 py-2">{pct(output.period_return)}</td>
+                <td className="px-2 py-2">{pct(output.benchmark_return)}</td>
+                <td className="px-2 py-2">{pct(output.benchmark_excess_return)}</td>
                 <td className="px-2 py-2">{pct(output.mdd)}</td>
                 <td className="px-2 py-2">{num(output.cagr_mdd_ratio)}</td>
                 <td className="px-2 py-2"><StatusBadge status={output.status} /></td>
@@ -1767,7 +1776,8 @@ export function App() {
       const analysisData = await runAnalysis({
         period: analysisPeriodFromEvaluationPeriod(period),
         rf: rfPct / 100,
-        bench: analysisBenchmark
+        bench: analysisBenchmark,
+        layer_benchmarks: evaluationLayerBenchmarks
       });
       setAnalysis(analysisData);
       setEvaluation(null);
@@ -1805,7 +1815,8 @@ export function App() {
       const analysisData = await runAnalysis({
         period: analysisPeriodFromEvaluationPeriod(period),
         rf: rfPct / 100,
-        bench: analysisBenchmark
+        bench: analysisBenchmark,
+        layer_benchmarks: evaluationLayerBenchmarks
       });
       setAnalysis(analysisData);
       setEvaluation(null);
