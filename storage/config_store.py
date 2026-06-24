@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from core.asset import VALID_GROUPS
+from core.asset import LAYER_TYPES
 from storage.database import connect, initialize_database
 
 
-TARGET_GROUPS = VALID_GROUPS
+TARGET_LAYERS = LAYER_TYPES
 OPTION_TABLES = {
     "thesis_statuses": {
         "default": "unknown",
@@ -67,7 +67,7 @@ def get_ips_config() -> dict[str, Any]:
     initialize_database()
     with connect() as conn:
         target_rows = conn.execute(
-            'SELECT * FROM ips_target_allocations ORDER BY "group" ASC'
+            "SELECT * FROM ips_target_allocations ORDER BY layer ASC"
         ).fetchall()
         priority_rows = conn.execute(
             """
@@ -81,7 +81,7 @@ def get_ips_config() -> dict[str, Any]:
 
     return {
         "target_allocation": {
-            row["group"]: {
+            row["layer"]: {
                 "min": row["min"],
                 "target": row["target"],
                 "max": row["max"],
@@ -103,7 +103,7 @@ def get_ips_management_config() -> dict[str, Any]:
     initialize_database()
     with connect() as conn:
         targets = conn.execute(
-            'SELECT * FROM ips_target_allocations ORDER BY "group" ASC'
+            "SELECT * FROM ips_target_allocations ORDER BY layer ASC"
         ).fetchall()
         priorities = conn.execute(
             """
@@ -116,7 +116,7 @@ def get_ips_management_config() -> dict[str, Any]:
     return {
         "target_allocations": [
             {
-                "group": row["group"],
+                "layer": row["layer"],
                 "min": row["min"],
                 "target": row["target"],
                 "max": row["max"],
@@ -148,9 +148,9 @@ def replace_target_allocations(rows: list[dict[str, Any]]) -> list[dict[str, Any
     with connect() as conn:
         conn.execute("DELETE FROM ips_target_allocations")
         for row in rows:
-            group = normalize_code(row.get("group"))
-            if group not in TARGET_GROUPS:
-                raise ConfigError("지원하지 않는 group입니다.")
+            layer = normalize_code(row.get("layer"))
+            if layer not in TARGET_LAYERS:
+                raise ConfigError("지원하지 않는 layer입니다.")
             min_value = float(row.get("min"))
             target_value = float(row.get("target"))
             max_value = float(row.get("max"))
@@ -158,10 +158,10 @@ def replace_target_allocations(rows: list[dict[str, Any]]) -> list[dict[str, Any
                 raise ConfigError("목표 비중은 0~1 범위에서 min <= target <= max 여야 합니다.")
             conn.execute(
                 """
-                INSERT INTO ips_target_allocations ("group", min, target, max)
+                INSERT INTO ips_target_allocations (layer, min, target, max)
                 VALUES (?, ?, ?, ?)
                 """,
-                (group, min_value, target_value, max_value),
+                (layer, min_value, target_value, max_value),
             )
     return get_ips_management_config()["target_allocations"]
 

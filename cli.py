@@ -1,38 +1,28 @@
-"""Agent-oriented Typer CLI for IPS Pilot."""
+"""Agent-oriented Typer CLI for IPS Pilot v2."""
 
 from __future__ import annotations
 
 import json
 import sys
 from datetime import datetime
-from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any
 
 import pandas as pd
 import typer
 
-from api.v1.serialization import (
-    GROUP_SUMMARY_COLUMNS,
-    METRICS_COLUMNS,
-    PROPOSAL_COLUMNS,
-    RC_VIOLATION_COLUMNS,
-    dataframe_records,
-    safe_mapping,
-)
 from services.analysis_service import DEFAULT_BENCH, DEFAULT_RF, AnalysisError, run_analysis
-from services.evaluation_service import EvaluationError, run_evaluation
-from services.evaluation_view import build_evaluation_view, empty_operating_view
+from services.evaluation_engine import run_evaluation
+from services.evaluation_period import (
+    EvaluationPeriodError,
+    analysis_period_value,
+    resolve_evaluation_period,
+)
 from services.portfolio_service import (
     PortfolioInputError,
     normalize_and_validate_assets,
     parse_csv_to_assets,
     parse_text_to_assets_service,
-)
-from services.simulation_service import (
-    SimulationError,
-    run_counterfactual_simulation,
-    run_ips_backtest,
 )
 from storage.database import db_path, initialize_database
 from storage.portfolio_store import (
@@ -44,11 +34,11 @@ from storage.portfolio_store import (
     list_snapshots,
     save_current_state,
 )
-from utils.metrics import annualize_cov
+from api.v1.serialization import safe_mapping
 
 
 app = typer.Typer(
-    help="IPS Pilot CLI optimized for monthly IPS review and agent-readable JSON output.",
+    help="IPS Pilot CLI for Evaluation Framework v2.",
     no_args_is_help=True,
 )
 portfolios_app = typer.Typer(help="Inspect saved portfolios.")
@@ -67,32 +57,6 @@ class CliError(Exception):
         self.hint = hint
 
 
-class DecisionContext(str, Enum):
-    """IPS evaluation context options."""
-
-    regular_review = "regular_review"
-    market_correction = "market_correction"
-    sharp_drop_review = "sharp_drop_review"
-    rebalance_review = "rebalance_review"
-
-
-class CounterfactualScenarioOption(str, Enum):
-    """Counterfactual preset options."""
-
-    core_reinforcement = "core_reinforcement"
-    pause_satellite_new_buys = "pause_satellite_new_buys"
-    dca_shift_to_core = "dca_shift_to_core"
-
-
-class BacktestStrategyOption(str, Enum):
-    """Limited IPS backtest policy options."""
-
-    current_ips = "current_ips"
-    core_first_dca = "core_first_dca"
-    pause_overweight_satellite = "pause_overweight_satellite"
-    return_chasing_reference = "return_chasing_reference"
-
-
 def _json_safe(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
@@ -107,44 +71,36 @@ def _emit_json(payload: dict[str, Any]) -> None:
     typer.echo(json.dumps(_json_safe(payload), ensure_ascii=False, indent=2))
 
 
+def _empty_v2_payload(command: str, error: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "ok": error is None,
+        "command": command,
+        "input": None,
+        "evaluation_period": None,
+        "layer_evaluations": [],
+        "asset_evaluations": [],
+        "review_queue": [],
+        "journal_draft": [],
+        "warnings": [],
+        "guardrails": {
+            "not_investment_advice": True,
+            "no_immediate_order_instruction": True,
+        },
+        "error": error,
+    }
+
+
 def _exit_with_error(command: str, exc: Exception) -> None:
     if isinstance(exc, CliError):
-        stage = exc.stage
-        message = exc.message
-        hint = exc.hint
+        error = {"stage": exc.stage, "message": exc.message, "hint": exc.hint}
     else:
-        stage = "unexpected"
-        message = str(exc)
-        hint = "명령 옵션과 입력 데이터를 확인한 뒤 다시 시도하세요."
-    _emit_json(
-        {
-            "ok": False,
-            "command": command,
-            "input": None,
-            "warnings": [],
-            "analysis": None,
-            "evaluation": None,
-            "artifacts": {},
-            "saved": None,
-            "error": {
-                "stage": stage,
-                "message": message,
-                "hint": hint,
-            },
+        error = {
+            "stage": "unexpected",
+            "message": str(exc),
+            "hint": "명령 옵션과 입력 데이터를 확인한 뒤 다시 시도하세요.",
         }
-    )
+    _emit_json(_empty_v2_payload(command, error))
     raise typer.Exit(code=1)
-
-
-def _parse_period(period: str) -> int | str:
-    normalized = period.strip()
-    if normalized.isdigit():
-        return int(normalized)
-    if normalized.upper() == "YTD":
-        return "YTD"
-    if normalized.lower() == "max":
-        return "Max"
-    raise CliError("input", "period는 개월 수, YTD, Max 중 하나여야 합니다.")
 
 
 def _selected_sources(*values: Any) -> int:
@@ -171,35 +127,20 @@ def _load_asset_df(
             df = pd.read_csv(file_path, sep=separator)
             assets, warnings = parse_csv_to_assets(df)
             asset_df, validation_warnings = normalize_and_validate_assets(assets)
-            return (
-                asset_df,
-                warnings + validation_warnings,
-                {"source": "file", "file": str(file_path)},
-                None,
-            )
+            return asset_df, warnings + validation_warnings, {"source": "file", "file": str(file_path)}, None
 
         if text is not None:
             assets, warnings = parse_text_to_assets_service(text)
             asset_df, validation_warnings = normalize_and_validate_assets(assets)
-            return (
-                asset_df,
-                warnings + validation_warnings,
-                {"source": "text"},
-                None,
-            )
+            return asset_df, warnings + validation_warnings, {"source": "text"}, None
 
         initialize_database()
         if portfolio_id is not None:
             state = get_current_state(portfolio_id)
             if state is None:
-                raise CliError(
-                    "input",
-                    f"portfolio_id={portfolio_id}의 current-state를 찾을 수 없습니다.",
-                    "웹앱에서 포트폴리오를 저장하거나 --snapshot-id를 사용하세요.",
-                )
-            asset_rows = state["session_state"].get("asset_df") or []
+                raise CliError("input", f"portfolio_id={portfolio_id}의 current-state를 찾을 수 없습니다.")
             return (
-                pd.DataFrame(asset_rows),
+                pd.DataFrame(state["session_state"].get("asset_df") or []),
                 [],
                 {"source": "portfolio_current_state", "portfolio_id": portfolio_id},
                 portfolio_id,
@@ -207,21 +148,12 @@ def _load_asset_df(
 
         snapshot = get_snapshot(snapshot_id or 0)
         if snapshot is None:
-            raise CliError(
-                "input",
-                f"snapshot_id={snapshot_id}를 찾을 수 없습니다.",
-                "portfolios list와 snapshots list로 사용 가능한 ID를 확인하세요.",
-            )
-        asset_rows = snapshot["session_state"].get("asset_df") or []
+            raise CliError("input", f"snapshot_id={snapshot_id}를 찾을 수 없습니다.")
         source_portfolio_id = int(snapshot["summary"]["portfolio_id"])
         return (
-            pd.DataFrame(asset_rows),
+            pd.DataFrame(snapshot["session_state"].get("asset_df") or []),
             [],
-            {
-                "source": "snapshot",
-                "snapshot_id": snapshot_id,
-                "portfolio_id": source_portfolio_id,
-            },
+            {"source": "snapshot", "snapshot_id": snapshot_id, "portfolio_id": source_portfolio_id},
             source_portfolio_id,
         )
     except PortfolioInputError as exc:
@@ -232,191 +164,6 @@ def _load_asset_df(
         raise CliError("input", f"파일을 읽을 수 없습니다: {file_path}") from exc
     except pd.errors.ParserError as exc:
         raise CliError("input", f"CSV/TSV 파싱 실패: {exc}") from exc
-
-
-def _cov_matrix(returns_smooth: pd.DataFrame, metrics_df: pd.DataFrame):
-    common = returns_smooth.columns.intersection(metrics_df.index)
-    if len(common) == 0:
-        return None
-    return annualize_cov(returns_smooth[common])
-
-
-def _records_to_csv(
-    records: list[dict[str, Any]],
-    output_dir: Path,
-    filename: str,
-) -> str | None:
-    if not records:
-        return None
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / filename
-    pd.DataFrame(records).to_csv(path, index=False)
-    return str(path)
-
-
-def _empty_agent_brief(
-    command: str,
-    error: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    view = empty_operating_view()
-    return {
-        "ok": error is None,
-        "command": command,
-        **view,
-        "error": error,
-    }
-
-
-def _exit_agent_brief_with_error(command: str, exc: Exception) -> None:
-    if isinstance(exc, CliError):
-        stage = exc.stage
-        message = exc.message
-        hint = exc.hint
-    else:
-        stage = "unexpected"
-        message = str(exc)
-        hint = "명령 옵션과 입력 데이터를 확인한 뒤 다시 시도하세요."
-    _emit_json(
-        _empty_agent_brief(
-            command,
-            {
-                "stage": stage,
-                "message": message,
-                "hint": hint,
-            },
-        )
-    )
-    raise typer.Exit(code=1)
-
-
-def _agent_command_payload(
-    *,
-    command: str,
-    input_meta: dict[str, Any],
-    warnings: list[str],
-    view: dict[str, Any],
-    period: int | str,
-    rf: float,
-    bench: str,
-    decision_context: str,
-) -> dict[str, Any]:
-    payload = _empty_agent_brief(command)
-    payload.update(
-        {
-            "input": {
-                **input_meta,
-                "period": period,
-                "rf": rf,
-                "bench": bench,
-                "decision_context": decision_context,
-                "database_path": str(db_path()),
-            },
-            "warnings": warnings,
-            **view,
-        }
-    )
-    return payload
-
-
-def _run_agent_evaluation(
-    *,
-    command: str,
-    file_path: Path | None,
-    text: str | None,
-    portfolio_id: int | None,
-    snapshot_id: int | None,
-    period: str,
-    rf: float,
-    bench: str,
-    rc_threshold: float,
-    e_threshold: float,
-    decision_context: DecisionContext,
-) -> dict[str, Any]:
-    parsed_period = _parse_period(period)
-    asset_df, warnings, input_meta, _source_portfolio_id = _load_asset_df(
-        file_path=file_path,
-        text=text,
-        portfolio_id=portfolio_id,
-        snapshot_id=snapshot_id,
-    )
-    bench_ticker = bench.upper()
-
-    try:
-        analysis = run_analysis(asset_df, parsed_period, rf, bench_ticker)
-    except AnalysisError as exc:
-        raise CliError("analysis", str(exc)) from exc
-
-    cov_matrix = _cov_matrix(analysis.returns_smooth, analysis.metrics_df)
-
-    try:
-        evaluation = run_evaluation(
-            analysis.metrics_df,
-            None,
-            rc_threshold,
-            e_threshold,
-            cov_matrix=cov_matrix,
-            decision_context=decision_context.value,
-        )
-    except EvaluationError as exc:
-        raise CliError("evaluation", str(exc)) from exc
-
-    metrics = dataframe_records(analysis.metrics_df, METRICS_COLUMNS, include_index=True)
-    proposal = dataframe_records(evaluation.proposal_df, PROPOSAL_COLUMNS)
-    ips_actions = dataframe_records(evaluation.ips_action_df)
-    group_summary = dataframe_records(
-        evaluation.group_summary_df, GROUP_SUMMARY_COLUMNS
-    )
-    rc_violations = dataframe_records(evaluation.rc_violations, RC_VIOLATION_COLUMNS)
-    view = build_evaluation_view(
-        metrics=metrics,
-        proposal=proposal,
-        ips_actions=ips_actions,
-        group_summary=group_summary,
-        rc_violations=rc_violations,
-        missing_tickers=analysis.missing_tickers,
-        playbook=evaluation.playbook,
-    )
-    return _agent_command_payload(
-        command=command,
-        input_meta=input_meta,
-        warnings=warnings,
-        view=view,
-        period=parsed_period,
-        rf=rf,
-        bench=bench_ticker,
-        decision_context=decision_context.value,
-    )
-
-
-def _select_agent_payload(payload: dict[str, Any], command: str) -> dict[str, Any]:
-    base_keys = [
-        "ok",
-        "command",
-        "input",
-        "warnings",
-        "guardrails",
-        "not_advice_notice",
-        "error",
-    ]
-    selected = {key: payload[key] for key in base_keys if key in payload}
-    selected["command"] = command
-    if command == "diagnose":
-        selected["ips_status"] = payload["ips_status"]
-        selected["risk_flags"] = payload["risk_flags"]
-        selected["playbook"] = payload["playbook"]
-    elif command == "dca-plan":
-        selected["dca_plan"] = payload["dca_plan"]
-    elif command == "review-queue":
-        selected["review_queue"] = payload["review_queue"]
-        selected["risk_flags"] = payload["risk_flags"]
-    elif command == "risk":
-        selected["risk_flags"] = payload["risk_flags"]
-        selected["top_risk_contributors"] = (
-            payload.get("ips_status", {}).get("top_risk_contributors", [])
-            if payload.get("ips_status")
-            else []
-        )
-    return selected
 
 
 def _save_run(
@@ -438,408 +185,309 @@ def _save_run(
     }
 
 
+def _run_v2(
+    *,
+    command: str,
+    file_path: Path | None,
+    text: str | None,
+    portfolio_id: int | None,
+    snapshot_id: int | None,
+    period: str,
+    start_date: str | None,
+    end_date: str | None,
+    rf: float,
+    bench: str,
+) -> tuple[dict[str, Any], pd.DataFrame, Any, dict[str, Any], int | None]:
+    asset_df, warnings, input_meta, source_portfolio_id = _load_asset_df(
+        file_path=file_path,
+        text=text,
+        portfolio_id=portfolio_id,
+        snapshot_id=snapshot_id,
+    )
+    try:
+        evaluation_period = resolve_evaluation_period(
+            period=period,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except EvaluationPeriodError as exc:
+        raise CliError("input", str(exc)) from exc
+
+    bench_ticker = bench.upper()
+    try:
+        analysis = run_analysis(
+            asset_df,
+            analysis_period_value(evaluation_period),
+            rf,
+            bench_ticker,
+        )
+    except AnalysisError as exc:
+        raise CliError("analysis", str(exc)) from exc
+
+    result = run_evaluation(
+        analysis=analysis,
+        evaluation_period=evaluation_period,
+        rf=rf,
+        bench=bench_ticker,
+    )
+    payload = result.to_payload()
+    payload.update(
+        {
+            "ok": True,
+            "command": command,
+            "input": {
+                **input_meta,
+                "period": evaluation_period.label,
+                "start_date": evaluation_period.start_date.isoformat(),
+                "end_date": evaluation_period.end_date.isoformat(),
+                "rf": rf,
+                "bench": bench_ticker,
+                "database_path": str(db_path()),
+            },
+            "warnings": warnings + payload["warnings"],
+            "error": None,
+        }
+    )
+    return payload, asset_df, analysis, input_meta, source_portfolio_id
+
+
+def _session_data(asset_df: pd.DataFrame, analysis, evaluation_payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "asset_df": asset_df.to_dict(orient="records"),
+        "prices": analysis.prices.reset_index().to_dict(orient="records"),
+        "returns": analysis.returns.reset_index().to_dict(orient="records"),
+        "returns_smooth": analysis.returns_smooth.reset_index().to_dict(orient="records"),
+        "weights_no_bench": analysis.weights_no_bench.to_dict(),
+        "metrics_df": analysis.metrics_df.reset_index().to_dict(orient="records"),
+        "portfolio_metrics": analysis.portfolio_metrics,
+        "benchmark_metrics": analysis.benchmark_metrics,
+        "missing_tickers": analysis.missing_tickers,
+        "analysis_settings": {
+            "period": evaluation_payload["input"]["period"],
+            "rf": evaluation_payload["input"]["rf"],
+            "bench": evaluation_payload["input"]["bench"],
+        },
+        "evaluation_v2": {
+            key: evaluation_payload[key]
+            for key in [
+                "evaluation_period",
+                "layer_evaluations",
+                "asset_evaluations",
+                "review_queue",
+                "journal_draft",
+                "warnings",
+                "guardrails",
+            ]
+        },
+        "evaluation_settings": {
+            "period": evaluation_payload["input"]["period"],
+            "start_date": evaluation_payload["input"]["start_date"],
+            "end_date": evaluation_payload["input"]["end_date"],
+            "rf": evaluation_payload["input"]["rf"],
+            "bench": evaluation_payload["input"]["bench"],
+        },
+    }
+
+
 @app.command()
 def evaluate(
-    file_path: Annotated[
-        Path | None,
-        typer.Option("--file"),
-    ] = None,
+    file_path: Annotated[Path | None, typer.Option("--file")] = None,
     text: Annotated[str | None, typer.Option("--text")] = None,
     portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
-    period: Annotated[str, typer.Option("--period")] = "12",
+    period: Annotated[str, typer.Option("--period")] = "3M",
+    start_date: Annotated[str | None, typer.Option("--start-date")] = None,
+    end_date: Annotated[str | None, typer.Option("--end-date")] = None,
     rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
     bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
-    rc_threshold: Annotated[float, typer.Option("--rc-threshold")] = 1.5,
-    e_threshold: Annotated[float, typer.Option("--e-threshold")] = 0.5,
-    decision_context: Annotated[
-        DecisionContext,
-        typer.Option("--decision-context"),
-    ] = DecisionContext.regular_review,
-    counterfactual_scenario: Annotated[
-        CounterfactualScenarioOption | None,
-        typer.Option("--counterfactual-scenario"),
-    ] = None,
-    backtest_strategy: Annotated[
-        list[BacktestStrategyOption] | None,
-        typer.Option("--backtest-strategy"),
-    ] = None,
     output_dir: Annotated[Path | None, typer.Option("--output-dir")] = None,
     save: Annotated[bool, typer.Option("--save")] = False,
     save_to_portfolio_id: Annotated[int | None, typer.Option("--save-to-portfolio-id")] = None,
     snapshot_name: Annotated[str | None, typer.Option("--snapshot-name")] = None,
     note: Annotated[str, typer.Option("--note")] = "",
 ) -> None:
-    """Run analysis and evaluation, emitting a single JSON object on stdout."""
+    """Run Evaluation Framework v2 and emit one JSON object."""
     try:
-        parsed_period = _parse_period(period)
-        asset_df, warnings, input_meta, source_portfolio_id = _load_asset_df(
+        payload, asset_df, analysis, _input_meta, source_portfolio_id = _run_v2(
+            command="evaluate",
             file_path=file_path,
             text=text,
             portfolio_id=portfolio_id,
             snapshot_id=snapshot_id,
-        )
-        bench_ticker = bench.upper()
-
-        try:
-            analysis = run_analysis(asset_df, parsed_period, rf, bench_ticker)
-        except AnalysisError as exc:
-            raise CliError("analysis", str(exc)) from exc
-
-        cov_matrix = _cov_matrix(analysis.returns_smooth, analysis.metrics_df)
-
-        try:
-            evaluation = run_evaluation(
-                analysis.metrics_df,
-                None,
-                rc_threshold,
-                e_threshold,
-                cov_matrix=cov_matrix,
-                decision_context=decision_context.value,
-            )
-        except EvaluationError as exc:
-            raise CliError("evaluation", str(exc)) from exc
-
-        simulation: dict[str, Any] = {
-            "counterfactual": None,
-            "backtest": None,
-        }
-        try:
-            if counterfactual_scenario is not None:
-                simulation["counterfactual"] = run_counterfactual_simulation(
-                    metrics_df=analysis.metrics_df,
-                    scenario=counterfactual_scenario.value,
-                    rc_over_thresh_pct=rc_threshold,
-                    e_thresh=e_threshold,
-                    cov_matrix=cov_matrix,
-                    decision_context=decision_context.value,
-                )
-            if backtest_strategy:
-                simulation["backtest"] = run_ips_backtest(
-                    returns_smooth=analysis.returns_smooth,
-                    metrics_df=analysis.metrics_df,
-                    strategies=[strategy.value for strategy in backtest_strategy],
-                    cov_matrix=cov_matrix,
-                    frequency="monthly",
-                    decision_context=decision_context.value,
-                    rf=rf,
-                )
-        except SimulationError as exc:
-            raise CliError("simulation", str(exc)) from exc
-
-        metrics = dataframe_records(
-            analysis.metrics_df, METRICS_COLUMNS, include_index=True
-        )
-        proposal = dataframe_records(evaluation.proposal_df, PROPOSAL_COLUMNS)
-        ips_actions = dataframe_records(evaluation.ips_action_df)
-        group_summary = dataframe_records(
-            evaluation.group_summary_df, GROUP_SUMMARY_COLUMNS
-        )
-        rc_violations = dataframe_records(
-            evaluation.rc_violations, RC_VIOLATION_COLUMNS
+            period=period,
+            start_date=start_date,
+            end_date=end_date,
+            rf=rf,
+            bench=bench,
         )
 
         artifacts: dict[str, str] = {}
         if output_dir is not None:
-            outputs = {
-                "metrics_csv": _records_to_csv(metrics, output_dir, "metrics.csv"),
-                "proposal_csv": _records_to_csv(proposal, output_dir, "proposal.csv"),
-                "ips_actions_csv": _records_to_csv(
-                    ips_actions, output_dir, "ips_actions.csv"
-                ),
-                "group_summary_csv": _records_to_csv(
-                    group_summary, output_dir, "group_summary.csv"
-                ),
-                "rc_violations_csv": _records_to_csv(
-                    rc_violations, output_dir, "rc_violations.csv"
-                ),
-            }
-            artifacts = {key: value for key, value in outputs.items() if value}
-
-        session_data = {
-            "asset_df": asset_df.to_dict(orient="records"),
-            "metrics_df": analysis.metrics_df.reset_index().to_dict(orient="records"),
-            "portfolio_metrics": analysis.portfolio_metrics,
-            "benchmark_metrics": analysis.benchmark_metrics,
-            "missing_tickers": analysis.missing_tickers,
-            "returns_smooth": analysis.returns_smooth.reset_index().to_dict(
-                orient="records"
-            ),
-            "analysis_settings": {
-                "period": parsed_period,
-                "rf": rf,
-                "bench": bench_ticker,
-            },
-            "proposal_df": evaluation.proposal_df.to_dict(orient="records"),
-            "ips_action_df": evaluation.ips_action_df.to_dict(orient="records"),
-            "group_summary_df": evaluation.group_summary_df.to_dict(orient="records"),
-            "rc_violations": evaluation.rc_violations.to_dict(orient="records"),
-            "evaluation_settings": {
-                "rc_over_thresh_pct": rc_threshold,
-                "e_thresh": e_threshold,
-                "target_weights": None,
-                "decision_context": decision_context.value,
-            },
-            "ips_config_snapshot": evaluation.ips_config_snapshot,
-            "playbook": evaluation.playbook,
-        }
+            output_dir.mkdir(parents=True, exist_ok=True)
+            for key, filename in {
+                "layer_evaluations": "layer_evaluations.csv",
+                "asset_evaluations": "asset_evaluations.csv",
+                "review_queue": "review_queue.csv",
+            }.items():
+                path = output_dir / filename
+                pd.DataFrame(payload[key]).to_csv(path, index=False)
+                artifacts[f"{key}_csv"] = str(path)
 
         target_portfolio_id = save_to_portfolio_id
         if target_portfolio_id is None and save:
             target_portfolio_id = source_portfolio_id
         if save and target_portfolio_id is None:
-            raise CliError(
-                "persistence",
-                "--save는 DB 입력 또는 --save-to-portfolio-id와 함께 사용해야 합니다.",
-            )
+            raise CliError("persistence", "--save는 DB 입력 또는 --save-to-portfolio-id와 함께 사용해야 합니다.")
         saved = (
             _save_run(
                 portfolio_id=target_portfolio_id,
                 snapshot_name=snapshot_name,
                 note=note,
-                session_data=session_data,
+                session_data=_session_data(asset_df, analysis, payload),
             )
             if target_portfolio_id is not None
             else {"saved": False}
         )
-
-        _emit_json(
-            {
-                "ok": True,
-                "command": "evaluate",
-                "input": {
-                    **input_meta,
-                    "period": parsed_period,
-                    "rf": rf,
-                    "bench": bench_ticker,
-                    "decision_context": decision_context.value,
-                    "counterfactual_scenario": counterfactual_scenario.value
-                    if counterfactual_scenario is not None
-                    else None,
-                    "backtest_strategies": [
-                        strategy.value for strategy in backtest_strategy or []
-                    ],
-                    "database_path": str(db_path()),
-                },
-                "warnings": warnings,
-                "analysis": {
-                    "metrics": metrics,
-                    "portfolio_metrics": safe_mapping(analysis.portfolio_metrics),
-                    "benchmark_metrics": safe_mapping(analysis.benchmark_metrics),
-                    "missing_tickers": analysis.missing_tickers,
-                },
-                "evaluation": {
-                    "proposal": proposal,
-                    "ips_actions": ips_actions,
-                    "group_summary": group_summary,
-                    "rc_violations": rc_violations,
-                    "ips_config_snapshot": evaluation.ips_config_snapshot,
-                    "playbook": evaluation.playbook,
-                },
-                "simulation": simulation,
-                "artifacts": artifacts,
-                "saved": saved,
-                "error": None,
-            }
-        )
+        payload["artifacts"] = artifacts
+        payload["saved"] = saved
+        _emit_json(payload)
     except Exception as exc:
         _exit_with_error("evaluate", exc)
 
 
 @app.command("agent-brief")
 def agent_brief(
-    file_path: Annotated[
-        Path | None,
-        typer.Option("--file"),
-    ] = None,
+    file_path: Annotated[Path | None, typer.Option("--file")] = None,
     text: Annotated[str | None, typer.Option("--text")] = None,
     portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
-    period: Annotated[str, typer.Option("--period")] = "12",
+    period: Annotated[str, typer.Option("--period")] = "3M",
     rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
     bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
-    rc_threshold: Annotated[float, typer.Option("--rc-threshold")] = 1.5,
-    e_threshold: Annotated[float, typer.Option("--e-threshold")] = 0.5,
-    decision_context: Annotated[
-        DecisionContext,
-        typer.Option("--decision-context"),
-    ] = DecisionContext.regular_review,
 ) -> None:
-    """Emit a compact IPS brief for Codex and other agents."""
+    """Emit a compact v2 IPS brief for agents."""
     try:
+        payload, *_ = _run_v2(
+            command="agent-brief",
+            file_path=file_path,
+            text=text,
+            portfolio_id=portfolio_id,
+            snapshot_id=snapshot_id,
+            period=period,
+            start_date=None,
+            end_date=None,
+            rf=rf,
+            bench=bench,
+        )
         _emit_json(
-            _run_agent_evaluation(
-                command="agent-brief",
-                file_path=file_path,
-                text=text,
-                portfolio_id=portfolio_id,
-                snapshot_id=snapshot_id,
-                period=period,
-                rf=rf,
-                bench=bench,
-                rc_threshold=rc_threshold,
-                e_threshold=e_threshold,
-                decision_context=decision_context,
-            )
+            {
+                "ok": True,
+                "command": "agent-brief",
+                "input": payload["input"],
+                "evaluation_period": payload["evaluation_period"],
+                "status_summary": _status_summary(payload),
+                "review_queue": payload["review_queue"],
+                "guardrails": payload["guardrails"],
+                "warnings": payload["warnings"],
+                "error": None,
+            }
         )
     except Exception as exc:
-        _exit_agent_brief_with_error("agent-brief", exc)
+        _exit_with_error("agent-brief", exc)
 
 
-@app.command("diagnose")
-def diagnose(
-    file_path: Annotated[
-        Path | None,
-        typer.Option("--file"),
-    ] = None,
-    text: Annotated[str | None, typer.Option("--text")] = None,
-    portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
-    snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
-    period: Annotated[str, typer.Option("--period")] = "12",
-    rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
-    bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
-    rc_threshold: Annotated[float, typer.Option("--rc-threshold")] = 1.5,
-    e_threshold: Annotated[float, typer.Option("--e-threshold")] = 0.5,
-    decision_context: Annotated[
-        DecisionContext,
-        typer.Option("--decision-context"),
-    ] = DecisionContext.regular_review,
-) -> None:
-    """Emit IPS status, risk flags, and playbook."""
-    try:
-        payload = _run_agent_evaluation(
-            command="diagnose",
-            file_path=file_path,
-            text=text,
-            portfolio_id=portfolio_id,
-            snapshot_id=snapshot_id,
-            period=period,
-            rf=rf,
-            bench=bench,
-            rc_threshold=rc_threshold,
-            e_threshold=e_threshold,
-            decision_context=decision_context,
-        )
-        _emit_json(_select_agent_payload(payload, "diagnose"))
-    except Exception as exc:
-        _exit_agent_brief_with_error("diagnose", exc)
-
-
-@app.command("dca-plan")
-def dca_plan(
-    file_path: Annotated[
-        Path | None,
-        typer.Option("--file"),
-    ] = None,
-    text: Annotated[str | None, typer.Option("--text")] = None,
-    portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
-    snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
-    period: Annotated[str, typer.Option("--period")] = "12",
-    rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
-    bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
-    rc_threshold: Annotated[float, typer.Option("--rc-threshold")] = 1.5,
-    e_threshold: Annotated[float, typer.Option("--e-threshold")] = 0.5,
-    decision_context: Annotated[
-        DecisionContext,
-        typer.Option("--decision-context"),
-    ] = DecisionContext.regular_review,
-) -> None:
-    """Emit regular-purchase adjustment candidates only."""
-    try:
-        payload = _run_agent_evaluation(
-            command="dca-plan",
-            file_path=file_path,
-            text=text,
-            portfolio_id=portfolio_id,
-            snapshot_id=snapshot_id,
-            period=period,
-            rf=rf,
-            bench=bench,
-            rc_threshold=rc_threshold,
-            e_threshold=e_threshold,
-            decision_context=decision_context,
-        )
-        _emit_json(_select_agent_payload(payload, "dca-plan"))
-    except Exception as exc:
-        _exit_agent_brief_with_error("dca-plan", exc)
+def _status_summary(payload: dict[str, Any]) -> dict[str, int]:
+    counts = {"OK": 0, "Watch": 0, "Review": 0, "Action": 0}
+    for record in payload["layer_evaluations"] + payload["asset_evaluations"]:
+        status = record.get("output", {}).get("status")
+        if status in counts:
+            counts[status] += 1
+    return counts
 
 
 @app.command("review-queue")
 def review_queue(
-    file_path: Annotated[
-        Path | None,
-        typer.Option("--file"),
-    ] = None,
+    file_path: Annotated[Path | None, typer.Option("--file")] = None,
     text: Annotated[str | None, typer.Option("--text")] = None,
     portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
-    period: Annotated[str, typer.Option("--period")] = "12",
+    period: Annotated[str, typer.Option("--period")] = "3M",
     rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
     bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
-    rc_threshold: Annotated[float, typer.Option("--rc-threshold")] = 1.5,
-    e_threshold: Annotated[float, typer.Option("--e-threshold")] = 0.5,
-    decision_context: Annotated[
-        DecisionContext,
-        typer.Option("--decision-context"),
-    ] = DecisionContext.regular_review,
 ) -> None:
-    """Emit thesis, risk, sell-review, and blocked review items."""
+    """Emit v2 review queue only."""
     try:
-        payload = _run_agent_evaluation(
+        payload, *_ = _run_v2(
             command="review-queue",
             file_path=file_path,
             text=text,
             portfolio_id=portfolio_id,
             snapshot_id=snapshot_id,
             period=period,
+            start_date=None,
+            end_date=None,
             rf=rf,
             bench=bench,
-            rc_threshold=rc_threshold,
-            e_threshold=e_threshold,
-            decision_context=decision_context,
         )
-        _emit_json(_select_agent_payload(payload, "review-queue"))
+        _emit_json(
+            {
+                "ok": True,
+                "command": "review-queue",
+                "input": payload["input"],
+                "evaluation_period": payload["evaluation_period"],
+                "review_queue": payload["review_queue"],
+                "guardrails": payload["guardrails"],
+                "warnings": payload["warnings"],
+                "error": None,
+            }
+        )
     except Exception as exc:
-        _exit_agent_brief_with_error("review-queue", exc)
+        _exit_with_error("review-queue", exc)
 
 
 @app.command("risk")
 def risk(
-    file_path: Annotated[
-        Path | None,
-        typer.Option("--file"),
-    ] = None,
+    file_path: Annotated[Path | None, typer.Option("--file")] = None,
     text: Annotated[str | None, typer.Option("--text")] = None,
     portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
-    period: Annotated[str, typer.Option("--period")] = "12",
+    period: Annotated[str, typer.Option("--period")] = "3M",
     rf: Annotated[float, typer.Option("--rf")] = DEFAULT_RF,
     bench: Annotated[str, typer.Option("--bench")] = DEFAULT_BENCH,
-    rc_threshold: Annotated[float, typer.Option("--rc-threshold")] = 1.5,
-    e_threshold: Annotated[float, typer.Option("--e-threshold")] = 0.5,
-    decision_context: Annotated[
-        DecisionContext,
-        typer.Option("--decision-context"),
-    ] = DecisionContext.regular_review,
 ) -> None:
-    """Emit risk flags and top risk contributors."""
+    """Emit v2 units with risk-related triggers."""
     try:
-        payload = _run_agent_evaluation(
+        payload, *_ = _run_v2(
             command="risk",
             file_path=file_path,
             text=text,
             portfolio_id=portfolio_id,
             snapshot_id=snapshot_id,
             period=period,
+            start_date=None,
+            end_date=None,
             rf=rf,
             bench=bench,
-            rc_threshold=rc_threshold,
-            e_threshold=e_threshold,
-            decision_context=decision_context,
         )
-        _emit_json(_select_agent_payload(payload, "risk"))
+        risk_items = [
+            item
+            for item in payload["review_queue"]
+            if any("risk" in code or "mdd" in code or "volatility" in code for code in item.get("triggered_by", []))
+        ]
+        _emit_json(
+            {
+                "ok": True,
+                "command": "risk",
+                "input": payload["input"],
+                "evaluation_period": payload["evaluation_period"],
+                "risk_review": risk_items,
+                "guardrails": payload["guardrails"],
+                "warnings": payload["warnings"],
+                "error": None,
+            }
+        )
     except Exception as exc:
-        _exit_agent_brief_with_error("risk", exc)
+        _exit_with_error("risk", exc)
 
 
 @portfolios_app.command("list")
@@ -847,13 +495,12 @@ def list_saved_portfolios() -> None:
     """List saved portfolios as JSON."""
     try:
         initialize_database()
-        portfolios = list_portfolios()
         _emit_json(
             {
                 "ok": True,
                 "command": "portfolios list",
                 "database_path": str(db_path()),
-                "portfolios": portfolios,
+                "portfolios": list_portfolios(),
                 "error": None,
             }
         )
@@ -870,14 +517,13 @@ def list_saved_snapshots(
     """List snapshots for a saved portfolio as JSON."""
     try:
         initialize_database()
-        snapshots = list_snapshots(portfolio_id)
         _emit_json(
             {
                 "ok": True,
                 "command": "snapshots list",
                 "database_path": str(db_path()),
                 "portfolio_id": portfolio_id,
-                "snapshots": snapshots,
+                "snapshots": list_snapshots(portfolio_id),
                 "error": None,
             }
         )

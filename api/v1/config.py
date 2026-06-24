@@ -18,7 +18,7 @@ from storage.config_store import (
 router = APIRouter()
 
 class TargetAllocationRequest(BaseModel):
-    group: str
+    layer: str
     min: float = Field(ge=0, le=1)
     target: float = Field(ge=0, le=1)
     max: float = Field(ge=0, le=1)

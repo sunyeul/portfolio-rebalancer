@@ -13,12 +13,7 @@ from services.analysis_service import DEFAULT_BENCH, DEFAULT_RF, AnalysisError, 
 router = APIRouter()
 
 EVALUATION_SESSION_KEYS = (
-    "proposal_df",
-    "ips_action_df",
-    "group_summary_df",
-    "rc_violations",
-    "ips_config_snapshot",
-    "playbook",
+    "evaluation_v2",
     "evaluation_settings",
 )
 

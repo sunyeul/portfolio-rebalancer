@@ -24,7 +24,8 @@ class PortfolioRowIn(BaseModel):
     ticker: str = ""
     allocation: float | str | None = None
     return_total: float | str | None = None
-    group: str | None = None
+    layer: str | None = None
+    category: str | None = None
     dca_enabled: bool | str | None = True
     thesis_status: str | None = None
 
