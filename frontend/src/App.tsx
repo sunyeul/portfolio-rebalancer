@@ -1,5 +1,8 @@
 import {
   AlertCircle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   BarChart3,
   ClipboardList,
   PencilLine,
@@ -110,6 +113,15 @@ type PortfolioInputRow = {
 type WorkflowPending = 'portfolio' | 'analysis' | 'evaluation' | null;
 type ManagementPending = 'portfolios' | 'portfolio' | 'save' | 'snapshot' | 'delete' | 'update' | null;
 type SnapshotModalMode = 'create' | 'edit';
+type SortDirection = 'asc' | 'desc';
+type SortState<ColumnId extends string> = { column: ColumnId; direction: SortDirection } | null;
+type SortValue = string | number | null | undefined;
+
+type SortableColumn<Row, ColumnId extends string> = {
+  id: ColumnId;
+  label: string;
+  getValue: (row: Row) => SortValue;
+};
 
 const initialRows: PortfolioInputRow[] = [
   {
@@ -179,6 +191,78 @@ function categoryLabel(value: string | null | undefined) {
 
 function thesisLabel(value: string | null | undefined) {
   return thesisLabels[value as ThesisStatusInput] ?? value ?? '미정';
+}
+
+function nextSortState<ColumnId extends string>(current: SortState<ColumnId>, column: ColumnId): SortState<ColumnId> {
+  if (current?.column !== column) return { column, direction: 'asc' };
+  if (current.direction === 'asc') return { column, direction: 'desc' };
+  return null;
+}
+
+function isMissingSortValue(value: SortValue) {
+  return value === null || value === undefined || (typeof value === 'number' && Number.isNaN(value));
+}
+
+function compareSortValues(left: SortValue, right: SortValue, direction: SortDirection) {
+  const leftMissing = isMissingSortValue(left);
+  const rightMissing = isMissingSortValue(right);
+  if (leftMissing && rightMissing) return 0;
+  if (leftMissing) return 1;
+  if (rightMissing) return -1;
+
+  const result =
+    typeof left === 'number' && typeof right === 'number'
+      ? left - right
+      : String(left).localeCompare(String(right), 'ko', { numeric: true, sensitivity: 'base' });
+
+  return direction === 'asc' ? result : -result;
+}
+
+function sortRows<Row, ColumnId extends string>(
+  rows: Row[],
+  columns: Array<SortableColumn<Row, ColumnId>>,
+  sortState: SortState<ColumnId>
+) {
+  if (!sortState) return rows;
+  const column = columns.find((candidate) => candidate.id === sortState.column);
+  if (!column) return rows;
+
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((left, right) => {
+      const result = compareSortValues(column.getValue(left.row), column.getValue(right.row), sortState.direction);
+      return result === 0 ? left.index - right.index : result;
+    })
+    .map(({ row }) => row);
+}
+
+function SortableHeader<ColumnId extends string>({
+  id,
+  label,
+  sortState,
+  onSort
+}: {
+  id: ColumnId;
+  label: string;
+  sortState: SortState<ColumnId>;
+  onSort: (id: ColumnId) => void;
+}) {
+  const direction = sortState?.column === id ? sortState.direction : null;
+  const Icon = direction === 'asc' ? ArrowUp : direction === 'desc' ? ArrowDown : ArrowUpDown;
+  const ariaSort = direction === 'asc' ? 'ascending' : direction === 'desc' ? 'descending' : 'none';
+
+  return (
+    <th className="px-2 py-2" aria-sort={ariaSort}>
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 rounded text-left font-bold text-slate-500 transition hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-cyan-700 focus:ring-offset-2"
+        onClick={() => onSort(id)}
+      >
+        <span>{label}</span>
+        <Icon className={`h-3.5 w-3.5 ${direction ? 'text-slate-900' : 'text-slate-400'}`} aria-hidden="true" />
+      </button>
+    </th>
+  );
 }
 
 function categoryOptionsForLayer(layer: LayerType) {
@@ -644,7 +728,51 @@ function MetricsStrip({ analysis }: { analysis: AnalysisResponse | null }) {
   );
 }
 
+function layerWeightGapForDisplay(output: EvaluationRecord['output']) {
+  return output.weight_gap == null ? output.weight_gap : -output.weight_gap;
+}
+
+type LayerDashboardColumnId = 'layer' | 'current' | 'gap' | 'return' | 'mdd' | 'efficiency' | 'status';
+
+const layerDashboardColumns: Array<SortableColumn<EvaluationRecord, LayerDashboardColumnId>> = [
+  { id: 'layer', label: '계층', getValue: (row) => layerLabel(row.unit.name) },
+  { id: 'current', label: '현재', getValue: (row) => row.output.current_weight },
+  { id: 'gap', label: '차이', getValue: (row) => layerWeightGapForDisplay(row.output) },
+  { id: 'return', label: '수익률', getValue: (row) => row.output.period_return },
+  { id: 'mdd', label: 'MDD', getValue: (row) => row.output.mdd },
+  { id: 'efficiency', label: '효율', getValue: (row) => row.output.cagr_mdd_ratio },
+  { id: 'status', label: '상태', getValue: (row) => statusLabel(row.output.status) }
+];
+
+type AssetEvaluationColumnId =
+  | 'layer'
+  | 'ticker'
+  | 'weight'
+  | 'layerInternalWeight'
+  | 'return'
+  | 'cagr'
+  | 'mdd'
+  | 'riskContribution'
+  | 'thesis'
+  | 'status';
+
+const assetEvaluationColumns: Array<SortableColumn<EvaluationRecord, AssetEvaluationColumnId>> = [
+  { id: 'layer', label: '계층', getValue: (row) => layerLabel(row.unit.parent_layer) },
+  { id: 'ticker', label: '티커', getValue: (row) => row.unit.name },
+  { id: 'weight', label: '비중', getValue: (row) => row.output.current_weight },
+  { id: 'layerInternalWeight', label: '계층 내 비중', getValue: (row) => row.output.layer_internal_weight },
+  { id: 'return', label: '수익률', getValue: (row) => row.output.period_return },
+  { id: 'cagr', label: 'CAGR', getValue: (row) => row.output.cagr },
+  { id: 'mdd', label: 'MDD', getValue: (row) => row.output.mdd },
+  { id: 'riskContribution', label: '위험 기여', getValue: (row) => row.output.risk_contribution },
+  { id: 'thesis', label: '논리', getValue: (row) => thesisLabel(row.output.thesis_status) },
+  { id: 'status', label: '상태', getValue: (row) => statusLabel(row.output.status) }
+];
+
 function LayerDashboard({ rows }: { rows: EvaluationRecord[] }) {
+  const [sortState, setSortState] = useState<SortState<LayerDashboardColumnId>>(null);
+  const sortedRows = useMemo(() => sortRows(rows, layerDashboardColumns, sortState), [rows, sortState]);
+
   if (!rows.length) return null;
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4">
@@ -656,21 +784,23 @@ function LayerDashboard({ rows }: { rows: EvaluationRecord[] }) {
         <table className="min-w-full text-left text-sm">
           <thead className="text-xs uppercase text-slate-500">
             <tr>
-              <th className="px-2 py-2">계층</th>
-              <th className="px-2 py-2">현재</th>
-              <th className="px-2 py-2">차이</th>
-              <th className="px-2 py-2">수익률</th>
-              <th className="px-2 py-2">MDD</th>
-              <th className="px-2 py-2">효율</th>
-              <th className="px-2 py-2">상태</th>
+              {layerDashboardColumns.map((column) => (
+                <SortableHeader
+                  key={column.id}
+                  id={column.id}
+                  label={column.label}
+                  sortState={sortState}
+                  onSort={(columnId) => setSortState((current) => nextSortState(current, columnId))}
+                />
+              ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ unit, output }) => (
+            {sortedRows.map(({ unit, output }) => (
               <tr key={unit.name} className="border-t border-slate-100">
                 <td className="px-2 py-2 font-bold text-slate-900">{layerLabel(unit.name)}</td>
                 <td className="px-2 py-2">{pct(output.current_weight)}</td>
-                <td className="px-2 py-2">{pct(output.weight_gap)}</td>
+                <td className="px-2 py-2">{pct(layerWeightGapForDisplay(output))}</td>
                 <td className="px-2 py-2">{pct(output.period_return)}</td>
                 <td className="px-2 py-2">{pct(output.mdd)}</td>
                 <td className="px-2 py-2">{num(output.cagr_mdd_ratio)}</td>
@@ -685,6 +815,9 @@ function LayerDashboard({ rows }: { rows: EvaluationRecord[] }) {
 }
 
 function AssetEvaluationTable({ rows }: { rows: EvaluationRecord[] }) {
+  const [sortState, setSortState] = useState<SortState<AssetEvaluationColumnId>>(null);
+  const sortedRows = useMemo(() => sortRows(rows, assetEvaluationColumns, sortState), [rows, sortState]);
+
   if (!rows.length) return null;
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4">
@@ -693,20 +826,19 @@ function AssetEvaluationTable({ rows }: { rows: EvaluationRecord[] }) {
         <table className="min-w-full text-left text-sm">
           <thead className="text-xs uppercase text-slate-500">
             <tr>
-              <th className="px-2 py-2">계층</th>
-              <th className="px-2 py-2">티커</th>
-              <th className="px-2 py-2">비중</th>
-              <th className="px-2 py-2">계층 내 비중</th>
-              <th className="px-2 py-2">수익률</th>
-              <th className="px-2 py-2">CAGR</th>
-              <th className="px-2 py-2">MDD</th>
-              <th className="px-2 py-2">위험 기여</th>
-              <th className="px-2 py-2">논리</th>
-              <th className="px-2 py-2">상태</th>
+              {assetEvaluationColumns.map((column) => (
+                <SortableHeader
+                  key={column.id}
+                  id={column.id}
+                  label={column.label}
+                  sortState={sortState}
+                  onSort={(columnId) => setSortState((current) => nextSortState(current, columnId))}
+                />
+              ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ unit, output }) => (
+            {sortedRows.map(({ unit, output }) => (
               <tr key={unit.name} className="border-t border-slate-100">
                 <td className="px-2 py-2">{layerLabel(unit.parent_layer)}</td>
                 <td className="px-2 py-2 font-bold text-slate-900">{unit.name}</td>
