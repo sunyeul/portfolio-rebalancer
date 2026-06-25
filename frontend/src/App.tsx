@@ -36,10 +36,8 @@ import {
   updateSnapshot
 } from './lib/api';
 import {
-  categoryValues,
   layerValues,
   thesisStatusValues,
-  type CategoryType,
   type LayerType,
   type PortfolioRowInput,
   type ThesisStatusInput
@@ -51,17 +49,6 @@ const layerLabels: Record<LayerType, string> = {
   core: '코어',
   satellite: '위성',
   experiment: '실험'
-};
-
-const categoryLabels: Record<CategoryType, string> = {
-  core_market: '코어 시장',
-  core_gold: '코어 금',
-  satellite_ai_infra: 'AI 인프라',
-  satellite_ai_software: 'AI 소프트웨어',
-  satellite_space: '우주',
-  satellite_nextgen: '차세대',
-  experiment_leverage: '레버리지',
-  experiment_momentum: '모멘텀'
 };
 
 const thesisLabels: Record<ThesisStatusInput, string> = {
@@ -78,23 +65,6 @@ const statusLabels: Record<string, string> = {
   Action: '조치 검토'
 };
 
-const categoryLayer: Record<CategoryType, LayerType> = {
-  core_market: 'core',
-  core_gold: 'core',
-  satellite_ai_infra: 'satellite',
-  satellite_ai_software: 'satellite',
-  satellite_space: 'satellite',
-  satellite_nextgen: 'satellite',
-  experiment_leverage: 'experiment',
-  experiment_momentum: 'experiment'
-};
-
-const defaultCategoryByLayer: Record<LayerType, CategoryType> = {
-  core: 'core_market',
-  satellite: 'satellite_ai_infra',
-  experiment: 'experiment_leverage'
-};
-
 const DEFAULT_LAYER_BENCHMARKS: Record<LayerType, string> = {
   core: DEFAULT_BENCHMARK,
   satellite: 'QQQ',
@@ -107,7 +77,6 @@ type PortfolioInputRow = {
   ticker: string;
   allocation: string;
   layer: LayerType;
-  category: CategoryType;
   thesis_status: ThesisStatusInput;
 };
 
@@ -130,7 +99,6 @@ const initialRows: PortfolioInputRow[] = [
     ticker: 'VOO',
     allocation: '70',
     layer: 'core',
-    category: 'core_market',
     thesis_status: 'valid'
   },
   {
@@ -138,7 +106,6 @@ const initialRows: PortfolioInputRow[] = [
     ticker: 'SMH',
     allocation: '8',
     layer: 'satellite',
-    category: 'satellite_ai_infra',
     thesis_status: 'valid'
   },
   {
@@ -146,7 +113,6 @@ const initialRows: PortfolioInputRow[] = [
     ticker: 'QQQ',
     allocation: '12',
     layer: 'satellite',
-    category: 'satellite_ai_software',
     thesis_status: 'watch'
   },
   {
@@ -154,7 +120,6 @@ const initialRows: PortfolioInputRow[] = [
     ticker: 'GLD',
     allocation: '10',
     layer: 'core',
-    category: 'core_gold',
     thesis_status: 'valid'
   }
 ];
@@ -184,10 +149,6 @@ function statusLabel(status: string) {
 
 function layerLabel(value: string | null | undefined) {
   return layerLabels[value as LayerType] ?? value ?? '미지정';
-}
-
-function categoryLabel(value: string | null | undefined) {
-  return categoryLabels[value as CategoryType] ?? value ?? '미지정';
 }
 
 function thesisLabel(value: string | null | undefined) {
@@ -266,10 +227,6 @@ function SortableHeader<ColumnId extends string>({
   );
 }
 
-function categoryOptionsForLayer(layer: LayerType) {
-  return categoryValues.filter((category) => categoryLayer[category] === layer);
-}
-
 function toNumber(value: string) {
   const numeric = Number(value.replace(/,/g, '').trim());
   return Number.isFinite(numeric) ? numeric : Number.NaN;
@@ -285,17 +242,12 @@ function makeInputRow(id: string): PortfolioInputRow {
     ticker: '',
     allocation: '',
     layer: 'core',
-    category: 'core_market',
     thesis_status: 'valid'
   };
 }
 
 function isLayerType(value: string | null | undefined): value is LayerType {
   return layerValues.includes(value as LayerType);
-}
-
-function isCategoryType(value: string | null | undefined): value is CategoryType {
-  return categoryValues.includes(value as CategoryType);
 }
 
 function editableThesisStatus(value: string | null | undefined): PortfolioInputRow['thesis_status'] {
@@ -307,14 +259,12 @@ function inputRowsFromAssets(assets: AssetRow[]): PortfolioInputRow[] {
   if (assets.length === 0) return initialRows;
   return assets.map((asset, index) => {
     const layer = isLayerType(asset.layer) ? asset.layer : 'core';
-    const category = isCategoryType(asset.category) ? asset.category : defaultCategoryByLayer[layer];
     const allocation = Number.isFinite(asset.allocation) ? asset.allocation : asset.weight * 100;
     return {
       id: `loaded-${asset.ticker}-${index}`,
       ticker: asset.ticker,
       allocation: String(Number.isFinite(allocation) ? allocation : ''),
       layer,
-      category,
       thesis_status: editableThesisStatus(asset.thesis_status)
     };
   });
@@ -353,7 +303,6 @@ function toPortfolioPayload(rows: PortfolioInputRow[]): PortfolioRowInput[] {
       ticker: row.ticker.trim().toUpperCase(),
       allocation: row.allocation.trim(),
       layer: row.layer,
-      category: row.category,
       thesis_status: row.thesis_status
     }));
 }
@@ -447,8 +396,7 @@ function PortfolioInputTable({
               <col className="w-[16%]" />
               <col className="w-[13%]" />
               <col className="w-[15%]" />
-              <col className="w-[24%]" />
-              <col className="w-[20%]" />
+              <col className="w-[34%]" />
               <col className="w-[12%]" />
             </colgroup>
             <thead className="bg-slate-50 text-xs font-bold uppercase text-slate-500">
@@ -456,14 +404,12 @@ function PortfolioInputTable({
                 <th className="border-b border-slate-200 px-3 py-3">티커</th>
                 <th className="border-b border-slate-200 px-3 py-3">비중(%)</th>
                 <th className="border-b border-slate-200 px-3 py-3">계층</th>
-                <th className="border-b border-slate-200 px-3 py-3">카테고리</th>
                 <th className="border-b border-slate-200 px-3 py-3">논리 상태</th>
                 <th className="border-b border-slate-200 px-3 py-3 text-center">삭제</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => {
-                const categoryOptions = categoryOptionsForLayer(row.layer);
                 const rowError = rowErrors.get(row.id);
                 return (
                   <tr key={row.id} className="border-b border-slate-100 transition hover:bg-slate-50/70">
@@ -492,29 +438,11 @@ function PortfolioInputTable({
                         aria-label="계층"
                         className="w-full min-w-0 rounded-md border border-slate-200 bg-white px-2.5 py-2 font-semibold text-slate-800 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
                         value={row.layer}
-                        onChange={(event) => {
-                          const layer = event.target.value as LayerType;
-                          const category = categoryLayer[row.category] === layer ? row.category : defaultCategoryByLayer[layer];
-                          onChange(row.id, { layer, category });
-                        }}
+                        onChange={(event) => onChange(row.id, { layer: event.target.value as LayerType })}
                       >
                         {layerValues.map((value) => (
                           <option key={value} value={value}>
                             {layerLabels[value]}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="min-w-0 px-3 py-3 align-top">
-                      <select
-                        aria-label="카테고리"
-                        className="w-full min-w-0 rounded-md border border-slate-200 bg-white px-2.5 py-2 font-semibold text-slate-800 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
-                        value={row.category}
-                        onChange={(event) => onChange(row.id, { category: event.target.value as CategoryType })}
-                      >
-                        {categoryOptions.map((value) => (
-                          <option key={value} value={value}>
-                            {categoryLabels[value]}
                           </option>
                         ))}
                       </select>
@@ -606,7 +534,7 @@ function PortfolioInputModal({
               포트폴리오 구성 편집
             </h2>
             <p className="mt-1 text-sm font-semibold text-slate-500">
-              티커와 비중을 입력하면 평가 대상 포트폴리오로 적용됩니다. 계층, 카테고리, 논리 상태는 기본값으로 보강할 수 있습니다.
+              티커와 비중을 입력하면 평가 대상 포트폴리오로 적용됩니다. 계층과 논리 상태는 기본값으로 보강할 수 있습니다.
             </p>
           </div>
           <button
@@ -688,7 +616,6 @@ function PortfolioPreview({ portfolio }: { portfolio: AssetRow[] }) {
               <th className="px-2 py-2">티커</th>
               <th className="px-2 py-2">비중</th>
               <th className="px-2 py-2">계층</th>
-              <th className="px-2 py-2">카테고리</th>
               <th className="px-2 py-2">논리 상태</th>
             </tr>
           </thead>
@@ -698,7 +625,6 @@ function PortfolioPreview({ portfolio }: { portfolio: AssetRow[] }) {
                 <td className="px-2 py-2 font-bold text-slate-900">{asset.ticker}</td>
                 <td className="px-2 py-2">{pct(asset.weight)}</td>
                 <td className="px-2 py-2">{layerLabel(asset.layer)}</td>
-                <td className="px-2 py-2">{categoryLabel(asset.category ?? 'core_market')}</td>
                 <td className="px-2 py-2">{thesisLabel(asset.thesis_status)}</td>
               </tr>
             ))}
@@ -1775,6 +1701,7 @@ export function App() {
       setPending('analysis');
       const analysisData = await runAnalysis({
         period: analysisPeriodFromEvaluationPeriod(period),
+        as_of_date: asOfDate,
         rf: ANALYSIS_DEFAULT_RF,
         bench: analysisBenchmark,
         layer_benchmarks: evaluationLayerBenchmarks
@@ -1785,6 +1712,7 @@ export function App() {
       setPending('evaluation');
       const evaluationData = await runEvaluation({
         period,
+        as_of_date: asOfDate,
         bench: analysisBenchmark,
         layer_benchmarks: evaluationLayerBenchmarks
       });
@@ -1813,6 +1741,7 @@ export function App() {
       setPending('analysis');
       const analysisData = await runAnalysis({
         period: analysisPeriodFromEvaluationPeriod(period),
+        as_of_date: asOfDate,
         rf: ANALYSIS_DEFAULT_RF,
         bench: analysisBenchmark,
         layer_benchmarks: evaluationLayerBenchmarks
@@ -1823,6 +1752,7 @@ export function App() {
       setPending('evaluation');
       const evaluationData = await runEvaluation({
         period,
+        as_of_date: asOfDate,
         bench: analysisBenchmark,
         layer_benchmarks: evaluationLayerBenchmarks
       });

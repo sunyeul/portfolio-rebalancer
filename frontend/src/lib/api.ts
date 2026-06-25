@@ -5,8 +5,6 @@ export type AssetRow = {
   allocation: number;
   return_total: number | null;
   layer?: string | null;
-  category?: string | null;
-  dca_enabled: boolean;
   thesis_status: string;
   weight: number;
 };
@@ -30,8 +28,6 @@ export type MetricRow = {
   efficiency_score: number | null;
   return_total: number | null;
   layer?: string | null;
-  category?: string | null;
-  dca_enabled: boolean;
   thesis_status: string;
 };
 
@@ -186,6 +182,7 @@ export function submitPortfolio(rows: PortfolioRowInput[]) {
 
 export function runAnalysis(payload: {
   period: number | 'YTD' | 'Max';
+  as_of_date?: string;
   rf: number;
   bench: string;
   layer_benchmarks?: Record<string, string>;
@@ -198,6 +195,9 @@ export function runAnalysis(payload: {
 
 export function runEvaluation(payload: {
   period?: '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'Max';
+  start_date?: string;
+  end_date?: string;
+  as_of_date?: string;
   bench?: string;
   layer_benchmarks?: Record<string, string>;
 }) {
