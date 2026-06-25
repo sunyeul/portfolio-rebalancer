@@ -15,7 +15,6 @@ from services.analysis_service import DEFAULT_RF, AnalysisError, run_analysis
 from services.evaluation_engine import run_evaluation
 from services.evaluation_period import (
     EvaluationPeriodError,
-    analysis_period_value,
     resolve_evaluation_period,
 )
 from services.evaluation_units import DEFAULT_LAYER_BENCHMARKS
@@ -235,6 +234,7 @@ def _run_v2(
     period: str,
     start_date: str | None,
     end_date: str | None,
+    as_of_date: str | None,
     layer_benchmark: list[str] | None,
 ) -> tuple[dict[str, Any], pd.DataFrame, Any, dict[str, Any], int | None]:
     asset_df, warnings, input_meta, source_portfolio_id = _load_asset_df(
@@ -248,6 +248,7 @@ def _run_v2(
             period=period,
             start_date=start_date,
             end_date=end_date,
+            as_of_date=as_of_date,
         )
     except EvaluationPeriodError as exc:
         raise CliError("input", str(exc)) from exc
@@ -257,7 +258,7 @@ def _run_v2(
     try:
         analysis = run_analysis(
             asset_df,
-            analysis_period_value(evaluation_period),
+            evaluation_period,
             DEFAULT_RF,
             bench_ticker,
             extra_benchmarks=list(layer_benchmarks.values()),
@@ -339,6 +340,7 @@ def evaluate(
     period: Annotated[str, typer.Option("--period")] = "3M",
     start_date: Annotated[str | None, typer.Option("--start-date")] = None,
     end_date: Annotated[str | None, typer.Option("--end-date")] = None,
+    as_of_date: Annotated[str | None, typer.Option("--as-of-date")] = None,
     layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
     output_dir: Annotated[Path | None, typer.Option("--output-dir")] = None,
     save: Annotated[bool, typer.Option("--save")] = False,
@@ -357,6 +359,7 @@ def evaluate(
             period=period,
             start_date=start_date,
             end_date=end_date,
+            as_of_date=as_of_date,
             layer_benchmark=layer_benchmark,
         )
 
@@ -401,6 +404,7 @@ def agent_brief(
     portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
     period: Annotated[str, typer.Option("--period")] = "3M",
+    as_of_date: Annotated[str | None, typer.Option("--as-of-date")] = None,
     layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
 ) -> None:
     """Emit a compact v2 IPS brief for agents."""
@@ -414,6 +418,7 @@ def agent_brief(
             period=period,
             start_date=None,
             end_date=None,
+            as_of_date=as_of_date,
             layer_benchmark=layer_benchmark,
         )
         _emit_json(
@@ -449,6 +454,7 @@ def review_queue(
     portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
     period: Annotated[str, typer.Option("--period")] = "3M",
+    as_of_date: Annotated[str | None, typer.Option("--as-of-date")] = None,
     layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
 ) -> None:
     """Emit v2 review queue only."""
@@ -462,6 +468,7 @@ def review_queue(
             period=period,
             start_date=None,
             end_date=None,
+            as_of_date=as_of_date,
             layer_benchmark=layer_benchmark,
         )
         _emit_json(
@@ -487,6 +494,7 @@ def risk(
     portfolio_id: Annotated[int | None, typer.Option("--portfolio-id")] = None,
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
     period: Annotated[str, typer.Option("--period")] = "3M",
+    as_of_date: Annotated[str | None, typer.Option("--as-of-date")] = None,
     layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
 ) -> None:
     """Emit v2 units with risk-related triggers."""
@@ -500,6 +508,7 @@ def risk(
             period=period,
             start_date=None,
             end_date=None,
+            as_of_date=as_of_date,
             layer_benchmark=layer_benchmark,
         )
         risk_items = [

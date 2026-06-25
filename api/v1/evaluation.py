@@ -12,7 +12,13 @@ from pydantic import BaseModel, Field
 from api.v1.serialization import METRICS_COLUMNS, dataframe_records
 from core.evaluation import EvaluationPeriod
 from middleware.session import session_manager
-from services.analysis_service import DEFAULT_BENCH, AnalysisResult
+from services.analysis_service import (
+    DEFAULT_BENCH,
+    DEFAULT_RF,
+    AnalysisError,
+    AnalysisResult,
+    run_analysis,
+)
 from services.evaluation_engine import run_evaluation
 from services.evaluation_period import EvaluationPeriodError, resolve_evaluation_period
 from services.evaluation_units import DEFAULT_LAYER_BENCHMARKS
@@ -24,35 +30,14 @@ class EvaluationRunRequest(BaseModel):
     period: str | None = Field(default=None, description="1M, 3M, 6M, YTD, 1Y, Max")
     start_date: date | None = None
     end_date: date | None = None
+    as_of_date: date | None = None
     bench: str | None = None
     layer_benchmarks: dict[str, str] | None = None
-
-
-def _frame_from_session(session_id: str, key: str) -> pd.DataFrame:
-    data = session_manager.get(session_id, key)
-    if data is None:
-        return pd.DataFrame()
-    df = pd.DataFrame(data)
-    if "Date" in df.columns or "date" in df.columns:
-        date_col = "Date" if "Date" in df.columns else "date"
-        df = df.set_index(date_col)
-    return df
-
-
-def _metrics_df_for_session(session_id: str) -> pd.DataFrame:
-    metrics_df_data = session_manager.get(session_id, "metrics_df")
-    if metrics_df_data is None:
-        raise HTTPException(status_code=400, detail="먼저 데이터 분석을 실행해주세요.")
-    metrics_df = pd.DataFrame(metrics_df_data)
-    if "ticker" in metrics_df.columns:
-        metrics_df = metrics_df.set_index("ticker")
-    return metrics_df
 
 
 def _period_for_request(
     payload: EvaluationRunRequest,
     session_id: str,
-    prices: pd.DataFrame,
 ) -> EvaluationPeriod:
     if payload.start_date is not None or payload.end_date is not None:
         try:
@@ -65,40 +50,46 @@ def _period_for_request(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     analysis_settings = session_manager.get(session_id, "analysis_settings") or {}
-    raw_period = payload.period or str(analysis_settings.get("period") or "3M")
-    if not prices.empty:
-        try:
-            start = pd.Timestamp(prices.index.min()).date()
-            end = pd.Timestamp(prices.index.max()).date()
-            label = raw_period.upper()
-            if label == "12":
-                label = "1Y"
-            if label == "MAX":
-                label = "Max"
-            if label not in {"1M", "3M", "6M", "YTD", "1Y", "Max"}:
-                label = "custom"
-            return EvaluationPeriod(label=label, start_date=start, end_date=end)
-        except Exception:
-            pass
+    raw_period = str(payload.period or analysis_settings.get("period") or "3M")
+    raw_period = {"1": "1M", "3": "3M", "6": "6M", "12": "1Y"}.get(
+        raw_period,
+        raw_period,
+    )
     try:
-        return resolve_evaluation_period(period=raw_period)
+        return resolve_evaluation_period(period=raw_period, as_of_date=payload.as_of_date)
     except EvaluationPeriodError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _store_analysis_result(session_id: str, result: AnalysisResult) -> None:
+    session_manager.set(
+        session_id, "prices", result.prices.reset_index().to_dict(orient="records")
+    )
+    session_manager.set(
+        session_id, "returns", result.returns.reset_index().to_dict(orient="records")
+    )
+    session_manager.set(
+        session_id,
+        "returns_smooth",
+        result.returns_smooth.reset_index().to_dict(orient="records"),
+    )
+    session_manager.set(session_id, "weights_no_bench", result.weights_no_bench.to_dict())
+    session_manager.set(
+        session_id, "metrics_df", result.metrics_df.reset_index().to_dict(orient="records")
+    )
+    session_manager.set(session_id, "portfolio_metrics", result.portfolio_metrics)
+    session_manager.set(session_id, "benchmark_metrics", result.benchmark_metrics)
+    session_manager.set(session_id, "missing_tickers", result.missing_tickers)
 
 
 def _analysis_result_for_session(
     session_id: str,
     payload: EvaluationRunRequest,
 ) -> tuple[AnalysisResult, EvaluationPeriod, str, dict[str, str]]:
-    metrics_df = _metrics_df_for_session(session_id)
-    prices = _frame_from_session(session_id, "prices")
-    returns = _frame_from_session(session_id, "returns")
-    returns_smooth = _frame_from_session(session_id, "returns_smooth")
-    if prices.empty or returns_smooth.empty:
-        raise HTTPException(
-            status_code=400,
-            detail="v2 평가는 가격/수익률 데이터가 필요합니다. 분석을 다시 실행해주세요.",
-        )
+    asset_df_data = session_manager.get(session_id, "asset_df")
+    if asset_df_data is None:
+        raise HTTPException(status_code=400, detail="먼저 포트폴리오를 입력해주세요.")
+    asset_df = pd.DataFrame(asset_df_data)
 
     analysis_settings = session_manager.get(session_id, "analysis_settings") or {}
     bench = str(payload.bench or analysis_settings.get("bench") or DEFAULT_BENCH).upper()
@@ -110,30 +101,19 @@ def _analysis_result_for_session(
             if str(layer).strip() and str(value).strip()
         }
     )
-    evaluation_period = _period_for_request(payload, session_id, prices)
-    weights = metrics_df.get("가중치", pd.Series(dtype=float)).astype(float)
-    bench_nav = None
-    if bench in prices.columns:
-        bench_prices = pd.to_numeric(prices[bench], errors="coerce").dropna()
-        if not bench_prices.empty and float(bench_prices.iloc[0]) > 0:
-            bench_nav = bench_prices / float(bench_prices.iloc[0])
-    return (
-        AnalysisResult(
-            prices=prices,
-            returns=returns,
-            returns_smooth=returns_smooth,
-            weights_no_bench=weights,
-            metrics_df=metrics_df,
-            port_nav=pd.Series(dtype=float),
-            bench_nav=bench_nav,
-            portfolio_metrics=session_manager.get(session_id, "portfolio_metrics") or {},
-            benchmark_metrics=session_manager.get(session_id, "benchmark_metrics"),
-            missing_tickers=session_manager.get(session_id, "missing_tickers") or [],
-        ),
-        evaluation_period,
-        bench,
-        layer_benchmarks,
-    )
+    evaluation_period = _period_for_request(payload, session_id)
+    try:
+        analysis = run_analysis(
+            asset_df,
+            evaluation_period,
+            DEFAULT_RF,
+            bench,
+            extra_benchmarks=list(layer_benchmarks.values()),
+        )
+    except AnalysisError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _store_analysis_result(session_id, analysis)
+    return (analysis, evaluation_period, bench, layer_benchmarks)
 
 
 def _csv_from_records(records: list[dict[str, Any]]) -> str:

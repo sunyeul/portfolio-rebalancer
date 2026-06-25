@@ -245,10 +245,12 @@ def run_analysis(
     """
     # 날짜 범위 설정
     end = datetime.today()
+    fetch_end = end
     # AIDEV-NOTE: flexible-period-handling; 개월 수를 timedelta로 변환 (정수 입력 지원)
     if isinstance(period, EvaluationPeriod):
         start = datetime.combine(period.start_date, datetime.min.time())
         end = datetime.combine(period.end_date, datetime.min.time())
+        fetch_end = end + timedelta(days=1)
     elif isinstance(period, int):
         # 개월 수 기반 계산: 대략 30일/월 사용 (더 정확한 달력 계산도 가능)
         start = end - timedelta(days=period * 30)
@@ -271,10 +273,16 @@ def run_analysis(
     try:
         # 튜플로 변환하여 캐싱 가능하게 함
         start_text = start.strftime("%Y-%m-%d")
-        end_text = end.strftime("%Y-%m-%d")
+        end_text = fetch_end.strftime("%Y-%m-%d")
         prices = fetch_prices(tuple(all_tickers), start_text, end_text)
     except Exception as e:
         raise AnalysisError(f"가격 데이터 조회 실패: {e}") from e
+
+    if isinstance(period, EvaluationPeriod) and not prices.empty:
+        index_dates = pd.to_datetime(prices.index, errors="coerce").normalize()
+        start_date = pd.Timestamp(period.start_date)
+        end_date = pd.Timestamp(period.end_date)
+        prices = prices.loc[(index_dates >= start_date) & (index_dates <= end_date)]
 
     present, missing = ensure_tickers_exist(prices, all_tickers)
     prices_raw = prices[present].copy()

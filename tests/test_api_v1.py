@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from core.evaluation import EvaluationPeriod
 from main import app
 from services.analysis_service import AnalysisResult
 
@@ -30,8 +31,6 @@ def _fake_analysis(asset_df, period, rf, bench, extra_benchmarks=None):
             "E": [0.8],
             "return_total": [0.1],
             "layer": ["core"],
-            "category": ["core_market"],
-            "dca_enabled": [True],
             "thesis_status": ["valid"],
         }
     ).set_index("ticker")
@@ -60,6 +59,7 @@ def _fake_analysis(asset_df, period, rf, bench, extra_benchmarks=None):
 
 def test_portfolio_analysis_and_v2_evaluation(monkeypatch):
     monkeypatch.setattr("api.v1.analysis.run_analysis", _fake_analysis)
+    monkeypatch.setattr("api.v1.evaluation.run_analysis", _fake_analysis)
 
     portfolio_response = client.post(
         "/api/v1/portfolio/manual",
@@ -69,7 +69,6 @@ def test_portfolio_analysis_and_v2_evaluation(monkeypatch):
                     "ticker": "VOO",
                     "allocation": 100,
                     "layer": "core",
-                    "category": "core_market",
                 }
             ]
         },
@@ -118,8 +117,34 @@ def test_portfolio_analysis_and_v2_evaluation(monkeypatch):
     assert benchmark_returns["experiment"] == pytest.approx(0.2)
 
 
+def test_analysis_run_uses_as_of_date(monkeypatch):
+    captured: dict[str, EvaluationPeriod] = {}
+
+    def fake_analysis(asset_df, period, rf, bench, extra_benchmarks=None):
+        captured["period"] = period
+        return _fake_analysis(asset_df, period, rf, bench, extra_benchmarks)
+
+    monkeypatch.setattr("api.v1.analysis.run_analysis", fake_analysis)
+
+    client.post(
+        "/api/v1/portfolio/manual",
+        json={"rows": [{"ticker": "VOO", "allocation": 100, "layer": "core"}]},
+    )
+
+    response = client.post(
+        "/api/v1/analysis/run",
+        json={"period": 3, "as_of_date": "2026-06-15", "rf": 0.025, "bench": "SPY"},
+    )
+
+    assert response.status_code == 200
+    assert captured["period"].label == "3M"
+    assert captured["period"].start_date.isoformat() == "2026-03-15"
+    assert captured["period"].end_date.isoformat() == "2026-06-15"
+
+
 def test_v2_csv_download(monkeypatch):
     monkeypatch.setattr("api.v1.analysis.run_analysis", _fake_analysis)
+    monkeypatch.setattr("api.v1.evaluation.run_analysis", _fake_analysis)
     client.post(
         "/api/v1/portfolio/manual",
         json={
@@ -128,7 +153,6 @@ def test_v2_csv_download(monkeypatch):
                     "ticker": "VOO",
                     "allocation": 100,
                     "layer": "core",
-                    "category": "core_market",
                 }
             ]
         },
@@ -140,6 +164,70 @@ def test_v2_csv_download(monkeypatch):
 
     assert response.status_code == 200
     assert "unit" in response.text
+
+
+def test_evaluation_run_reanalyzes_from_as_of_date(monkeypatch):
+    captured: dict[str, EvaluationPeriod] = {}
+
+    def fake_analysis(asset_df, period, rf, bench, extra_benchmarks=None):
+        captured["period"] = period
+        return _fake_analysis(asset_df, period, rf, bench, extra_benchmarks)
+
+    monkeypatch.setattr("api.v1.analysis.run_analysis", _fake_analysis)
+    monkeypatch.setattr("api.v1.evaluation.run_analysis", fake_analysis)
+
+    client.post(
+        "/api/v1/portfolio/manual",
+        json={
+            "rows": [
+                {
+                    "ticker": "VOO",
+                    "allocation": 100,
+                    "layer": "core",
+                }
+            ]
+        },
+    )
+    client.post("/api/v1/analysis/run", json={"period": 12, "rf": 0.025, "bench": "SPY"})
+
+    response = client.post(
+        "/api/v1/evaluation/run",
+        json={"period": "3M", "as_of_date": "2026-06-15", "bench": "SPY"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["evaluation_period"]["start_date"] == "2026-03-15"
+    assert payload["evaluation_period"]["end_date"] == "2026-06-15"
+    assert captured["period"].start_date.isoformat() == "2026-03-15"
+    assert captured["period"].end_date.isoformat() == "2026-06-15"
+
+
+def test_evaluation_run_inherits_numeric_analysis_period(monkeypatch):
+    captured: dict[str, EvaluationPeriod] = {}
+
+    def fake_analysis(asset_df, period, rf, bench, extra_benchmarks=None):
+        captured["period"] = period
+        return _fake_analysis(asset_df, period, rf, bench, extra_benchmarks)
+
+    monkeypatch.setattr("api.v1.analysis.run_analysis", _fake_analysis)
+    monkeypatch.setattr("api.v1.evaluation.run_analysis", fake_analysis)
+
+    client.post(
+        "/api/v1/portfolio/manual",
+        json={"rows": [{"ticker": "VOO", "allocation": 100, "layer": "core"}]},
+    )
+    client.post("/api/v1/analysis/run", json={"period": 12, "rf": 0.025, "bench": "SPY"})
+
+    response = client.post(
+        "/api/v1/evaluation/run",
+        json={"as_of_date": "2026-06-15", "bench": "SPY"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["evaluation_period"]["label"] == "1Y"
+    assert captured["period"].start_date.isoformat() == "2025-06-15"
+    assert captured["period"].end_date.isoformat() == "2026-06-15"
 
 
 def test_unknown_csv_type_is_rejected():

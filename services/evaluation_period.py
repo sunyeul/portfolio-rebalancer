@@ -32,11 +32,13 @@ def resolve_evaluation_period(
     period: str = "3M",
     start_date: str | date | None = None,
     end_date: str | date | None = None,
+    as_of_date: str | date | None = None,
     today: date | None = None,
 ) -> EvaluationPeriod:
     """Resolve preset or custom period into an EvaluationPeriod."""
     resolved_end = _coerce_date(end_date, "end_date")
     resolved_start = _coerce_date(start_date, "start_date")
+    resolved_as_of = _coerce_date(as_of_date, "as_of_date")
     if (resolved_start is None) != (resolved_end is None):
         raise EvaluationPeriodError("start_date and end_date must be provided together")
     if resolved_start is not None and resolved_end is not None:
@@ -46,7 +48,7 @@ def resolve_evaluation_period(
             end_date=resolved_end,
         )
 
-    end = today or date.today()
+    end = resolved_as_of or today or date.today()
     label = str(period).strip()
     normalized = label.upper()
     if normalized == "MAX":

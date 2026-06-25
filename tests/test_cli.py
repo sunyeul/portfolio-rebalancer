@@ -7,6 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from cli import app
+from core.evaluation import EvaluationPeriod
 from services.analysis_service import AnalysisResult
 
 
@@ -41,8 +42,6 @@ def _fake_analysis(asset_df, period, rf, bench, extra_benchmarks=None):
             "E": [0.8],
             "return_total": [0.1],
             "layer": ["core"],
-            "category": ["core_market"],
-            "dca_enabled": [True],
             "thesis_status": ["valid"],
         }
     ).set_index("ticker")
@@ -129,6 +128,36 @@ def test_evaluate_outputs_v2_envelope(monkeypatch):
     assert payload["guardrails"]["no_immediate_order_instruction"] is True
 
 
+def test_evaluate_as_of_date_controls_analysis_period(monkeypatch):
+    captured: dict[str, EvaluationPeriod] = {}
+
+    def fake_analysis(asset_df, period, rf, bench, extra_benchmarks=None):
+        captured["period"] = period
+        return _fake_analysis(asset_df, period, rf, bench, extra_benchmarks)
+
+    monkeypatch.setattr("cli.run_analysis", fake_analysis)
+
+    result = runner.invoke(
+        app,
+        [
+            "evaluate",
+            "--text",
+            "VOO 100",
+            "--period",
+            "3M",
+            "--as-of-date",
+            "2026-06-15",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["input"]["start_date"] == "2026-03-15"
+    assert payload["input"]["end_date"] == "2026-06-15"
+    assert captured["period"].start_date.isoformat() == "2026-03-15"
+    assert captured["period"].end_date.isoformat() == "2026-06-15"
+
+
 def test_review_queue_command_uses_v2(monkeypatch):
     monkeypatch.setattr("cli.run_analysis", _fake_analysis)
 
@@ -138,6 +167,10 @@ def test_review_queue_command_uses_v2(monkeypatch):
     payload = _payload(result)
     assert payload["command"] == "review-queue"
     assert "review_queue" in payload
+    assert any(
+        "해야 할 일: 노출 변경을 판단하기 전에" in item["suggested_next_step"]
+        for item in payload["review_queue"]
+    )
 
 
 def test_cli_help_lists_v2_commands():

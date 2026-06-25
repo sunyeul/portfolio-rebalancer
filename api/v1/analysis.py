@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from api.v1.serialization import METRICS_COLUMNS, dataframe_records, safe_mapping
+from core.evaluation import EvaluationPeriod
 from middleware.session import session_manager
 from services.analysis_service import DEFAULT_BENCH, DEFAULT_RF, AnalysisError, run_analysis
+from services.evaluation_period import EvaluationPeriodError, resolve_evaluation_period
 from services.evaluation_units import DEFAULT_LAYER_BENCHMARKS
 
 router = APIRouter()
@@ -21,6 +25,7 @@ EVALUATION_SESSION_KEYS = (
 
 class AnalysisRunRequest(BaseModel):
     period: int | str = Field(12, description="Month count, YTD, or Max")
+    as_of_date: date | None = None
     rf: float = DEFAULT_RF
     bench: str = DEFAULT_BENCH
     layer_benchmarks: dict[str, str] | None = None
@@ -37,6 +42,32 @@ def _parse_period(period: int | str) -> int | str:
     if normalized.lower() == "max":
         return "Max"
     raise HTTPException(status_code=400, detail="period는 개월 수, YTD, Max 중 하나여야 합니다.")
+
+
+def _period_for_request(payload: AnalysisRunRequest) -> int | str | EvaluationPeriod:
+    parsed = _parse_period(payload.period)
+    if payload.as_of_date is None:
+        return parsed
+    if isinstance(parsed, int):
+        label = {1: "1M", 3: "3M", 6: "6M", 12: "1Y"}.get(parsed)
+        if label is not None:
+            try:
+                return resolve_evaluation_period(
+                    period=label,
+                    as_of_date=payload.as_of_date,
+                )
+            except EvaluationPeriodError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        start = (pd.Timestamp(payload.as_of_date) - pd.DateOffset(months=parsed)).date()
+        return EvaluationPeriod(
+            label="custom",
+            start_date=start,
+            end_date=payload.as_of_date,
+        )
+    try:
+        return resolve_evaluation_period(period=parsed, as_of_date=payload.as_of_date)
+    except EvaluationPeriodError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/run")
@@ -56,10 +87,11 @@ async def run_analysis_endpoint(payload: AnalysisRunRequest, request: Request):
             if str(layer).strip() and str(value).strip()
         }
     )
+    analysis_period = _period_for_request(payload)
     try:
         result = run_analysis(
             asset_df,
-            _parse_period(payload.period),
+            analysis_period,
             payload.rf,
             payload.bench.upper(),
             extra_benchmarks=list(layer_benchmarks.values()),
@@ -89,7 +121,21 @@ async def run_analysis_endpoint(payload: AnalysisRunRequest, request: Request):
         session_id,
         "analysis_settings",
         {
-            "period": _parse_period(payload.period),
+            "period": (
+                analysis_period.label
+                if isinstance(analysis_period, EvaluationPeriod)
+                else analysis_period
+            ),
+            "start_date": (
+                analysis_period.start_date.isoformat()
+                if isinstance(analysis_period, EvaluationPeriod)
+                else None
+            ),
+            "end_date": (
+                analysis_period.end_date.isoformat()
+                if isinstance(analysis_period, EvaluationPeriod)
+                else None
+            ),
             "rf": payload.rf,
             "bench": payload.bench.upper(),
         },
