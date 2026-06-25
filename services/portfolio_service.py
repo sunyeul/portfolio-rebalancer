@@ -7,7 +7,7 @@ from typing import List
 import pandas as pd
 from pydantic import ValidationError
 
-from core.asset import ASSET_CATEGORIES, LAYER_TYPES, Asset, parse_text_to_assets
+from core.asset import LAYER_TYPES, Asset, parse_text_to_assets
 from storage.config_store import active_codes
 from utils.metrics import normalize_weights
 
@@ -83,10 +83,6 @@ def parse_csv_to_assets(df: pd.DataFrame) -> tuple[List[Asset], List[str]]:
         "현재수익률": "return_total",
         "계층": "layer",
         "레이어": "layer",
-        "카테고리": "category",
-        "분류": "category",
-        "정기매수": "dca_enabled",
-        "정기매수대상": "dca_enabled",
         "투자논리": "thesis_status",
         "논리상태": "thesis_status",
     }
@@ -119,10 +115,6 @@ def parse_csv_to_assets(df: pd.DataFrame) -> tuple[List[Asset], List[str]]:
                     layer=_normalize_optional_code(
                         _get_attr(r, "layer"), LAYER_TYPES, "layer", ticker, warnings
                     ),
-                    category=_normalize_optional_code(
-                        _get_attr(r, "category"), ASSET_CATEGORIES, "category", ticker, warnings
-                    ),
-                    dca_enabled=_get_attr(r, "dca_enabled", True),
                     thesis_status=_normalize_thesis_status(_get_attr(r, "thesis_status", "valid")),
                 )
                 asset_list.append(asset)
@@ -168,10 +160,6 @@ def parse_manual_edit_to_assets(
                 layer=_normalize_optional_code(
                     row.get("layer"), LAYER_TYPES, "layer", normalized_ticker, warnings
                 ),
-                category=_normalize_optional_code(
-                    row.get("category"), ASSET_CATEGORIES, "category", normalized_ticker, warnings
-                ),
-                dca_enabled=row.get("dca_enabled", True),
                 thesis_status=_normalize_thesis_status(row.get("thesis_status", "valid")),
             )
             asset_list.append(asset)
@@ -215,7 +203,7 @@ def normalize_and_validate_assets(
     raw_df = asset_df.copy()
 
     for ticker, rows in raw_df.groupby("ticker"):
-        for field_name in ("layer", "category"):
+        for field_name in ("layer",):
             if rows[field_name].nunique(dropna=True) > 1:
                 warnings.append(
                     f"{ticker}: {field_name} 값이 여러 개입니다. 첫 번째 값을 사용합니다."
@@ -226,8 +214,6 @@ def normalize_and_validate_assets(
             "allocation": "sum",
             "return_total": "first",  # 첫 번째 return_total 유지 (중복 제거 시)
             "layer": "first",
-            "category": "first",
-            "dca_enabled": "first",
             "thesis_status": "first",
         }
     )

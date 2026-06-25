@@ -8,7 +8,7 @@ from services.portfolio_service import (
 )
 
 
-def test_parse_csv_uses_current_shape_defaults():
+def test_parse_csv_uses_layer_and_thesis_defaults():
     df = pd.DataFrame([{"ticker": "VOO", "allocation": 40}])
 
     assets, warnings = parse_csv_to_assets(df)
@@ -16,9 +16,9 @@ def test_parse_csv_uses_current_shape_defaults():
     assert warnings == []
     assert assets[0].ticker == "VOO"
     assert assets[0].layer == "core"
-    assert assets[0].category == "core_market"
-    assert assets[0].dca_enabled is True
     assert assets[0].thesis_status == "valid"
+    assert "category" not in assets[0].model_dump()
+    assert "dca_enabled" not in assets[0].model_dump()
 
 
 def test_korean_yfinance_tickers_are_accepted_across_input_paths():
@@ -39,7 +39,7 @@ def test_korean_yfinance_tickers_are_accepted_across_input_paths():
     assert [asset.ticker for asset in csv_assets] == tickers
 
 
-def test_parse_csv_reads_ips_metadata_and_percent_return_total():
+def test_parse_csv_reads_layer_thesis_and_percent_return_total():
     df = pd.DataFrame(
         [
             {
@@ -47,8 +47,6 @@ def test_parse_csv_reads_ips_metadata_and_percent_return_total():
                 "allocation": 2,
                 "return_total": -12,
                 "layer": "satellite",
-                "category": "satellite_ai_infra",
-                "dca_enabled": False,
                 "thesis_status": "watch",
             }
         ]
@@ -59,86 +57,58 @@ def test_parse_csv_reads_ips_metadata_and_percent_return_total():
     assert warnings == []
     assert assets[0].return_total == -0.12
     assert assets[0].layer == "satellite"
-    assert assets[0].category == "satellite_ai_infra"
-    assert assets[0].dca_enabled is False
     assert assets[0].thesis_status == "watch"
 
 
-def test_layer_and_category_are_preserved_across_input_paths():
+def test_layer_and_thesis_are_preserved_across_input_paths():
     text_assets = parse_text_to_assets(
-        "SMH 8 satellite satellite_ai_infra valid\n"
-        "UFO 3 satellite satellite_nextgen watch\n"
-        "069500.KS 5 satellite satellite_ai_software valid\n"
-        "BND 5 core core_market valid"
+        "SMH 8 satellite valid\n"
+        "UFO 3 satellite watch\n"
+        "BND 5 core valid"
     )
     manual_assets, manual_warnings = parse_manual_edit_to_assets(
         [
-            {
-                "ticker": "SMH",
-                "allocation": "8",
-                "layer": "satellite",
-                "category": "satellite_ai_infra",
-            },
+            {"ticker": "SMH", "allocation": "8", "layer": "satellite"},
             {
                 "ticker": "UFO",
                 "allocation": "3",
                 "layer": "satellite",
-                "category": "satellite_nextgen",
+                "thesis_status": "watch",
             },
-            {
-                "ticker": "069500.KS",
-                "allocation": "5",
-                "layer": "satellite",
-                "category": "satellite_ai_software",
-            },
-            {"ticker": "BND", "allocation": "5", "layer": "core", "category": "core_market"},
+            {"ticker": "BND", "allocation": "5", "layer": "core"},
         ]
     )
     csv_assets, csv_warnings = parse_csv_to_assets(
         pd.DataFrame(
             [
-                {
-                    "ticker": "SMH",
-                    "allocation": 8,
-                    "layer": "satellite",
-                    "category": "satellite_ai_infra",
-                },
+                {"ticker": "SMH", "allocation": 8, "layer": "satellite"},
                 {
                     "ticker": "UFO",
                     "allocation": 3,
                     "layer": "satellite",
-                    "category": "satellite_nextgen",
+                    "thesis_status": "watch",
                 },
-                {
-                    "ticker": "069500.KS",
-                    "allocation": 5,
-                    "layer": "satellite",
-                    "category": "satellite_ai_software",
-                },
-                {"ticker": "BND", "allocation": 5, "layer": "core", "category": "core_market"},
+                {"ticker": "BND", "allocation": 5, "layer": "core"},
             ]
         )
     )
 
-    assert [(asset.layer, asset.category) for asset in text_assets] == [
-        ("satellite", "satellite_ai_infra"),
-        ("satellite", "satellite_nextgen"),
-        ("satellite", "satellite_ai_software"),
-        ("core", "core_market"),
+    assert [(asset.layer, asset.thesis_status) for asset in text_assets] == [
+        ("satellite", "valid"),
+        ("satellite", "watch"),
+        ("core", "valid"),
     ]
     assert manual_warnings == []
-    assert [(asset.layer, asset.category) for asset in manual_assets] == [
-        ("satellite", "satellite_ai_infra"),
-        ("satellite", "satellite_nextgen"),
-        ("satellite", "satellite_ai_software"),
-        ("core", "core_market"),
+    assert [(asset.layer, asset.thesis_status) for asset in manual_assets] == [
+        ("satellite", "valid"),
+        ("satellite", "watch"),
+        ("core", "valid"),
     ]
     assert csv_warnings == []
-    assert [(asset.layer, asset.category) for asset in csv_assets] == [
-        ("satellite", "satellite_ai_infra"),
-        ("satellite", "satellite_nextgen"),
-        ("satellite", "satellite_ai_software"),
-        ("core", "core_market"),
+    assert [(asset.layer, asset.thesis_status) for asset in csv_assets] == [
+        ("satellite", "valid"),
+        ("satellite", "watch"),
+        ("core", "valid"),
     ]
 
 
@@ -149,8 +119,6 @@ def test_parse_csv_maps_korean_current_spec_columns():
                 "ticker": "VOO",
                 "가중치": 40,
                 "계층": "core",
-                "카테고리": "core_market",
-                "정기매수": "yes",
                 "투자논리": "valid",
             }
         ]
@@ -160,21 +128,14 @@ def test_parse_csv_maps_korean_current_spec_columns():
 
     assert warnings == []
     assert assets[0].layer == "core"
-    assert assets[0].category == "core_market"
-    assert assets[0].dca_enabled is True
     assert assets[0].thesis_status == "valid"
 
 
-def test_normalize_warns_on_duplicate_metadata_conflicts():
+def test_normalize_warns_on_duplicate_layer_conflicts():
     df = pd.DataFrame(
         [
-            {"ticker": "VOO", "allocation": 20, "layer": "core", "category": "core_market"},
-            {
-                "ticker": "VOO",
-                "allocation": 20,
-                "layer": "satellite",
-                "category": "satellite_ai_infra",
-            },
+            {"ticker": "VOO", "allocation": 20, "layer": "core"},
+            {"ticker": "VOO", "allocation": 20, "layer": "satellite"},
         ]
     )
     assets, _ = parse_csv_to_assets(df)
@@ -183,9 +144,9 @@ def test_normalize_warns_on_duplicate_metadata_conflicts():
 
     assert asset_df.loc[0, "allocation"] == 40
     assert asset_df.loc[0, "layer"] == "core"
-    assert asset_df.loc[0, "category"] == "core_market"
+    assert "category" not in asset_df.columns
+    assert "dca_enabled" not in asset_df.columns
     assert any("layer 값이 여러 개" in warning for warning in warnings)
-    assert any("category 값이 여러 개" in warning for warning in warnings)
 
 
 def test_parse_manual_edit_ignores_empty_rows():
@@ -203,20 +164,7 @@ def test_parse_manual_edit_ignores_empty_rows():
     assert assets[0].allocation == 40
 
 
-def test_parse_manual_edit_reads_checkbox_and_string_dca_values():
-    assets, warnings = parse_manual_edit_to_assets(
-        [
-            {"ticker": "VOO", "allocation": "40", "dca_enabled": True},
-            {"ticker": "IONQ", "allocation": "2", "dca_enabled": "false"},
-        ]
-    )
-
-    assert warnings == []
-    assert assets[0].dca_enabled is True
-    assert assets[1].dca_enabled is False
-
-
-def test_parse_manual_edit_preserves_metadata_and_percent_return_total():
+def test_parse_manual_edit_preserves_layer_thesis_and_percent_return_total():
     assets, warnings = parse_manual_edit_to_assets(
         [
             {
@@ -224,7 +172,6 @@ def test_parse_manual_edit_preserves_metadata_and_percent_return_total():
                 "allocation": "3",
                 "return_total": "-12",
                 "layer": "satellite",
-                "category": "satellite_ai_infra",
                 "thesis_status": "watch",
             }
         ]
@@ -234,7 +181,6 @@ def test_parse_manual_edit_preserves_metadata_and_percent_return_total():
     assert assets[0].ticker == "UFO"
     assert assets[0].return_total == -0.12
     assert assets[0].layer == "satellite"
-    assert assets[0].category == "satellite_ai_infra"
     assert assets[0].thesis_status == "watch"
 
 
@@ -245,7 +191,6 @@ def test_normalize_uses_valid_as_standard_thesis_code():
                 "ticker": "VOO",
                 "allocation": "100",
                 "layer": "core",
-                "category": "core_market",
                 "thesis_status": "valid",
             }
         ]
@@ -265,7 +210,6 @@ def test_normalize_accepts_legacy_intact_thesis_as_valid():
                 "ticker": "VOO",
                 "allocation": "100",
                 "layer": "core",
-                "category": "core_market",
                 "thesis_status": "intact",
             }
         ]

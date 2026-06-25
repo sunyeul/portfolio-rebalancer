@@ -19,8 +19,6 @@ def _create_snapshot() -> dict:
                     "weight": 1.0,
                     "return_total": None,
                     "layer": "core",
-                    "category": "core_market",
-                    "dca_enabled": True,
                     "thesis_status": "valid",
                 }
             ]
@@ -48,16 +46,13 @@ def test_journal_store_upserts_and_patches_latest_snapshot_entry(journal_db):
             "date": "2026-06-14",
             "decision_context": "regular_review",
             "playbook_code": "regular_review",
-            "dca_changes_considered": [{"ticker": "VOO", "candidate": "increase"}],
             "review_items": [{"ticker": "QQQ", "queue": "thesis_review"}],
             "decision_note": "정기 점검 기록",
         },
     )
 
     assert created["snapshot_id"] == snapshot["id"]
-    assert created["dca_changes_considered"] == [
-        {"ticker": "VOO", "candidate": "increase"}
-    ]
+    assert "dca_changes_considered" not in created
     assert created["review_items"] == [{"ticker": "QQQ", "queue": "thesis_review"}]
     assert created["decision_note"] == "정기 점검 기록"
 
@@ -71,9 +66,6 @@ def test_journal_store_upserts_and_patches_latest_snapshot_entry(journal_db):
 
     assert patched["date"] == "2026-06-14"
     assert patched["decision_context"] == "regular_review"
-    assert patched["dca_changes_considered"] == [
-        {"ticker": "VOO", "candidate": "increase"}
-    ]
     assert patched["review_items"] == []
     assert patched["decision_note"] == "검토 큐 확인 완료"
 
@@ -83,7 +75,6 @@ def test_journal_store_upserts_and_patches_latest_snapshot_entry(journal_db):
             "date": "2026-06-15",
             "decision_context": "rebalance_review",
             "playbook_code": None,
-            "dca_changes_considered": [],
             "review_items": [{"ticker": "GLD", "queue": "risk_review"}],
             "decision_note": "",
         },
@@ -104,7 +95,6 @@ def test_journal_store_rejects_missing_snapshot_or_entry(journal_db):
                 "date": "2026-06-14",
                 "decision_context": "regular_review",
                 "playbook_code": "regular_review",
-                "dca_changes_considered": [],
                 "review_items": [],
                 "decision_note": "",
             },

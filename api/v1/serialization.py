@@ -28,8 +28,6 @@ METRICS_COLUMNS = {
     "E": "efficiency_score",
     "return_total": "return_total",
     "layer": "layer",
-    "category": "category",
-    "dca_enabled": "dca_enabled",
     "thesis_status": "thesis_status",
 }
 

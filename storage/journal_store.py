@@ -26,10 +26,6 @@ def _row_to_journal(row) -> dict[str, Any]:
         "date": row["date"],
         "decision_context": row["decision_context"],
         "playbook_code": row["playbook_code"],
-        "dca_changes_considered": _json_load(
-            row["dca_changes_considered_json"],
-            [],
-        ),
         "review_items": _json_load(row["review_items_json"], []),
         "decision_note": row["decision_note"],
         "created_at": row["created_at"],
@@ -68,16 +64,14 @@ def upsert_journal(snapshot_id: int, payload: dict[str, Any]) -> dict[str, Any]:
                 date,
                 decision_context,
                 playbook_code,
-                dca_changes_considered_json,
                 review_items_json,
                 decision_note
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(snapshot_id) DO UPDATE SET
                 date = excluded.date,
                 decision_context = excluded.decision_context,
                 playbook_code = excluded.playbook_code,
-                dca_changes_considered_json = excluded.dca_changes_considered_json,
                 review_items_json = excluded.review_items_json,
                 decision_note = excluded.decision_note,
                 updated_at = CURRENT_TIMESTAMP
@@ -87,7 +81,6 @@ def upsert_journal(snapshot_id: int, payload: dict[str, Any]) -> dict[str, Any]:
                 payload["date"],
                 payload["decision_context"],
                 payload.get("playbook_code"),
-                _json_dump(payload.get("dca_changes_considered") or []),
                 _json_dump(payload.get("review_items") or []),
                 payload.get("decision_note") or "",
             ),
@@ -111,10 +104,6 @@ def update_journal(snapshot_id: int, payload: dict[str, Any]) -> dict[str, Any]:
             current["decision_context"],
         ),
         "playbook_code": payload.get("playbook_code", current["playbook_code"]),
-        "dca_changes_considered": payload.get(
-            "dca_changes_considered",
-            current["dca_changes_considered"],
-        ),
         "review_items": payload.get("review_items", current["review_items"]),
         "decision_note": payload.get("decision_note", current["decision_note"]),
     }

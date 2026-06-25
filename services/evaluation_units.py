@@ -6,12 +6,7 @@ from typing import NamedTuple
 
 import pandas as pd
 
-from core.asset import (
-    ASSET_CATEGORIES,
-    CATEGORY_LAYERS,
-    DEFAULT_CATEGORY,
-    DEFAULT_LAYER,
-)
+from core.asset import DEFAULT_LAYER, LAYER_TYPES
 from core.evaluation import EvaluationPeriod, EvaluationUnit
 
 
@@ -59,28 +54,19 @@ class EvaluationUnitSet(NamedTuple):
     asset_targets: dict[str, float]
 
 
-def normalize_layer_category(df: pd.DataFrame) -> pd.DataFrame:
-    """Ensure metrics data has v2 layer/category columns."""
+def normalize_layer_metadata(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure metrics data has a v2 layer column."""
     result = df.copy()
 
     if "layer" not in result.columns:
         result["layer"] = None
-    if "category" not in result.columns:
-        result["category"] = None
 
     for idx, row in result.iterrows():
-        category = row.get("category") or DEFAULT_CATEGORY
-        category = str(category).strip().lower()
-        if category not in ASSET_CATEGORIES:
-            category = DEFAULT_CATEGORY
-        layer = row.get("layer") or CATEGORY_LAYERS.get(category, DEFAULT_LAYER)
+        layer = row.get("layer") or DEFAULT_LAYER
         layer = str(layer).strip().lower()
-        if category in CATEGORY_LAYERS:
-            layer = CATEGORY_LAYERS[category]
-        if layer not in DEFAULT_LAYER_LIMITS:
-            layer = CATEGORY_LAYERS.get(category, DEFAULT_LAYER)
+        if layer not in LAYER_TYPES or layer not in DEFAULT_LAYER_LIMITS:
+            layer = DEFAULT_LAYER
         result.at[idx, "layer"] = layer
-        result.at[idx, "category"] = category
     return result
 
 
@@ -141,7 +127,7 @@ def build_evaluation_units(
     layer_benchmarks: dict[str, str] | None = None,
 ) -> EvaluationUnitSet:
     """Build v2 layer and asset units from metrics data."""
-    metrics = normalize_layer_category(metrics_df)
+    metrics = normalize_layer_metadata(metrics_df)
     if "가중치" in metrics.columns:
         weights = pd.to_numeric(metrics["가중치"], errors="coerce").fillna(0.0)
     else:

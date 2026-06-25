@@ -11,7 +11,7 @@ from core.evaluation import EvaluationOutput, EvaluationPeriod, EvaluationUnit, 
 from services.analysis_service import AnalysisResult
 from services.analysis_service import parse_benchmark
 from services.evaluation_status import classify_evaluation_status
-from services.evaluation_units import build_evaluation_units, normalize_layer_category
+from services.evaluation_units import build_evaluation_units, normalize_layer_metadata
 from utils.efficiency_metrics import cagr_mdd_ratio, return_mdd_ratio
 from utils.ips_config import load_ips_config
 from utils.performance_metrics import benchmark_excess_return, cagr, period_return
@@ -117,11 +117,11 @@ def _review_item(unit: EvaluationUnit, output: EvaluationOutput) -> ReviewItem |
         return None
     status = output.status
     if status == "Watch":
-        next_step = "Keep this unit on the next review checklist; do not treat it as an order instruction."
+        next_step = "해야 할 일: 다음 리뷰 때 다시 확인하세요. 지금은 노출을 바꾸기보다 관찰 대상에 올려둡니다."
     elif status == "Review":
-        next_step = "Review data quality, thesis, risk limits, and regular-purchase policy before changing exposure."
+        next_step = "해야 할 일: 노출 변경을 판단하기 전에 데이터, 투자 논리, 위험 한도, 계층 목표 비중을 확인하세요."
     else:
-        next_step = "Inspect thesis damage and breached limits; any intervention remains an exceptional human decision."
+        next_step = "해야 할 일: 투자 논리가 훼손됐고 한도도 위반됐는지 확인하세요. 개입 여부는 예외적으로 사람이 판단합니다."
     return ReviewItem(
         level=unit.level,
         name=unit.name,
@@ -153,7 +153,7 @@ def _journal_item(review_item: ReviewItem) -> dict[str, Any]:
         "prompts": [
             "What changed in the thesis?",
             "Which threshold was triggered?",
-            "Can this be addressed through regular-purchase policy instead of immediate trading?",
+            "Does this still fit the layer target and risk limits?",
         ],
     }
 
@@ -260,7 +260,7 @@ def run_evaluation(
 ) -> EvaluationEngineResult:
     """Run the v2 shared layer/asset evaluation engine."""
     config = ips_config or load_ips_config()
-    metrics = normalize_layer_category(analysis.metrics_df)
+    metrics = normalize_layer_metadata(analysis.metrics_df)
     unit_set = build_evaluation_units(
         metrics,
         config,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from core.asset import LAYER_TYPES
@@ -69,15 +68,6 @@ def get_ips_config() -> dict[str, Any]:
         target_rows = conn.execute(
             "SELECT * FROM ips_target_allocations ORDER BY layer ASC"
         ).fetchall()
-        priority_rows = conn.execute(
-            """
-            SELECT action_code, priority
-            FROM ips_action_priorities
-            WHERE is_active = 1
-            ORDER BY priority ASC, action_code ASC
-            """
-        ).fetchall()
-        rule_rows = conn.execute("SELECT key, value_json FROM ips_rules").fetchall()
 
     return {
         "target_allocation": {
@@ -88,14 +78,6 @@ def get_ips_config() -> dict[str, Any]:
             }
             for row in target_rows
         },
-        "action_priority": {
-            row["action_code"]: row["priority"]
-            for row in priority_rows
-        },
-        "rules": {
-            row["key"]: json.loads(row["value_json"])
-            for row in rule_rows
-        },
     }
 
 
@@ -105,14 +87,6 @@ def get_ips_management_config() -> dict[str, Any]:
         targets = conn.execute(
             "SELECT * FROM ips_target_allocations ORDER BY layer ASC"
         ).fetchall()
-        priorities = conn.execute(
-            """
-            SELECT *
-            FROM ips_action_priorities
-            ORDER BY priority ASC, action_code ASC
-            """
-        ).fetchall()
-        rules = conn.execute("SELECT * FROM ips_rules ORDER BY key ASC").fetchall()
     return {
         "target_allocations": [
             {
@@ -122,22 +96,6 @@ def get_ips_management_config() -> dict[str, Any]:
                 "max": row["max"],
             }
             for row in targets
-        ],
-        "action_priorities": [
-            {
-                "action_code": row["action_code"],
-                "label": row["label"],
-                "priority": row["priority"],
-                "is_active": bool(row["is_active"]),
-            }
-            for row in priorities
-        ],
-        "rules": [
-            {
-                "key": row["key"],
-                "value": json.loads(row["value_json"]),
-            }
-            for row in rules
         ],
         "ips_config": get_ips_config(),
     }
@@ -164,47 +122,3 @@ def replace_target_allocations(rows: list[dict[str, Any]]) -> list[dict[str, Any
                 (layer, min_value, target_value, max_value),
             )
     return get_ips_management_config()["target_allocations"]
-
-
-def replace_action_priorities(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    initialize_database()
-    with connect() as conn:
-        conn.execute("DELETE FROM ips_action_priorities")
-        for row in rows:
-            action_code = normalize_code(row.get("action_code"))
-            label = str(row.get("label") or "").strip()
-            if not action_code or not label:
-                raise ConfigError("action_code와 label을 입력해주세요.")
-            conn.execute(
-                """
-                INSERT INTO ips_action_priorities (
-                    action_code,
-                    label,
-                    priority,
-                    is_active
-                )
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    action_code,
-                    label,
-                    int(row.get("priority", 99)),
-                    1 if row.get("is_active", True) else 0,
-                ),
-            )
-    return get_ips_management_config()["action_priorities"]
-
-
-def replace_rules(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    initialize_database()
-    with connect() as conn:
-        conn.execute("DELETE FROM ips_rules")
-        for row in rows:
-            key = normalize_code(row.get("key"))
-            if not key:
-                raise ConfigError("rule key를 입력해주세요.")
-            conn.execute(
-                "INSERT INTO ips_rules (key, value_json) VALUES (?, ?)",
-                (key, json.dumps(row.get("value"), ensure_ascii=False)),
-            )
-    return get_ips_management_config()["rules"]

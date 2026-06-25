@@ -8,10 +8,6 @@ from typing import Any
 
 from api.v1.serialization import json_safe
 from core.asset import (
-    ASSET_CATEGORIES,
-    CATEGORY_LAYERS,
-    DEFAULT_CATEGORY,
-    DEFAULT_CATEGORY_BY_LAYER,
     DEFAULT_LAYER,
     LAYER_TYPES,
 )
@@ -65,18 +61,9 @@ def _ensure_lookup(conn, table: str, code: str, default_code: str) -> int:
     return int(cursor.lastrowid)
 
 
-def _fixed_layer(value: Any, category: str | None = None) -> str:
-    if category in CATEGORY_LAYERS:
-        return CATEGORY_LAYERS[category]
+def _fixed_layer(value: Any) -> str:
     code = _normalize_code(value, DEFAULT_LAYER)
     return code if code in LAYER_TYPES else DEFAULT_LAYER
-
-
-def _fixed_category(value: Any, layer: str | None = None) -> str:
-    code = _normalize_code(value, "")
-    if code in ASSET_CATEGORIES:
-        return code
-    return DEFAULT_CATEGORY_BY_LAYER.get(layer or DEFAULT_LAYER, DEFAULT_CATEGORY)
 
 
 def _ensure_asset(conn, ticker: str) -> int:
@@ -448,12 +435,10 @@ def _insert_positions(conn, snapshot_id: int, asset_rows: list[dict[str, Any]]) 
                 weight,
                 return_total,
                 layer,
-                category,
-                dca_enabled,
                 thesis_status_id,
                 position_order
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 snapshot_id,
@@ -461,9 +446,7 @@ def _insert_positions(conn, snapshot_id: int, asset_rows: list[dict[str, Any]]) 
                 row.get("allocation", 0),
                 row.get("weight", 0),
                 row.get("return_total"),
-                _fixed_layer(row.get("layer"), _fixed_category(row.get("category"), row.get("layer"))),
-                _fixed_category(row.get("category"), row.get("layer")),
-                1 if row.get("dca_enabled", True) else 0,
+                _fixed_layer(row.get("layer")),
                 thesis_id,
                 position_order,
             ),
@@ -501,8 +484,6 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
                 pos.weight,
                 pos.return_total,
                 pos.layer,
-                pos.category,
-                pos.dca_enabled,
                 ts.code AS thesis_status_code
             FROM snapshot_positions pos
             JOIN assets a ON a.id = pos.asset_id
@@ -520,8 +501,6 @@ def get_snapshot(snapshot_id: int) -> dict[str, Any] | None:
                 "allocation": row["allocation"],
                 "return_total": row["return_total"],
                 "layer": row["layer"],
-                "category": row["category"],
-                "dca_enabled": bool(row["dca_enabled"]),
                 "thesis_status": row["thesis_status_code"],
                 "weight": row["weight"],
             }

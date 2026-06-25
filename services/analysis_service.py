@@ -16,7 +16,7 @@ from utils.data_fetcher import (
     compute_ytd_returns,
 )
 from core.evaluation import EvaluationPeriod
-from core.asset import CATEGORY_LAYERS, DEFAULT_CATEGORY, DEFAULT_LAYER
+from core.asset import DEFAULT_LAYER, LAYER_TYPES
 from utils.metrics import (
     annualize_cov,
     cagr_from_series,
@@ -419,7 +419,7 @@ def run_analysis(
     )
 
     # IPS 메타데이터 병합
-    meta_cols = ["layer", "category", "dca_enabled", "thesis_status"]
+    meta_cols = ["layer", "thesis_status"]
     asset_meta = asset_df.set_index("ticker")
     for col in meta_cols:
         if col in asset_meta.columns:
@@ -427,28 +427,14 @@ def run_analysis(
 
     if "layer" not in metrics_df.columns:
         metrics_df["layer"] = pd.NA
-    if "category" not in metrics_df.columns:
-        metrics_df["category"] = pd.NA
     for ticker, row in metrics_df.iterrows():
-        category = row.get("category")
-        if pd.isna(category) or str(category).strip() == "":
-            category = DEFAULT_CATEGORY
-        category = str(category).strip().lower()
-        if category not in CATEGORY_LAYERS:
-            category = DEFAULT_CATEGORY
         layer = row.get("layer")
         if pd.isna(layer) or str(layer).strip() == "":
-            layer = CATEGORY_LAYERS.get(category, DEFAULT_LAYER)
+            layer = DEFAULT_LAYER
         layer = str(layer).strip().lower()
-        if category in CATEGORY_LAYERS:
-            layer = CATEGORY_LAYERS[category]
+        if layer not in LAYER_TYPES:
+            layer = DEFAULT_LAYER
         metrics_df.at[ticker, "layer"] = layer
-        metrics_df.at[ticker, "category"] = category
-    metrics_df["dca_enabled"] = (
-        metrics_df.get("dca_enabled", pd.Series(True, index=metrics_df.index))
-        .fillna(True)
-        .astype(bool)
-    )
     metrics_df["thesis_status"] = metrics_df.get(
         "thesis_status", pd.Series(index=metrics_df.index)
     ).fillna("unknown")

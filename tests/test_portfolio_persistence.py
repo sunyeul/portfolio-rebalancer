@@ -70,8 +70,6 @@ def test_snapshot_persists_metadata_without_as_of_date_contract(portfolio_db):
                     "weight": 1.0,
                     "return_total": None,
                     "layer": "core",
-                    "category": "core_market",
-                    "dca_enabled": True,
                     "thesis_status": "valid",
                 }
             ]
@@ -107,8 +105,6 @@ def test_snapshot_does_not_persist_analysis_or_evaluation_payloads(portfolio_db)
                     "weight": 1.0,
                     "return_total": None,
                     "layer": "core",
-                    "category": "core_market",
-                    "dca_enabled": True,
                     "thesis_status": "valid",
                 }
             ],
@@ -143,8 +139,6 @@ def test_snapshot_does_not_persist_analysis_or_evaluation_payloads(portfolio_db)
                 "allocation": 100.0,
                 "return_total": None,
                 "layer": "core",
-                "category": "core_market",
-                "dca_enabled": True,
                 "thesis_status": "valid",
                 "weight": 1.0,
             }
@@ -187,8 +181,6 @@ def test_snapshot_update_persists_editable_metadata(portfolio_db):
                     "weight": 1.0,
                     "return_total": None,
                     "layer": "core",
-                    "category": "core_market",
-                    "dca_enabled": True,
                     "thesis_status": "valid",
                 }
             ]
@@ -230,8 +222,6 @@ def test_snapshot_defaults_missing_thesis_status_to_valid(portfolio_db):
                     "weight": 1.0,
                     "return_total": None,
                     "layer": "core",
-                    "category": "core_market",
-                    "dca_enabled": True,
                 }
             ]
         },

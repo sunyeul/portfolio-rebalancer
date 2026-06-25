@@ -22,23 +22,6 @@ TARGET_ALLOCATION_SEEDS = [
     ("experiment", 0.00, 0.00, 0.05),
 ]
 
-ACTION_PRIORITY_SEEDS = [
-    ("block_action", "행동 보류", 1),
-    ("rebalance_sell_review", "리밸런싱 매도 검토", 2),
-    ("risk_control_review", "위험 관리 점검", 3),
-    ("review_before_action", "실행 전 점검", 4),
-    ("reduce_or_pause_dca", "정기매수 축소·중단 후보", 5),
-    ("increase_dca", "정기매수 증액 후보", 6),
-    ("hold_observe", "유지·관찰", 7),
-]
-
-IPS_RULE_SEEDS = [
-    ("default_when_uncertain", '"core"'),
-    ("immediate_buy_is_exception", "true"),
-    ("prefer_dca_over_sell", "true"),
-    ("min_trade_pct", "0.01"),
-]
-
 
 def db_path() -> Path:
     """Return the configured SQLite database path."""
@@ -113,8 +96,6 @@ def initialize_database() -> None:
                 weight REAL NOT NULL,
                 return_total REAL,
                 layer TEXT NOT NULL DEFAULT 'core',
-                category TEXT NOT NULL DEFAULT 'core_market',
-                dca_enabled INTEGER NOT NULL DEFAULT 1,
                 thesis_status_id INTEGER NOT NULL REFERENCES thesis_statuses(id),
                 position_order INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(snapshot_id, asset_id)
@@ -145,7 +126,6 @@ def initialize_database() -> None:
                 date TEXT NOT NULL,
                 decision_context TEXT NOT NULL,
                 playbook_code TEXT,
-                dca_changes_considered_json TEXT NOT NULL DEFAULT '[]',
                 review_items_json TEXT NOT NULL DEFAULT '[]',
                 decision_note TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -155,8 +135,6 @@ def initialize_database() -> None:
         )
         _seed_lookup(conn, "thesis_statuses", THESIS_STATUS_SEEDS)
         _seed_target_allocations(conn)
-        _seed_action_priorities(conn)
-        _seed_ips_rules(conn)
 
 
 def _seed_lookup(
@@ -193,37 +171,4 @@ def _seed_target_allocations(conn: sqlite3.Connection) -> None:
             ON CONFLICT(layer) DO NOTHING
             """,
             (layer, min_value, target_value, max_value),
-        )
-
-
-def _seed_action_priorities(conn: sqlite3.Connection) -> None:
-    active_codes = [action_code for action_code, _, _ in ACTION_PRIORITY_SEEDS]
-    placeholders = ",".join("?" for _ in active_codes)
-    conn.execute(
-        f"DELETE FROM ips_action_priorities WHERE action_code NOT IN ({placeholders})",
-        active_codes,
-    )
-    for action_code, label, priority in ACTION_PRIORITY_SEEDS:
-        conn.execute(
-            """
-            INSERT INTO ips_action_priorities (action_code, label, priority, is_active)
-            VALUES (?, ?, ?, 1)
-            ON CONFLICT(action_code) DO UPDATE SET
-                label = excluded.label,
-                priority = excluded.priority,
-                is_active = 1
-            """,
-            (action_code, label, priority),
-        )
-
-
-def _seed_ips_rules(conn: sqlite3.Connection) -> None:
-    for key, value_json in IPS_RULE_SEEDS:
-        conn.execute(
-            """
-            INSERT INTO ips_rules (key, value_json)
-            VALUES (?, ?)
-            ON CONFLICT(key) DO NOTHING
-            """,
-            (key, value_json),
         )

@@ -3,33 +3,8 @@ from pydantic import BaseModel, field_validator, Field, model_validator
 import re
 
 LAYER_TYPES = {"core", "satellite", "experiment"}
-ASSET_CATEGORIES = {
-    "core_market",
-    "core_gold",
-    "satellite_ai_infra",
-    "satellite_ai_software",
-    "satellite_space",
-    "satellite_nextgen",
-    "experiment_leverage",
-    "experiment_momentum",
-}
-CATEGORY_LAYERS = {
-    "core_market": "core",
-    "core_gold": "core",
-    "satellite_ai_infra": "satellite",
-    "satellite_ai_software": "satellite",
-    "satellite_space": "satellite",
-    "satellite_nextgen": "satellite",
-    "experiment_leverage": "experiment",
-    "experiment_momentum": "experiment",
-}
-DEFAULT_CATEGORY = "core_market"
+THESIS_STATUSES = {"valid", "watch", "broken", "unknown", "intact"}
 DEFAULT_LAYER = "core"
-DEFAULT_CATEGORY_BY_LAYER = {
-    "core": "core_market",
-    "satellite": "satellite_ai_infra",
-    "experiment": "experiment_leverage",
-}
 
 
 class Asset(BaseModel):
@@ -44,8 +19,6 @@ class Asset(BaseModel):
         None, description="누적 수익률 (0.1234 = 12.34%, 선택)"
     )
     layer: str | None = Field(None, description="v2 평가 계층")
-    category: str | None = Field(None, description="v2 자산 카테고리")
-    dca_enabled: bool = Field(True, description="정기매수 조정 대상 여부")
     thesis_status: str = Field("valid", description="투자 논리 상태")
 
     @field_validator("ticker", mode="before")
@@ -100,15 +73,6 @@ class Asset(BaseModel):
         normalized = str(v).strip().lower()
         return normalized if normalized in LAYER_TYPES else None
 
-    @field_validator("category", mode="before")
-    @classmethod
-    def normalize_category(cls, v: str | None) -> str | None:
-        """v2 category는 지원 목록만 유지하고 비어 있으면 보강합니다."""
-        if v is None or str(v).strip() == "":
-            return None
-        normalized = str(v).strip().lower()
-        return normalized if normalized in ASSET_CATEGORIES else None
-
     @field_validator("thesis_status", mode="before")
     @classmethod
     def normalize_text_field(cls, v: str | None) -> str:
@@ -118,28 +82,11 @@ class Asset(BaseModel):
         normalized = str(v).strip().lower()
         return "valid" if normalized == "intact" else normalized
 
-    @field_validator("dca_enabled", mode="before")
-    @classmethod
-    def validate_dca_enabled(cls, v) -> bool:
-        """CSV/수동 입력의 여러 boolean 표현을 정기매수 여부로 해석합니다."""
-        if v is None or v == "":
-            return True
-        if isinstance(v, bool):
-            return v
-        s = str(v).strip().lower()
-        return s in {"true", "1", "yes", "y", "on", "정기", "가능"}
-
     @model_validator(mode="after")
-    def fill_layer_category(self):
-        """Fill the current v2 layer/category model."""
+    def fill_layer(self):
+        """Fill the current v2 layer model."""
         layer = self.layer if self.layer in LAYER_TYPES else DEFAULT_LAYER
-        category = self.category
-        if category in ASSET_CATEGORIES:
-            layer = CATEGORY_LAYERS[category]
-        else:
-            category = DEFAULT_CATEGORY_BY_LAYER.get(layer, DEFAULT_CATEGORY)
         self.layer = layer
-        self.category = category
         return self
 
     class Config:
@@ -178,7 +125,6 @@ def parse_text_to_assets(text: str) -> List[Asset]:
         allocation = None
         return_total = None
         layer = None
-        category = None
         thesis_status = "valid"
 
         num_count = 0
@@ -195,9 +141,7 @@ def parse_text_to_assets(text: str) -> List[Asset]:
                 token = p.strip().lower()
                 if token in LAYER_TYPES:
                     layer = token
-                elif token in ASSET_CATEGORIES:
-                    category = token
-                elif token:
+                elif token in THESIS_STATUSES:
                     thesis_status = token
 
         if allocation is None:
@@ -210,7 +154,6 @@ def parse_text_to_assets(text: str) -> List[Asset]:
                 allocation=allocation,
                 return_total=return_total,
                 layer=layer,
-                category=category,
                 thesis_status=thesis_status,
             )
             assets.append(asset)

@@ -26,7 +26,6 @@ class JournalWriteRequest(BaseModel):
     date: str = Field(default_factory=lambda: date.today().isoformat())
     decision_context: DecisionContext = "regular_review"
     playbook_code: str | None = None
-    dca_changes_considered: list[dict[str, Any]] = Field(default_factory=list)
     review_items: list[dict[str, Any]] = Field(default_factory=list)
     decision_note: str = ""
 
@@ -35,7 +34,6 @@ class JournalPatchRequest(BaseModel):
     date: str | None = None
     decision_context: DecisionContext | None = None
     playbook_code: str | None = None
-    dca_changes_considered: list[dict[str, Any]] | None = None
     review_items: list[dict[str, Any]] | None = None
     decision_note: str | None = None
 

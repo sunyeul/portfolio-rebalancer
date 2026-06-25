@@ -12,7 +12,7 @@ IPS Pilot is an IPS inspection workbench built around a single v2 evaluation fra
 ## Product Shape
 
 - First-class layers: `core`, `satellite`, `experiment`
-- Asset categories under layers, represented directly as `layer` and `category`
+- First-class layer assignment through `layer`
 - Evaluation period support: `1M`, `3M`, `6M`, `YTD`, `1Y`, `Max`, or custom start/end dates
 - Shared layer/asset outputs: weight, target gap, return, layer benchmark return, benchmark excess return, CAGR, MDD, volatility, concentration, risk contribution, efficiency, thesis status, burden, status
 - Main result surfaces: Layer Dashboard, Asset Evaluation Table, Review Queue, Journal Draft
@@ -157,7 +157,6 @@ CSV/TSV and manual rows support:
 - `allocation`
 - `return_total`
 - `layer`: `core`, `satellite`, `experiment`
-- `category`: for example `core_market`, `satellite_ai_infra`, `experiment_leverage`
 - `thesis_status`: `valid`, `watch`, `broken`, `unknown`
 
 ## Evaluation Status

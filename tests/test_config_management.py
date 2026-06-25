@@ -30,18 +30,11 @@ def test_config_options_and_ips_are_seeded_from_defaults(monkeypatch, tmp_path):
     assert ips["ips_config"]["target_allocation"]["core"]["target"] == 0.8
     assert ips["ips_config"]["target_allocation"]["satellite"]["target"] == 0.2
     assert ips["ips_config"]["target_allocation"]["experiment"]["target"] == 0.0
-    assert list(ips["ips_config"]["action_priority"]) == [
-        "block_action",
-        "rebalance_sell_review",
-        "risk_control_review",
-        "review_before_action",
-        "reduce_or_pause_dca",
-        "increase_dca",
-        "hold_observe",
-    ]
+    assert set(ips) == {"target_allocations", "ips_config"}
+    assert set(ips["ips_config"]) == {"target_allocation"}
 
 
-def test_app_defined_config_values_are_read_only(monkeypatch, tmp_path):
+def test_thesis_options_are_read_only(monkeypatch, tmp_path):
     client = _client_with_db(monkeypatch, tmp_path)
 
     thesis_response = client.patch(
@@ -49,19 +42,6 @@ def test_app_defined_config_values_are_read_only(monkeypatch, tmp_path):
         json={"is_active": False},
     )
     assert thesis_response.status_code == 405
-
-    priority_response = client.put(
-        "/api/v1/config/ips/action-priorities",
-        json=[
-            {
-                "action_code": "custom_action",
-                "label": "사용자 액션",
-                "priority": 99,
-                "is_active": True,
-            }
-        ],
-    )
-    assert priority_response.status_code == 403
 
 
 def test_ips_edits_are_loaded_by_runtime_config(monkeypatch, tmp_path):
@@ -123,7 +103,6 @@ def test_unknown_input_metadata_warns_and_uses_defaults(monkeypatch, tmp_path):
                     "ticker": "VOO",
                     "allocation": 100,
                     "layer": "typo_layer",
-                    "category": "typo_category",
                     "thesis_status": "typo_status",
                 }
             ]
@@ -132,6 +111,5 @@ def test_unknown_input_metadata_warns_and_uses_defaults(monkeypatch, tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert payload["assets"][0]["layer"] == "core"
-    assert payload["assets"][0]["category"] == "core_market"
     assert payload["assets"][0]["thesis_status"] == "unknown"
-    assert len(payload["warnings"]) == 3
+    assert len(payload["warnings"]) == 2
