@@ -5,148 +5,60 @@ description: Use when designing, reviewing, or implementing this portfolio rebal
 
 # IPS Judgment Filter
 
-## Core Role
+## Purpose
 
-Use this skill as the app's investment policy filter. The app should not behave like an automatic trading recommender. It should help the user decide whether the current portfolio state calls for increasing regular purchases, reducing regular purchases, observing, rechecking the investment thesis, or treating an immediate action as an exception.
+Keep IPS Pilot from becoming an automatic trading recommender. The app may inspect whether the IPS suggests future regular-purchase changes, observation, thesis review, or exceptional human review.
 
-The central question is:
-
-> Given the current portfolio, does the user's investment policy say to adjust future buying, wait, recheck the thesis, or only exceptionally consider immediate buy/sell action?
-
-## V2 Inspection Frame
+## V2 Frame
 
 IPS Pilot v2 evaluates both layers and assets as inspection units. Keep `core`, `satellite`, and `experiment` as first-class layers, and use only the status vocabulary `OK`, `Watch`, `Review`, and `Action`.
 
-- `OK`: no material threshold, data, thesis, or burden warning.
-- `Watch`: soft warning such as thesis uncertainty, target-gap tolerance, weak efficiency, or elevated burden.
-- `Review`: hard threshold breach, risk overage, broken thesis, or insufficient data that blocks judgment.
-- `Action`: broken thesis plus a hard limit breach; inspect possible exceptional intervention, not permission to trade.
+- `OK`: inside the inspection frame.
+- `Watch`: soft warning.
+- `Review`: human verification item.
+- `Action`: broken thesis plus hard limit breach; inspect possible exceptional intervention, not permission to trade.
 
-## Default Posture
+## Decision Posture
 
-The default adjustment mechanism is regular purchase allocation, not immediate trading.
+The default adjustment mechanism is future regular-purchase policy, not immediate trading.
 
-- If an asset is below target, first ask whether future regular purchases can be increased.
-- If an asset is above target or risk has risen, first ask whether future buying can be reduced or paused.
-- Immediate buying or selling is considered only after regular purchase adjustment is insufficient.
-- When data is weak, classification is unclear, or conviction is low, prefer hold, observe, or thesis review.
+- Underweight exposure: inspect whether future regular purchases can increase.
+- Overweight or higher-risk exposure: inspect whether future buying can reduce or pause before considering a sale.
+- Weak data, unclear classification, or low conviction: prefer observe, verify data, or review thesis.
+- Immediate buying or selling is exceptional and requires explicit human judgment.
 
-## Judgment Order
+## Explainability
 
-Follow this order before recommending any strong action:
+Use internal status and trigger labels for consistency, but translate them into plain review language for humans. Explain what changed, why it matters under the IPS, and what should be verified next.
 
-1. Check whether the portfolio is missing core exposure.
-2. Check whether the investment thesis still holds.
-3. Check whether regular purchase adjustment can address the gap.
-4. Consider exceptional immediate buying only if regular purchase adjustment is not enough.
-5. Treat satellite assets more strictly: confirm long-term holdability, thesis quality, overlap, management burden, and whether an ETF substitute is better.
+Good explanation shape: raw label, plain meaning, verification task. Example: `risk_contribution_high` means the unit is carrying a large share of portfolio risk, so verify whether that concentration is intentional and still acceptable.
 
-In ambiguous situations, choose core reinforcement over new satellite exposure. If capital must be deployed but the satellite case is unclear, the default destination is core, not the satellite idea.
+Do not let explanation become an order. A readable explanation may say "review future regular-purchase policy" or "verify thesis and risk limit fit"; it should not say "buy", "sell", or size a trade.
 
-## Core Assets
+## Layer Rules
 
-Core assets are for long-term market participation, not short-term performance chasing.
+Core assets are for long-term market participation. Do not penalize normal core drawdowns as standalone failure signals.
 
-- If a core asset is below target and its thesis remains intact, prioritize reinforcing it through regular purchase increases.
-- In a drawdown, weak short-term performance or low efficiency does not make a core asset bad by itself.
-- A drawdown is usually a time to secure sound core exposure at better prices, not a reason to expand satellite bets first.
-- For underweight core assets in a drawdown, prefer "increase regular purchases" over "buy immediately."
-
-## Satellite Assets
-
-Satellite assets require stricter judgment. The first question is not how much upside remains, but whether the user can responsibly hold the asset for a long time.
-
-Before increasing satellite exposure, verify:
-
-- The industry, company, or theme thesis remains alive.
-- The user can hold it for at least five years.
-- The user can actually manage the position.
-- An ETF would not be a cleaner substitute.
-- It does not duplicate existing positions unnecessarily.
-- The motivation is not simply that the price looks cheaper.
-
-In a drawdown, a satellite asset is usually a thesis review candidate before it is an additional purchase candidate.
-
-## Drawdown Behavior
-
-In falling markets, the app should not encourage indiscriminate dip-buying.
-
-The preferred drawdown response is:
-
-1. Determine whether core exposure is below target.
-2. Confirm the thesis is intact.
-3. Use regular purchase increases where possible.
-4. Consider exceptional additional buying only after the above checks.
-5. Apply stricter thesis and holdability checks to satellites.
-
-The key behavior is "core-first regular purchase reinforcement," not "buy whatever fell."
+Satellite and experiment exposure require stricter thesis, overlap, management-burden, holdability, and ETF-substitution checks. A fallen satellite is a thesis-review candidate before it is an accumulation candidate.
 
 ## Immediate Buying Is Exceptional
 
-The app should not say to buy just because an asset dropped sharply.
-
-Only consider immediate buying when all of these are reasonably true:
-
-- The investment thesis remains intact.
-- There is room under the target allocation.
-- The price is attractive enough relative to long-term expectation.
-- Regular purchase increases are insufficient.
-- The action does not increase management complexity materially.
-- The motivation is not FOMO.
-- The goal is not merely lowering average cost.
-
-Do not treat these as valid standalone buy reasons:
-
-- A one-day sharp drop.
-- A large premarket move.
-- A desire to lower average cost.
-- Other investors being fearful.
-- The asset simply looking cheap.
-
-The relevant IPS focus is long-term expected return and target allocation, not average cost defense.
+Never treat a drop, cheap-looking price, premarket move, average-cost defense, or fear/FOMO as a standalone buy reason. For underweight assets, prefer regular-purchase adjustment language unless the user explicitly asks to inspect exceptional action.
 
 ## Selling Is More Exceptional
 
-The app should not recommend selling only because returns are good or bad.
+Never recommend selling only because returns are good, returns are poor, the asset fell, the asset rose, or unrealized gains are large. Selling language must be framed as thesis damage, simplification, consolidation, or allocation/risk control.
 
-Selling can be considered when:
+## Allowed Outcome Language
 
-- The investment thesis is damaged.
-- The position can be consolidated into a better asset.
-- The portfolio needs simplification.
-- The position is far above target allocation.
+- Increase future regular purchases.
+- Reduce or pause future regular purchases.
+- Hold and observe.
+- Review investment thesis, overlap, burden, or ETF substitution.
+- Inspect possible exceptional action; if required conditions are not confirmed, hold.
 
-Do not treat these as valid standalone sell reasons:
+## Hard Stops
 
-- The asset rose a lot.
-- The asset recently fell.
-- Recent performance was poor for a few months.
-- There is a short-term negative event.
-- There are large unrealized gains.
-
-Selling should be framed as thesis damage, simplification, or allocation control, not emotional response.
-
-## Insufficient Data
-
-When data is incomplete, stale, unreliable, or classification is unclear, the app should become more conservative.
-
-The right outcome is usually hold, observe, or thesis review. Do not turn unreliable data into buy or sell recommendations.
-
-## Final Judgment Categories
-
-Use these five natural-language outcomes as the app's decision vocabulary:
-
-1. Increase regular purchases: the asset is below target and can be accumulated under the IPS, but the adjustment should happen through future buying rather than immediate purchase.
-2. Reduce or pause regular purchases: the asset is above target or risk has risen, so new buying should be reduced before considering a sale.
-3. Hold and observe: there is no need to act now; defer investment judgment until the next review.
-4. Review investment thesis: numbers alone are insufficient; recheck the reason to hold, ETF substitution, overlap, and management burden.
-5. Consider exceptional action or hold: immediate buy/sell is exceptional, and if the required conditions are not confirmed, hold.
-
-## Common Mistakes
-
-- Treating underweight assets as automatic immediate buys.
-- Treating overweight assets as automatic sells.
-- Penalizing core assets for normal drawdown behavior.
-- Treating fallen satellites as opportunities before thesis review.
-- Using average cost, premarket movement, or one-day price changes as decisive reasons.
-- Forcing a buy/sell decision when the policy answer is to wait.
+- Do not add order sizing, execution flags, or automatic buy/sell recommendations.
+- Do not collapse layer logic into ticker-only logic.
+- Do not turn stale, missing, or ambiguous data into action.
