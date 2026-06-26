@@ -186,9 +186,10 @@ export function runAnalysis(payload: {
   rf: number;
   bench: string;
   layer_benchmarks?: Record<string, string>;
-}) {
+}, signal?: AbortSignal) {
   return requestJson<AnalysisResponse>('/api/v1/analysis/run', {
     method: 'POST',
+    signal,
     body: JSON.stringify(payload)
   });
 }
@@ -200,9 +201,10 @@ export function runEvaluation(payload: {
   as_of_date?: string;
   bench?: string;
   layer_benchmarks?: Record<string, string>;
-}) {
+}, signal?: AbortSignal) {
   return requestJson<EvaluationResponse>('/api/v1/evaluation/run', {
     method: 'POST',
+    signal,
     body: JSON.stringify(payload)
   });
 }

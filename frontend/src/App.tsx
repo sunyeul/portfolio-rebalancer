@@ -42,6 +42,7 @@ import {
   type PortfolioRowInput,
   type ThesisStatusInput
 } from './lib/schemas';
+import { ReviewCopilot, ReviewCopilotHost } from './copilot/ReviewCopilot';
 
 const DEFAULT_BENCHMARK = 'SPY:80,QQQ:20';
 
@@ -1514,6 +1515,16 @@ export function App() {
   const canSubmitSnapshot =
     managementPending === null && snapshotModalName.trim() !== '' && snapshotMeaningfulRows.length > 0 && snapshotRowErrors.size === 0;
   const canCreateSnapshot = selectedPortfolioId !== null && meaningfulRows.length > 0;
+  const copilotLayerBenchmarks = useMemo(() => normalizedLayerBenchmarks(layerBenchmarks), [layerBenchmarks]);
+  const copilotSettings = useMemo(
+    () => ({
+      period,
+      asOfDate,
+      layerBenchmarks: copilotLayerBenchmarks,
+      analysisBenchmark: copilotLayerBenchmarks.core
+    }),
+    [period, asOfDate, copilotLayerBenchmarks]
+  );
   const workflowButtonLabel =
     pending === 'portfolio'
       ? '포트폴리오 적용 중'
@@ -1765,6 +1776,7 @@ export function App() {
   }
 
   return (
+    <ReviewCopilotHost>
     <main className="min-h-screen bg-slate-100 p-4 text-slate-900 md:p-8">
       <div className="mx-auto grid max-w-7xl gap-5">
         <header className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-5 md:flex-row md:items-center md:justify-between">
@@ -1940,7 +1952,15 @@ export function App() {
           if (snapshotPendingDelete) deleteSavedSnapshot(snapshotPendingDelete);
         }}
       />
+      <ReviewCopilot
+        portfolio={portfolio}
+        evaluation={evaluation}
+        settings={copilotSettings}
+        onAnalysis={setAnalysis}
+        onEvaluation={setEvaluation}
+      />
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
     </main>
+    </ReviewCopilotHost>
   );
 }
