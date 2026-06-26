@@ -7,6 +7,7 @@ IPS Pilot is an IPS inspection workbench built around a single v2 evaluation fra
 - Backend: FastAPI, pandas, numpy, scipy, yfinance, Pydantic
 - Frontend: Bun, Vite, React, TypeScript
 - Frontend libraries: TanStack Query, Zod, lucide-react
+- Review Copilot: CopilotKit v2, Bun sidecar runtime, TanStack AI/OpenAI
 - Storage: SQLite
 
 ## Product Shape
@@ -29,9 +30,17 @@ cd ..
 
 task run
 task frontend-dev
+task agent-dev
 ```
 
-During development, Vite proxies `/api` requests to `http://localhost:8000`. Production builds are served by FastAPI from `frontend/dist`.
+During development, Vite proxies `/api` requests to `http://localhost:8000` and `/copilotkit` requests to the Review Copilot runtime at `http://localhost:3001`. Production builds are served by FastAPI from `frontend/dist`.
+
+Review Copilot requires `OPENAI_API_KEY`. Optional runtime settings:
+
+```bash
+COPILOT_MODEL=gpt-4o
+COPILOT_RUNTIME_PORT=3001
+```
 
 The default SQLite database is `data/portfolio_rebalancer.sqlite3`. Override it with `PORTFOLIO_DB_PATH`.
 
@@ -40,7 +49,8 @@ The default SQLite database is `data/portfolio_rebalancer.sqlite3`. Override it 
 ```bash
 task run             # FastAPI API server
 task frontend-dev    # Vite dev server
-task dev             # API + frontend dev servers
+task agent-dev       # Review Copilot runtime
+task dev             # API + frontend + Review Copilot dev servers
 task build-frontend  # React production build
 uv run pytest        # backend tests
 ```

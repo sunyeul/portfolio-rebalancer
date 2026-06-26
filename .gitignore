@@ -13,6 +13,7 @@ wheels/
 frontend/node_modules/
 frontend/dist/
 frontend/tsconfig.tsbuildinfo
+agent-runtime/node_modules/
 
 # Local SQLite data
 data/*.sqlite3
