@@ -9,6 +9,7 @@ import type {
   reviewItemCardSchema,
   reviewQueueTriageSurfaceSchema
 } from './schemas/reviewQueueTriage.schema';
+import type { evaluationGraphSurfaceSchema } from './schemas/evaluationGraph.schema';
 
 export type AgentExplanationSource = z.infer<typeof agentExplanationSourceSchema>;
 export type ReviewDisposition = z.infer<typeof reviewDispositionSchema>;
@@ -16,10 +17,14 @@ export type ReviewItemCardPayload = z.infer<typeof reviewItemCardSchema>;
 export type ReviewQueueTriageSurfacePayload = z.infer<typeof reviewQueueTriageSurfaceSchema>;
 export type ReviewDecision = z.infer<typeof reviewDecisionSchema>;
 export type JournalDraftComposerSurfacePayload = z.infer<typeof journalDraftComposerSurfaceSchema>;
+export type EvaluationGraphSurfacePayload = z.infer<typeof evaluationGraphSurfaceSchema>;
 
-export type ReviewA2UISurfacePayload = ReviewQueueTriageSurfacePayload | JournalDraftComposerSurfacePayload;
+export type ReviewA2UISurfacePayload =
+  | ReviewQueueTriageSurfacePayload
+  | JournalDraftComposerSurfacePayload
+  | EvaluationGraphSurfacePayload;
 
-export type AppSurfaceTarget = 'review_queue' | 'journal_draft';
+export type AppSurfaceTarget = 'review_queue' | 'journal_draft' | 'evaluation_graphs';
 export type AppSurfaceMode = 'preview' | 'replace' | 'append';
 export type AppSurfaceComponent = ReviewA2UISurfacePayload['component'];
 
@@ -46,6 +51,12 @@ export type GenerativeSurfacePatch =
       surface: 'JournalDraftComposerSurface';
       mode: AppSurfaceMode;
       payload: JournalDraftComposerSurfacePayload;
+    }
+  | {
+      target: 'evaluation_graphs';
+      surface: 'EvaluationGraphSurface';
+      mode: AppSurfaceMode;
+      payload: EvaluationGraphSurfacePayload;
     };
 
 export type ReviewA2UIEnvelope =

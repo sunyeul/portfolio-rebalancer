@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 
 import type {
   AppSurfaceTarget,
+  EvaluationGraphSurfacePayload,
   GenerativeSurfacePatch,
   JournalDraftComposerSurfacePayload,
   ReviewDecision,
@@ -12,6 +13,7 @@ import type {
 export type GenerativeUiState = {
   reviewQueueSurface: ReviewQueueTriageSurfacePayload | null;
   journalDraftSurface: JournalDraftComposerSurfacePayload | null;
+  evaluationGraphSurface: EvaluationGraphSurfacePayload | null;
   reviewDecisions: ReviewDecision[];
 };
 
@@ -24,6 +26,7 @@ export type GenerativeUiAction =
 export const initialGenerativeUiState: GenerativeUiState = {
   reviewQueueSurface: null,
   journalDraftSurface: null,
+  evaluationGraphSurface: null,
   reviewDecisions: []
 };
 
@@ -35,14 +38,35 @@ export function generativeUiReducer(
     if (action.patch.target === 'review_queue') {
       return { ...state, reviewQueueSurface: action.patch.payload };
     }
-    return { ...state, journalDraftSurface: action.patch.payload };
+    if (action.patch.target === 'journal_draft') {
+      return { ...state, journalDraftSurface: action.patch.payload };
+    }
+    if (
+      action.patch.mode === 'append' &&
+      state.evaluationGraphSurface &&
+      state.evaluationGraphSurface.evaluation_period.label === action.patch.payload.evaluation_period.label &&
+      state.evaluationGraphSurface.evaluation_period.start_date === action.patch.payload.evaluation_period.start_date &&
+      state.evaluationGraphSurface.evaluation_period.end_date === action.patch.payload.evaluation_period.end_date
+    ) {
+      return {
+        ...state,
+        evaluationGraphSurface: {
+          ...action.patch.payload,
+          charts: [...state.evaluationGraphSurface.charts, ...action.patch.payload.charts]
+        }
+      };
+    }
+    return { ...state, evaluationGraphSurface: action.patch.payload };
   }
 
   if (action.type === 'clearSurface') {
     if (action.target === 'review_queue') {
       return { ...state, reviewQueueSurface: null };
     }
-    return { ...state, journalDraftSurface: null };
+    if (action.target === 'journal_draft') {
+      return { ...state, journalDraftSurface: null };
+    }
+    return { ...state, evaluationGraphSurface: null };
   }
 
   if (action.type === 'updateReviewDecision') {

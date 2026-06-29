@@ -7,6 +7,7 @@ import {
 import { IPS_PILOT_REVIEW_CATALOG_ID } from '../src/a2ui/catalogs/ipsPilotReviewCatalog';
 import type {
   A2UiAppSurfaceEnvelope,
+  EvaluationGraphSurfacePayload,
   GenerativeSurfacePatch,
   JournalDraftComposerSurfacePayload,
   ReviewQueueTriageSurfacePayload
@@ -106,6 +107,46 @@ const journalSurface: JournalDraftComposerSurfacePayload = {
   guardrail_notice: {
     text: 'Inspection only.'
   }
+};
+
+const graphSurface: EvaluationGraphSurfacePayload = {
+  component: 'EvaluationGraphSurface',
+  catalog_id: IPS_PILOT_REVIEW_CATALOG_ID,
+  title: '계층/종목 평가 그래프',
+  evaluation_period: {
+    label: '1M',
+    start_date: '2026-06-01',
+    end_date: '2026-06-27'
+  },
+  guardrail_notice: {
+    text: 'Inspection only.'
+  },
+  charts: [
+    {
+      id: 'layer-gap',
+      chart_type: 'layer_weight_gap_bar',
+      title: '계층 비중과 목표 대비 차이',
+      source: 'layer_evaluations'
+    },
+    {
+      id: 'risk-scatter',
+      chart_type: 'asset_risk_scatter',
+      title: '종목 비중과 위험 기여',
+      source: 'asset_evaluations'
+    },
+    {
+      id: 'risk-bars',
+      chart_type: 'metric_bar',
+      title: '위험 기여 상위 종목',
+      source: 'asset_evaluations',
+      metric: 'risk_contribution',
+      sort: {
+        by: 'risk_contribution',
+        direction: 'desc'
+      },
+      limit: 10
+    }
+  ]
 };
 
 function envelope(
@@ -332,6 +373,92 @@ describe('A2UI app surface validation', () => {
     expect(result.ok).toBe(false);
   });
 
+  test('accepts EvaluationGraphSurface with evaluation_graphs target', () => {
+    const result = validateA2UiAppSurfaceEnvelope(
+      envelope({
+        target: 'evaluation_graphs',
+        surface: graphSurface
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(convertA2UiToSurfacePatch(result.envelope)).toMatchObject({
+        target: 'evaluation_graphs',
+        surface: 'EvaluationGraphSurface'
+      });
+    }
+  });
+
+  test('rejects EvaluationGraphSurface with non-graph targets', () => {
+    expect(validateA2UiAppSurfaceEnvelope(envelope({ surface: graphSurface })).ok).toBe(false);
+    expect(
+      validateA2UiAppSurfaceEnvelope(
+        envelope({
+          target: 'journal_draft',
+          surface: graphSurface
+        })
+      ).ok
+    ).toBe(false);
+  });
+
+  test('rejects invalid EvaluationGraphSurface chart source, chart type, and metric', () => {
+    expect(
+      validateA2UiAppSurfaceEnvelope(
+        envelope({
+          target: 'evaluation_graphs',
+          surface: {
+            ...graphSurface,
+            charts: [
+              {
+                id: 'bad-source',
+                chart_type: 'asset_risk_scatter',
+                title: 'Bad source',
+                source: 'layer_evaluations'
+              }
+            ]
+          }
+        })
+      ).ok
+    ).toBe(false);
+    expect(
+      validateA2UiAppSurfaceEnvelope(
+        envelope({
+          target: 'evaluation_graphs',
+          surface: {
+            ...graphSurface,
+            charts: [
+              {
+                id: 'bad-chart',
+                chart_type: 'pie',
+                title: 'Bad chart',
+                source: 'asset_evaluations'
+              }
+            ]
+          }
+        })
+      ).ok
+    ).toBe(false);
+    expect(
+      validateA2UiAppSurfaceEnvelope(
+        envelope({
+          target: 'evaluation_graphs',
+          surface: {
+            ...graphSurface,
+            charts: [
+              {
+                id: 'bad-metric',
+                chart_type: 'metric_bar',
+                title: 'Bad metric',
+                source: 'layer_evaluations',
+                metric: 'layer_internal_weight'
+              }
+            ]
+          }
+        })
+      ).ok
+    ).toBe(false);
+  });
+
   test('rejects missing targets and unknown components', () => {
     expect(validateA2UiAppSurfaceEnvelope({ ...envelope(), target: undefined }).ok).toBe(false);
     expect(
@@ -359,6 +486,21 @@ describe('A2UI app surface validation', () => {
                 ]
               }
             ]
+          }
+        })
+      );
+      expect(result.ok).toBe(false);
+    });
+  }
+
+  for (const word of ['buy', 'sell', 'calculate_order_size', 'place_order']) {
+    test(`rejects forbidden action vocabulary in graph surface: ${word}`, () => {
+      const result = validateA2UiAppSurfaceEnvelope(
+        envelope({
+          target: 'evaluation_graphs',
+          surface: {
+            ...graphSurface,
+            title: `Do not ${word} from this graph.`
           }
         })
       );
@@ -430,6 +572,54 @@ describe('A2UI app surface validation', () => {
         review_item_id: 'asset:satellite:SMH',
         disposition: 'review_thesis'
       }
+    ]);
+  });
+
+  test('reducer replaces and appends EvaluationGraphSurface charts', () => {
+    const replacePatch: GenerativeSurfacePatch = {
+      target: 'evaluation_graphs',
+      surface: 'EvaluationGraphSurface',
+      mode: 'replace',
+      payload: graphSurface
+    };
+    const appendPatch: GenerativeSurfacePatch = {
+      target: 'evaluation_graphs',
+      surface: 'EvaluationGraphSurface',
+      mode: 'append',
+      payload: {
+        ...graphSurface,
+        title: '추가 그래프',
+        charts: [
+          {
+            id: 'mdd-bars',
+            chart_type: 'metric_bar',
+            title: 'MDD 점검',
+            source: 'asset_evaluations',
+            metric: 'mdd',
+            sort: {
+              by: 'mdd',
+              direction: 'asc'
+            }
+          }
+        ]
+      }
+    };
+
+    const withGraph = generativeUiReducer(initialGenerativeUiState, {
+      type: 'applySurfacePatch',
+      patch: replacePatch
+    });
+    const withAppend = generativeUiReducer(withGraph, {
+      type: 'applySurfacePatch',
+      patch: appendPatch
+    });
+
+    expect(withGraph.evaluationGraphSurface?.charts).toHaveLength(3);
+    expect(withAppend.evaluationGraphSurface?.charts.map((chart) => chart.id)).toEqual([
+      'layer-gap',
+      'risk-scatter',
+      'risk-bars',
+      'mdd-bars'
     ]);
   });
 });

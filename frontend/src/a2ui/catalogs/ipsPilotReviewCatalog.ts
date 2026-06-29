@@ -1,12 +1,13 @@
 export const IPS_PILOT_REVIEW_CATALOG_ID = 'ips-pilot-review/v1' as const;
 
-export const appSurfaceTargetValues = ['review_queue', 'journal_draft'] as const;
+export const appSurfaceTargetValues = ['review_queue', 'journal_draft', 'evaluation_graphs'] as const;
 
 export const appSurfaceModes = ['preview', 'replace', 'append'] as const;
 
 export const allowedReviewSurfaces = [
   'ReviewQueueTriageSurface',
   'JournalDraftComposerSurface',
+  'EvaluationGraphSurface',
   'MetricExplanationPopover',
   'GuardrailNotice'
 ] as const;
@@ -20,6 +21,8 @@ export const allowedReviewComponents = [
   'JournalDraftComposerSurface',
   'EvidenceLinkedDraftBlock',
   'FollowUpChecklist',
+  'EvaluationGraphSurface',
+  'EvaluationGraphChart',
   'GuardrailNotice'
 ] as const;
 
@@ -57,4 +60,35 @@ export const journalEvidenceFieldValues = [
   'metrics_snapshot',
   'suggested_next_step',
   'thesis'
+] as const;
+
+export const evaluationGraphChartTypeValues = ['layer_weight_gap_bar', 'asset_risk_scatter', 'metric_bar'] as const;
+
+export const evaluationGraphSourceValues = ['layer_evaluations', 'asset_evaluations'] as const;
+
+export const layerEvaluationMetricValues = [
+  'current_weight',
+  'target_weight',
+  'weight_gap',
+  'period_return',
+  'benchmark_excess_return',
+  'mdd',
+  'volatility',
+  'risk_contribution',
+  'cagr_mdd_ratio',
+  'status'
+] as const;
+
+export const assetEvaluationMetricValues = [
+  'current_weight',
+  'layer_internal_weight',
+  'period_return',
+  'cagr',
+  'mdd',
+  'volatility',
+  'risk_contribution',
+  'return_mdd_ratio',
+  'cagr_mdd_ratio',
+  'thesis_status',
+  'status'
 ] as const;

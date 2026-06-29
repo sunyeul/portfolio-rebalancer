@@ -9,6 +9,7 @@ import {
   reviewDispositionValues
 } from '../catalogs/ipsPilotReviewCatalog';
 import { journalDraftComposerSurfaceSchema } from '../schemas/journalDraftComposer.schema';
+import { evaluationGraphSurfaceSchema } from '../schemas/evaluationGraph.schema';
 import { reviewQueueTriageSurfaceSchema } from '../schemas/reviewQueueTriage.schema';
 import type {
   A2UiAppSurfaceEnvelope,
@@ -63,12 +64,14 @@ function zodErrors(error: z.ZodError) {
 function surfaceSchemaForComponent(component: string) {
   if (component === 'ReviewQueueTriageSurface') return reviewQueueTriageSurfaceSchema;
   if (component === 'JournalDraftComposerSurface') return journalDraftComposerSurfaceSchema;
+  if (component === 'EvaluationGraphSurface') return evaluationGraphSurfaceSchema;
   return null;
 }
 
 function targetForComponent(component: string): AppSurfaceTarget | null {
   if (component === 'ReviewQueueTriageSurface') return 'review_queue';
   if (component === 'JournalDraftComposerSurface') return 'journal_draft';
+  if (component === 'EvaluationGraphSurface') return 'evaluation_graphs';
   return null;
 }
 
@@ -196,6 +199,15 @@ export function convertA2UiToSurfacePatch(envelope: A2UiAppSurfaceEnvelope): Gen
     return {
       target: 'journal_draft',
       surface: 'JournalDraftComposerSurface',
+      mode: envelope.mode,
+      payload: envelope.surface
+    };
+  }
+
+  if (envelope.target === 'evaluation_graphs' && envelope.surface.component === 'EvaluationGraphSurface') {
+    return {
+      target: 'evaluation_graphs',
+      surface: 'EvaluationGraphSurface',
       mode: envelope.mode,
       payload: envelope.surface
     };
