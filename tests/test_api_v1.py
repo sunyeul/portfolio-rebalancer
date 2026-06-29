@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from core.evaluation import EvaluationPeriod
 from main import app
 from services.analysis_service import AnalysisResult
+from storage.database import initialize_database
 
 
 client = TestClient(app)
@@ -234,3 +235,121 @@ def test_unknown_csv_type_is_rejected():
     response = client.get("/api/v1/evaluation/download-csv?type=unknown")
 
     assert response.status_code in {400, 404}
+
+
+def test_saved_snapshot_evaluation_runs_are_persisted_and_loaded(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "PORTFOLIO_DB_PATH",
+        str(tmp_path / "portfolio_rebalancer.sqlite3"),
+    )
+    initialize_database()
+    monkeypatch.setattr("api.v1.evaluation.run_analysis", _fake_analysis)
+
+    portfolio_response = client.post(
+        "/api/v1/portfolios",
+        json={"name": "Saved evaluation account"},
+    )
+    assert portfolio_response.status_code == 200
+    portfolio_id = portfolio_response.json()["portfolio"]["id"]
+
+    snapshot_response = client.post(
+        f"/api/v1/portfolios/{portfolio_id}/snapshots",
+        json={
+            "name": "June holdings",
+            "rows": [
+                {
+                    "ticker": "VOO",
+                    "allocation": 100,
+                    "layer": "core",
+                    "thesis_status": "valid",
+                }
+            ],
+        },
+    )
+    assert snapshot_response.status_code == 200
+    snapshot_id = snapshot_response.json()["snapshot"]["id"]
+
+    first_response = client.post(
+        f"/api/v1/portfolios/snapshots/{snapshot_id}/evaluations/run",
+        json={"period": "3M", "bench": "SPY"},
+    )
+    assert first_response.status_code == 200
+    first_payload = first_response.json()
+    assert first_payload["evaluation_run"] is None
+    assert first_payload["evaluation"]["evaluation_period"]["label"] == "3M"
+
+    first_save_response = client.post(
+        f"/api/v1/portfolios/snapshots/{snapshot_id}/evaluations"
+    )
+    assert first_save_response.status_code == 200
+    first_run = first_save_response.json()["evaluation_run"]
+    assert first_run["status"] == "active"
+    assert first_run["is_stale"] is False
+
+    second_response = client.post(
+        f"/api/v1/portfolios/snapshots/{snapshot_id}/evaluations/run",
+        json={"period": "1Y", "bench": "SPY"},
+    )
+    assert second_response.status_code == 200
+    assert second_response.json()["evaluation_run"] is None
+
+    second_save_response = client.post(
+        f"/api/v1/portfolios/snapshots/{snapshot_id}/evaluations"
+    )
+    assert second_save_response.status_code == 200
+    second_run = second_save_response.json()["evaluation_run"]
+
+    list_response = client.get(
+        f"/api/v1/portfolios/snapshots/{snapshot_id}/evaluations"
+    )
+    assert list_response.status_code == 200
+    runs = list_response.json()["evaluation_runs"]
+    assert [run["status"] for run in runs] == ["active", "superseded"]
+    assert runs[0]["id"] == second_run["id"]
+    assert runs[1]["id"] == first_run["id"]
+    assert runs[1]["superseded_by_run_id"] == second_run["id"]
+
+    load_response = client.post(f"/api/v1/portfolios/snapshots/{snapshot_id}/load")
+    assert load_response.status_code == 200
+    loaded = load_response.json()
+    assert loaded["evaluation_run"]["id"] == second_run["id"]
+    assert loaded["evaluation_run"]["settings"]["period"] == "1Y"
+    assert loaded["evaluation_run"]["settings"]["bench"] == "SPY"
+    assert loaded["evaluation"]["evaluation_period"]["label"] == "1Y"
+
+    csv_response = client.get("/api/v1/evaluation/download-csv?type=asset_evaluations")
+    assert csv_response.status_code == 200
+    assert "unit" in csv_response.text
+
+
+def test_saved_snapshot_patch_rejects_position_rows(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "PORTFOLIO_DB_PATH",
+        str(tmp_path / "portfolio_rebalancer.sqlite3"),
+    )
+    initialize_database()
+
+    portfolio_response = client.post(
+        "/api/v1/portfolios",
+        json={"name": "Immutable snapshot API account"},
+    )
+    portfolio_id = portfolio_response.json()["portfolio"]["id"]
+    snapshot_response = client.post(
+        f"/api/v1/portfolios/{portfolio_id}/snapshots",
+        json={
+            "name": "Holdings",
+            "rows": [{"ticker": "VOO", "allocation": 100, "layer": "core"}],
+        },
+    )
+    snapshot_id = snapshot_response.json()["snapshot"]["id"]
+
+    response = client.patch(
+        f"/api/v1/portfolios/snapshots/{snapshot_id}",
+        json={
+            "name": "Changed",
+            "rows": [{"ticker": "QQQ", "allocation": 100, "layer": "core"}],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "새 보유현황 스냅샷" in response.json()["detail"]

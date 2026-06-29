@@ -11,6 +11,12 @@ from api.v1.serialization import (
     dataframe_records,
     safe_mapping,
 )
+from api.v1.evaluation import (
+    EvaluationRunRequest,
+    _store_analysis_result,
+    analysis_response_payload,
+    run_evaluation_for_asset_df,
+)
 from middleware.session import session_manager
 from services.portfolio_service import (
     PortfolioInputError,
@@ -19,11 +25,15 @@ from services.portfolio_service import (
 )
 from storage.portfolio_store import (
     StorageError,
+    activate_snapshot_evaluation_run,
+    create_snapshot_evaluation_run,
     create_portfolio,
     create_snapshot,
     delete_snapshot,
+    get_active_snapshot_evaluation_run,
     get_current_state,
     get_snapshot,
+    list_snapshot_evaluation_runs,
     list_portfolios,
     list_snapshots,
     save_current_state,
@@ -203,16 +213,12 @@ async def update_saved_snapshot(
     payload: SnapshotUpdateRequest,
 ):
     """Update a saved snapshot's editable metadata."""
-    asset_rows = None
     if payload.rows is not None:
-        try:
-            assets, _warnings = parse_manual_edit_to_assets(
-                [row.model_dump() for row in payload.rows]
-            )
-            asset_df, _validation_warnings = normalize_and_validate_assets(assets)
-            asset_rows = asset_df.to_dict(orient="records")
-        except PortfolioInputError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=400,
+            detail="포지션 변경은 새 보유현황 스냅샷으로 저장해주세요.",
+        )
+    asset_rows = None
     try:
         return {
             "snapshot": update_snapshot(
@@ -253,9 +259,11 @@ async def load_saved_snapshot(snapshot_id: int, request: Request):
         raise HTTPException(status_code=404, detail="스냅샷을 찾을 수 없습니다.")
 
     session_id = request.state.session_id
-    for key, value in snapshot["session_state"].items():
-        if value is not None:
-            session_manager.set(session_id, key, value)
+    _restore_snapshot_session(session_id, snapshot)
+    active_run = get_active_snapshot_evaluation_run(snapshot_id)
+    if active_run is not None:
+        session_manager.set(session_id, "evaluation_v2", active_run["result"])
+        session_manager.set(session_id, "evaluation_settings", active_run["settings"])
     try:
         save_current_state(snapshot["summary"]["portfolio_id"], snapshot["session_state"])
     except StorageError:
@@ -263,8 +271,114 @@ async def load_saved_snapshot(snapshot_id: int, request: Request):
     return _snapshot_response(snapshot)
 
 
+@router.get("/snapshots/{snapshot_id}/evaluations")
+async def list_saved_snapshot_evaluations(snapshot_id: int):
+    """List persisted evaluation records for a saved position snapshot."""
+    try:
+        return {"evaluation_runs": list_snapshot_evaluation_runs(snapshot_id)}
+    except StorageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/snapshots/{snapshot_id}/evaluations/run")
+async def run_saved_snapshot_evaluation(
+    snapshot_id: int,
+    payload: EvaluationRunRequest,
+    request: Request,
+):
+    """Run an unsaved evaluation for a saved position snapshot."""
+    snapshot = get_snapshot(snapshot_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="스냅샷을 찾을 수 없습니다.")
+    asset_rows = snapshot["session_state"].get("asset_df") or []
+    if not asset_rows:
+        raise HTTPException(status_code=400, detail="평가할 보유현황이 없습니다.")
+
+    asset_df = pd.DataFrame(asset_rows)
+    analysis, evaluation_payload, settings = run_evaluation_for_asset_df(asset_df, payload)
+
+    session_id = request.state.session_id
+    _restore_snapshot_session(session_id, snapshot)
+    _store_analysis_result(session_id, analysis)
+    session_manager.set(session_id, "evaluation_v2", evaluation_payload)
+    session_manager.set(session_id, "evaluation_settings", settings)
+
+    return {
+        "analysis": analysis_response_payload(analysis),
+        "evaluation": evaluation_payload,
+        "evaluation_run": None,
+    }
+
+
+@router.post("/snapshots/{snapshot_id}/evaluations")
+async def save_current_snapshot_evaluation(snapshot_id: int, request: Request):
+    """Persist the current session evaluation as the latest snapshot evaluation record."""
+    snapshot = get_snapshot(snapshot_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="스냅샷을 찾을 수 없습니다.")
+
+    session_id = request.state.session_id
+    evaluation_payload = session_manager.get(session_id, "evaluation_v2")
+    settings = session_manager.get(session_id, "evaluation_settings")
+    if not evaluation_payload or not settings:
+        raise HTTPException(status_code=400, detail="저장할 평가 결과가 없습니다. 먼저 다시 평가를 실행해주세요.")
+
+    session_asset_rows = session_manager.get(session_id, "asset_df") or []
+    snapshot_asset_rows = snapshot["session_state"].get("asset_df") or []
+    if session_asset_rows != snapshot_asset_rows:
+        raise HTTPException(
+            status_code=400,
+            detail="현재 평가는 선택한 보유현황 스냅샷과 일치하지 않습니다. 스냅샷을 다시 불러온 뒤 평가해주세요.",
+        )
+
+    evaluation_run = create_snapshot_evaluation_run(
+        snapshot_id,
+        settings,
+        evaluation_payload,
+    )
+    return {
+        "evaluation": evaluation_payload,
+        "evaluation_run": _evaluation_run_response(evaluation_run),
+    }
+
+
+@router.post("/snapshots/{snapshot_id}/evaluations/{run_id}/activate")
+async def activate_saved_snapshot_evaluation(
+    snapshot_id: int,
+    run_id: int,
+    request: Request,
+):
+    """Mark an existing evaluation record as the representative snapshot evaluation."""
+    try:
+        evaluation_run = activate_snapshot_evaluation_run(snapshot_id, run_id)
+    except StorageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    session_id = request.state.session_id
+    session_manager.set(session_id, "evaluation_v2", evaluation_run["result"])
+    session_manager.set(session_id, "evaluation_settings", evaluation_run["settings"])
+    return {
+        "evaluation": evaluation_run["result"],
+        "evaluation_run": _evaluation_run_response(evaluation_run),
+    }
+
+
 def _session_data(session_id: str) -> dict:
     return {key: session_manager.get(session_id, key) for key in SESSION_KEYS}
+
+
+def _restore_snapshot_session(session_id: str, snapshot: dict) -> None:
+    for key in SESSION_KEYS:
+        session_manager.delete(session_id, key)
+    for key, value in snapshot["session_state"].items():
+        if value is not None:
+            session_manager.set(session_id, key, value)
+
+
+def _evaluation_run_response(run: dict | None) -> dict | None:
+    if run is None:
+        return None
+    return {key: value for key, value in run.items() if key != "result"}
 
 
 def _state_response(state: dict) -> dict:
@@ -312,6 +426,7 @@ def _snapshot_response(snapshot: dict) -> dict:
         },
         "analysis": None,
         "evaluation": None,
+        "evaluation_run": None,
     }
 
     if snapshot["analysis"]:
@@ -329,7 +444,11 @@ def _snapshot_response(snapshot: dict) -> dict:
             "missing_tickers": snapshot["analysis"]["missing_tickers"],
         }
 
-    if snapshot["evaluation"] and "layer_evaluations" in snapshot["evaluation"]:
+    active_run = get_active_snapshot_evaluation_run(snapshot["summary"]["id"])
+    if active_run and active_run["result"] and "layer_evaluations" in active_run["result"]:
+        response["evaluation"] = active_run["result"]
+        response["evaluation_run"] = _evaluation_run_response(active_run)
+    elif snapshot["evaluation"] and "layer_evaluations" in snapshot["evaluation"]:
         response["evaluation"] = snapshot["evaluation"]
 
     return response

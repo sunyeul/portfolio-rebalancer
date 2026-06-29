@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+from hashlib import sha256
+from pathlib import Path
 from typing import Any
 
 from api.v1.serialization import json_safe
@@ -15,6 +17,9 @@ from storage.database import connect, initialize_database
 
 
 TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,15}$")
+EVALUATION_SCHEMA_VERSION = 1
+EVALUATION_ENGINE_VERSION = "evaluation-v2"
+IPS_CONFIG_PATH = Path(__file__).resolve().parents[1] / "config" / "ips.yaml"
 
 
 class StorageError(Exception):
@@ -37,6 +42,53 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, list):
         return [_json_safe(item) for item in value]
     return json_safe(value)
+
+
+def current_ips_config_hash() -> str:
+    """Return a stable hash for the IPS rules used by stored evaluations."""
+    try:
+        return sha256(IPS_CONFIG_PATH.read_bytes()).hexdigest()
+    except FileNotFoundError:
+        return "missing"
+
+
+def _evaluation_metadata(
+    schema_version: int | None = None,
+    engine_version: str | None = None,
+    ips_config_hash: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema_version": schema_version or EVALUATION_SCHEMA_VERSION,
+        "engine_version": engine_version or EVALUATION_ENGINE_VERSION,
+        "ips_config_hash": ips_config_hash or current_ips_config_hash(),
+    }
+
+
+def _is_stale_evaluation(row) -> bool:
+    metadata = _evaluation_metadata()
+    return (
+        int(row["schema_version"]) != metadata["schema_version"]
+        or str(row["engine_version"]) != metadata["engine_version"]
+        or str(row["ips_config_hash"]) != metadata["ips_config_hash"]
+    )
+
+
+def _evaluation_run_row(row, include_result: bool = True) -> dict[str, Any]:
+    payload = {
+        "id": row["id"],
+        "snapshot_id": row["snapshot_id"],
+        "settings": _json_load(row["settings_json"], {}),
+        "schema_version": row["schema_version"],
+        "engine_version": row["engine_version"],
+        "ips_config_hash": row["ips_config_hash"],
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "superseded_by_run_id": row["superseded_by_run_id"],
+        "is_stale": _is_stale_evaluation(row),
+    }
+    if include_result:
+        payload["result"] = _json_load(row["result_json"], {})
+    return payload
 
 
 def _normalize_code(value: Any, default: str) -> str:
@@ -372,6 +424,8 @@ def update_snapshot(
     asset_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     initialize_database()
+    if asset_rows is not None:
+        raise StorageError("포지션 변경은 새 보유현황 스냅샷으로 저장해주세요.")
     current = get_snapshot(snapshot_id)
     if current is None:
         raise StorageError("스냅샷을 찾을 수 없습니다.")
@@ -387,12 +441,6 @@ def update_snapshot(
             """,
             (next_name, next_note, snapshot_id),
         )
-        if asset_rows is not None:
-            conn.execute(
-                "DELETE FROM snapshot_positions WHERE snapshot_id = ?",
-                (snapshot_id,),
-            )
-            _insert_positions(conn, snapshot_id, asset_rows)
         conn.execute(
             "UPDATE portfolios SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (current_summary["portfolio_id"],),
@@ -418,6 +466,188 @@ def delete_snapshot(snapshot_id: int) -> None:
             "UPDATE portfolios SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (portfolio_id,),
         )
+
+
+def create_snapshot_evaluation_run(
+    snapshot_id: int,
+    settings: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    initialize_database()
+    metadata = _evaluation_metadata()
+    with connect() as conn:
+        snapshot = conn.execute(
+            """
+            SELECT s.id, s.portfolio_id
+            FROM portfolio_snapshots s
+            WHERE s.id = ?
+            """,
+            (snapshot_id,),
+        ).fetchone()
+        if snapshot is None:
+            raise StorageError("스냅샷을 찾을 수 없습니다.")
+        cursor = conn.execute(
+            """
+            INSERT INTO snapshot_evaluation_runs (
+                snapshot_id,
+                settings_json,
+                result_json,
+                schema_version,
+                engine_version,
+                ips_config_hash,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'active')
+            """,
+            (
+                snapshot_id,
+                _json_dump(settings),
+                _json_dump(result),
+                metadata["schema_version"],
+                metadata["engine_version"],
+                metadata["ips_config_hash"],
+            ),
+        )
+        run_id = int(cursor.lastrowid)
+        conn.execute(
+            """
+            UPDATE snapshot_evaluation_runs
+            SET status = 'superseded', superseded_by_run_id = ?
+            WHERE snapshot_id = ?
+              AND status = 'active'
+              AND id != ?
+            """,
+            (run_id, snapshot_id, run_id),
+        )
+        conn.execute(
+            "UPDATE portfolios SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (snapshot["portfolio_id"],),
+        )
+    run = get_snapshot_evaluation_run(run_id)
+    if run is None:
+        raise StorageError("평가 기록 저장 결과를 찾을 수 없습니다.")
+    return run
+
+
+def get_snapshot_evaluation_run(run_id: int) -> dict[str, Any] | None:
+    initialize_database()
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                snapshot_id,
+                settings_json,
+                result_json,
+                schema_version,
+                engine_version,
+                ips_config_hash,
+                status,
+                created_at,
+                superseded_by_run_id
+            FROM snapshot_evaluation_runs
+            WHERE id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+    return _evaluation_run_row(row) if row else None
+
+
+def get_active_snapshot_evaluation_run(snapshot_id: int) -> dict[str, Any] | None:
+    initialize_database()
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                id,
+                snapshot_id,
+                settings_json,
+                result_json,
+                schema_version,
+                engine_version,
+                ips_config_hash,
+                status,
+                created_at,
+                superseded_by_run_id
+            FROM snapshot_evaluation_runs
+            WHERE snapshot_id = ?
+              AND status = 'active'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (snapshot_id,),
+        ).fetchone()
+    return _evaluation_run_row(row) if row else None
+
+
+def list_snapshot_evaluation_runs(snapshot_id: int) -> list[dict[str, Any]]:
+    initialize_database()
+    if get_snapshot(snapshot_id) is None:
+        raise StorageError("스냅샷을 찾을 수 없습니다.")
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                id,
+                snapshot_id,
+                settings_json,
+                result_json,
+                schema_version,
+                engine_version,
+                ips_config_hash,
+                status,
+                created_at,
+                superseded_by_run_id
+            FROM snapshot_evaluation_runs
+            WHERE snapshot_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (snapshot_id,),
+        ).fetchall()
+    return [_evaluation_run_row(row, include_result=False) for row in rows]
+
+
+def activate_snapshot_evaluation_run(snapshot_id: int, run_id: int) -> dict[str, Any]:
+    initialize_database()
+    with connect() as conn:
+        run = conn.execute(
+            """
+            SELECT r.id, s.portfolio_id
+            FROM snapshot_evaluation_runs r
+            JOIN portfolio_snapshots s ON s.id = r.snapshot_id
+            WHERE r.id = ?
+              AND r.snapshot_id = ?
+            """,
+            (run_id, snapshot_id),
+        ).fetchone()
+        if run is None:
+            raise StorageError("평가 기록을 찾을 수 없습니다.")
+        conn.execute(
+            """
+            UPDATE snapshot_evaluation_runs
+            SET status = 'superseded', superseded_by_run_id = ?
+            WHERE snapshot_id = ?
+              AND status = 'active'
+              AND id != ?
+            """,
+            (run_id, snapshot_id, run_id),
+        )
+        conn.execute(
+            """
+            UPDATE snapshot_evaluation_runs
+            SET status = 'active', superseded_by_run_id = NULL
+            WHERE id = ?
+            """,
+            (run_id,),
+        )
+        conn.execute(
+            "UPDATE portfolios SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (run["portfolio_id"],),
+        )
+    active = get_snapshot_evaluation_run(run_id)
+    if active is None:
+        raise StorageError("대표 평가 지정 결과를 찾을 수 없습니다.")
+    return active
 
 
 def _insert_positions(conn, snapshot_id: int, asset_rows: list[dict[str, Any]]) -> None:

@@ -9,7 +9,7 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from api.v1.serialization import METRICS_COLUMNS, dataframe_records
+from api.v1.serialization import METRICS_COLUMNS, dataframe_records, safe_mapping
 from core.evaluation import EvaluationPeriod
 from middleware.session import session_manager
 from services.analysis_service import (
@@ -61,6 +61,34 @@ def _period_for_request(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def normalized_layer_benchmarks(payload: EvaluationRunRequest) -> dict[str, str]:
+    layer_benchmarks = DEFAULT_LAYER_BENCHMARKS.copy()
+    layer_benchmarks.update(
+        {
+            str(layer).strip().lower(): str(value).strip().upper()
+            for layer, value in (payload.layer_benchmarks or {}).items()
+            if str(layer).strip() and str(value).strip()
+        }
+    )
+    return layer_benchmarks
+
+
+def evaluation_settings_payload(
+    payload: EvaluationRunRequest,
+    evaluation_period: EvaluationPeriod,
+    bench: str,
+    layer_benchmarks: dict[str, str],
+) -> dict[str, Any]:
+    return {
+        "period": evaluation_period.label,
+        "start_date": evaluation_period.start_date.isoformat(),
+        "end_date": evaluation_period.end_date.isoformat(),
+        "as_of_date": payload.as_of_date.isoformat() if payload.as_of_date else None,
+        "bench": bench,
+        "layer_benchmarks": layer_benchmarks,
+    }
+
+
 def _store_analysis_result(session_id: str, result: AnalysisResult) -> None:
     session_manager.set(
         session_id, "prices", result.prices.reset_index().to_dict(orient="records")
@@ -82,26 +110,36 @@ def _store_analysis_result(session_id: str, result: AnalysisResult) -> None:
     session_manager.set(session_id, "missing_tickers", result.missing_tickers)
 
 
-def _analysis_result_for_session(
-    session_id: str,
-    payload: EvaluationRunRequest,
-) -> tuple[AnalysisResult, EvaluationPeriod, str, dict[str, str]]:
-    asset_df_data = session_manager.get(session_id, "asset_df")
-    if asset_df_data is None:
-        raise HTTPException(status_code=400, detail="먼저 포트폴리오를 입력해주세요.")
-    asset_df = pd.DataFrame(asset_df_data)
+def analysis_response_payload(result: AnalysisResult) -> dict[str, Any]:
+    return {
+        "metrics": dataframe_records(
+            result.metrics_df,
+            METRICS_COLUMNS,
+            include_index=True,
+        ),
+        "portfolio_metrics": safe_mapping(result.portfolio_metrics),
+        "benchmark_metrics": safe_mapping(result.benchmark_metrics),
+        "missing_tickers": result.missing_tickers,
+    }
 
-    analysis_settings = session_manager.get(session_id, "analysis_settings") or {}
+
+def run_evaluation_for_asset_df(
+    asset_df: pd.DataFrame,
+    payload: EvaluationRunRequest,
+    session_id: str | None = None,
+) -> tuple[AnalysisResult, dict[str, Any], dict[str, Any]]:
+    analysis_settings = (
+        session_manager.get(session_id, "analysis_settings")
+        if session_id is not None
+        else {}
+    ) or {}
     bench = str(payload.bench or analysis_settings.get("bench") or DEFAULT_BENCH).upper()
-    layer_benchmarks = DEFAULT_LAYER_BENCHMARKS.copy()
-    layer_benchmarks.update(
-        {
-            str(layer).strip().lower(): str(value).strip().upper()
-            for layer, value in (payload.layer_benchmarks or {}).items()
-            if str(layer).strip() and str(value).strip()
-        }
+    layer_benchmarks = normalized_layer_benchmarks(payload)
+    evaluation_period = (
+        _period_for_request(payload, session_id)
+        if session_id is not None
+        else _period_for_request(payload, "")
     )
-    evaluation_period = _period_for_request(payload, session_id)
     try:
         analysis = run_analysis(
             asset_df,
@@ -112,8 +150,37 @@ def _analysis_result_for_session(
         )
     except AnalysisError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = run_evaluation(
+        analysis=analysis,
+        evaluation_period=evaluation_period,
+        bench=bench,
+        layer_benchmarks=layer_benchmarks,
+    )
+    response_payload = result.to_payload()
+    settings = evaluation_settings_payload(
+        payload,
+        evaluation_period,
+        bench,
+        layer_benchmarks,
+    )
+    return analysis, response_payload, settings
+
+
+def _analysis_result_for_session(
+    session_id: str,
+    payload: EvaluationRunRequest,
+) -> tuple[AnalysisResult, dict[str, Any], dict[str, Any]]:
+    asset_df_data = session_manager.get(session_id, "asset_df")
+    if asset_df_data is None:
+        raise HTTPException(status_code=400, detail="먼저 포트폴리오를 입력해주세요.")
+    asset_df = pd.DataFrame(asset_df_data)
+    analysis, response_payload, settings = run_evaluation_for_asset_df(
+        asset_df,
+        payload,
+        session_id=session_id,
+    )
     _store_analysis_result(session_id, analysis)
-    return (analysis, evaluation_period, bench, layer_benchmarks)
+    return analysis, response_payload, settings
 
 
 def _csv_from_records(records: list[dict[str, Any]]) -> str:
@@ -124,26 +191,9 @@ def _csv_from_records(records: list[dict[str, Any]]) -> str:
 async def run_evaluation_endpoint(payload: EvaluationRunRequest, request: Request):
     """Run Evaluation Framework v2 for the current session."""
     session_id = request.state.session_id
-    analysis, evaluation_period, bench, layer_benchmarks = _analysis_result_for_session(session_id, payload)
-    result = run_evaluation(
-        analysis=analysis,
-        evaluation_period=evaluation_period,
-        bench=bench,
-        layer_benchmarks=layer_benchmarks,
-    )
-    response_payload = result.to_payload()
+    _analysis, response_payload, settings = _analysis_result_for_session(session_id, payload)
     session_manager.set(session_id, "evaluation_v2", response_payload)
-    session_manager.set(
-        session_id,
-        "evaluation_settings",
-        {
-            "period": evaluation_period.label,
-            "start_date": evaluation_period.start_date.isoformat(),
-            "end_date": evaluation_period.end_date.isoformat(),
-            "bench": bench,
-            "layer_benchmarks": layer_benchmarks,
-        },
-    )
+    session_manager.set(session_id, "evaluation_settings", settings)
     return response_payload
 
 

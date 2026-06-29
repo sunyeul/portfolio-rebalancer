@@ -101,6 +101,22 @@ def initialize_database() -> None:
                 UNIQUE(snapshot_id, asset_id)
             );
 
+            CREATE TABLE IF NOT EXISTS snapshot_evaluation_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id INTEGER NOT NULL REFERENCES portfolio_snapshots(id) ON DELETE CASCADE,
+                settings_json TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                schema_version INTEGER NOT NULL,
+                engine_version TEXT NOT NULL,
+                ips_config_hash TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('active', 'superseded')),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                superseded_by_run_id INTEGER REFERENCES snapshot_evaluation_runs(id) ON DELETE SET NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_snapshot_evaluation_runs_snapshot_status
+                ON snapshot_evaluation_runs(snapshot_id, status, id);
+
             CREATE TABLE IF NOT EXISTS ips_target_allocations (
                 layer TEXT PRIMARY KEY,
                 min REAL NOT NULL,

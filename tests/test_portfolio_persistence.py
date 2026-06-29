@@ -1,11 +1,16 @@
 import pytest
 
 from storage.database import connect, initialize_database
+import storage.portfolio_store as portfolio_store
 from storage.portfolio_store import (
     _state_payload,
+    create_snapshot_evaluation_run,
     create_portfolio,
     create_snapshot,
     get_snapshot,
+    get_active_snapshot_evaluation_run,
+    list_snapshot_evaluation_runs,
+    delete_snapshot,
     update_snapshot,
 )
 
@@ -205,6 +210,148 @@ def test_snapshot_update_persists_editable_metadata(portfolio_db):
     assert updated["created_at"] == snapshot["created_at"]
     assert updated["updated_at"] != stale_timestamp
     assert "as_of_date" not in updated
+
+
+def test_snapshot_update_rejects_position_changes(portfolio_db):
+    portfolio = create_portfolio("Immutable snapshot account")
+    snapshot = create_snapshot(
+        portfolio["id"],
+        "Before rejected edit",
+        "",
+        {
+            "asset_df": [
+                {
+                    "ticker": "VOO",
+                    "allocation": 100.0,
+                    "weight": 1.0,
+                    "return_total": None,
+                    "layer": "core",
+                    "thesis_status": "valid",
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(portfolio_store.StorageError, match="새 보유현황 스냅샷"):
+        update_snapshot(
+            snapshot["id"],
+            asset_rows=[
+                {
+                    "ticker": "QQQ",
+                    "allocation": 100.0,
+                    "weight": 1.0,
+                    "return_total": None,
+                    "layer": "core",
+                    "thesis_status": "valid",
+                }
+            ],
+        )
+
+
+def test_snapshot_evaluation_runs_are_append_only_with_one_active_run(portfolio_db):
+    portfolio = create_portfolio("Evaluation run account")
+    snapshot = create_snapshot(
+        portfolio["id"],
+        "Run snapshot",
+        "",
+        {
+            "asset_df": [
+                {
+                    "ticker": "VOO",
+                    "allocation": 100.0,
+                    "weight": 1.0,
+                    "return_total": None,
+                    "layer": "core",
+                    "thesis_status": "valid",
+                }
+            ]
+        },
+    )
+
+    first = create_snapshot_evaluation_run(
+        snapshot["id"],
+        {"period": "3M", "bench": "SPY"},
+        {"evaluation_period": {"label": "3M"}, "layer_evaluations": [], "asset_evaluations": []},
+    )
+    second = create_snapshot_evaluation_run(
+        snapshot["id"],
+        {"period": "1Y", "bench": "SPY"},
+        {"evaluation_period": {"label": "1Y"}, "layer_evaluations": [], "asset_evaluations": []},
+    )
+
+    runs = list_snapshot_evaluation_runs(snapshot["id"])
+    active = get_active_snapshot_evaluation_run(snapshot["id"])
+
+    assert [run["id"] for run in runs] == [second["id"], first["id"]]
+    assert active["id"] == second["id"]
+    assert runs[0]["status"] == "active"
+    assert runs[1]["status"] == "superseded"
+    assert runs[1]["superseded_by_run_id"] == second["id"]
+
+
+def test_snapshot_evaluation_run_stale_detection(portfolio_db, monkeypatch):
+    portfolio = create_portfolio("Stale evaluation account")
+    snapshot = create_snapshot(
+        portfolio["id"],
+        "Stale snapshot",
+        "",
+        {
+            "asset_df": [
+                {
+                    "ticker": "VOO",
+                    "allocation": 100.0,
+                    "weight": 1.0,
+                    "return_total": None,
+                    "layer": "core",
+                    "thesis_status": "valid",
+                }
+            ]
+        },
+    )
+    create_snapshot_evaluation_run(
+        snapshot["id"],
+        {"period": "3M", "bench": "SPY"},
+        {"evaluation_period": {"label": "3M"}, "layer_evaluations": [], "asset_evaluations": []},
+    )
+
+    assert get_active_snapshot_evaluation_run(snapshot["id"])["is_stale"] is False
+
+    monkeypatch.setattr(portfolio_store, "EVALUATION_ENGINE_VERSION", "changed-engine")
+
+    assert get_active_snapshot_evaluation_run(snapshot["id"])["is_stale"] is True
+
+
+def test_snapshot_delete_cascades_evaluation_runs(portfolio_db):
+    portfolio = create_portfolio("Cascade evaluation account")
+    snapshot = create_snapshot(
+        portfolio["id"],
+        "Cascade snapshot",
+        "",
+        {
+            "asset_df": [
+                {
+                    "ticker": "VOO",
+                    "allocation": 100.0,
+                    "weight": 1.0,
+                    "return_total": None,
+                    "layer": "core",
+                    "thesis_status": "valid",
+                }
+            ]
+        },
+    )
+    create_snapshot_evaluation_run(
+        snapshot["id"],
+        {"period": "3M", "bench": "SPY"},
+        {"evaluation_period": {"label": "3M"}, "layer_evaluations": [], "asset_evaluations": []},
+    )
+
+    delete_snapshot(snapshot["id"])
+
+    with connect() as conn:
+        rows = conn.execute("SELECT id FROM snapshot_evaluation_runs").fetchall()
+
+    assert rows == []
 
 
 def test_snapshot_defaults_missing_thesis_status_to_valid(portfolio_db):
