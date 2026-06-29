@@ -1,19 +1,28 @@
-# Python-generated files
+# Python artifacts
 __pycache__/
 *.py[oc]
+.pytest_cache/
+.ruff_cache/
 build/
 dist/
 wheels/
 *.egg-info
 
-# Virtual environments
-.venv
+# Local environments and secrets
+.venv/
+.env
+.env.*
+!.env.example
 
 # Frontend dependencies and build output
 frontend/node_modules/
 frontend/dist/
 frontend/tsconfig.tsbuildinfo
+
+# Agent runtime dependencies and build output
 agent-runtime/node_modules/
+agent-runtime/dist/
+agent-runtime/tsconfig.tsbuildinfo
 
 # Local SQLite data
 data/*.sqlite3
