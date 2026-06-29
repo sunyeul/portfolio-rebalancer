@@ -3,6 +3,7 @@ import { IPS_PILOT_REVIEW_CATALOG_ID, reviewDispositionValues } from '../catalog
 import type {
   AgentExplanationSource,
   JournalDraftComposerSurfacePayload,
+  EvaluationGraphSurfacePayload,
   ReviewDecision,
   ReviewDisposition,
   ReviewItemCardPayload,
@@ -25,6 +26,40 @@ export type ReviewQueueAgentExplanationPatch = {
   overview?: string | null;
   explanations?: ReviewQueueAgentExplanationInput[];
 };
+
+export function buildDefaultEvaluationGraphSurface(
+  evaluation: EvaluationResponse | null
+): EvaluationGraphSurfacePayload {
+  const period = evaluation?.evaluation_period ?? {
+    label: 'custom' as const,
+    start_date: 'N/A',
+    end_date: 'N/A'
+  };
+
+  return {
+    component: 'EvaluationGraphSurface',
+    catalog_id: IPS_PILOT_REVIEW_CATALOG_ID,
+    title: '계층/종목 평가 그래프',
+    evaluation_period: period,
+    guardrail_notice: { text: GUARDRAIL_NOTICE },
+    charts: [
+      {
+        id: 'default-layer-weight-gap',
+        chart_type: 'layer_weight_gap_bar',
+        title: '계층 비중과 목표 대비 차이',
+        description: '계층별 현재 비중, 목표 비중, 목표 대비 차이를 표시합니다.',
+        source: 'layer_evaluations'
+      },
+      {
+        id: 'default-asset-risk-scatter',
+        chart_type: 'asset_risk_scatter',
+        title: '종목 평가 요약',
+        description: '종목 평가 테이블의 비중·위험 기여·수익률을 시각화합니다.',
+        source: 'asset_evaluations'
+      }
+    ]
+  };
+}
 
 const statusLabelsKo: Record<ReviewItem['status'], string> = {
   Action: '조치 검토',

@@ -50,6 +50,7 @@ import { GenerativeUiProvider, useGenerativeUi } from './a2ui/GenerativeUiContex
 import { ReviewQueueTriageSurface } from './a2ui/renderers/ReviewQueueTriageSurface';
 import { requestReviewQueueAgentExplanations } from './a2ui/utils/agentExplanations';
 import {
+  buildDefaultEvaluationGraphSurface,
   buildReviewQueueTriageSurface,
   defaultReviewDecisionsFromEvaluation,
   mergeReviewQueueAgentExplanations
@@ -759,13 +760,23 @@ const assetEvaluationColumns: Array<SortableColumn<EvaluationRecord, AssetEvalua
   { id: 'status', label: '상태', getValue: (row) => statusLabel(row.output.status) }
 ];
 
-function LayerDashboard({ rows }: { rows: EvaluationRecord[] }) {
+function localRowId(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+}
+
+function LayerDashboard({
+  focusedLayer,
+  rows
+}: {
+  focusedLayer: string | null;
+  rows: EvaluationRecord[];
+}) {
   const [sortState, setSortState] = useState<SortState<LayerDashboardColumnId>>(null);
   const sortedRows = useMemo(() => sortRows(rows, layerDashboardColumns, sortState), [rows, sortState]);
 
   if (!rows.length) return null;
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4">
+    <section id="layer-dashboard" className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center gap-2">
         <BarChart3 className="h-5 w-5 text-cyan-800" />
         <h2 className="text-base font-bold text-slate-950">계층 대시보드</h2>
@@ -786,19 +797,29 @@ function LayerDashboard({ rows }: { rows: EvaluationRecord[] }) {
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map(({ unit, output }) => (
-              <tr key={unit.name} className="border-t border-slate-100">
-                <td className="px-2 py-2 font-bold text-slate-900">{layerLabel(unit.name)}</td>
-                <td className="px-2 py-2">{pct(output.current_weight)}</td>
-                <td className="px-2 py-2">{pct(output.weight_gap)}</td>
-                <td className="px-2 py-2">{pct(output.period_return)}</td>
-                <td className="px-2 py-2">{pct(output.benchmark_return)}</td>
-                <td className="px-2 py-2">{pct(output.benchmark_excess_return)}</td>
-                <td className="px-2 py-2">{pct(output.mdd)}</td>
-                <td className="px-2 py-2">{num(output.cagr_mdd_ratio)}</td>
-                <td className="px-2 py-2"><StatusBadge status={output.status} /></td>
-              </tr>
-            ))}
+            {sortedRows.map(({ unit, output }) => {
+              const isFocused = focusedLayer === unit.name;
+              const isDimmed = focusedLayer !== null && !isFocused;
+              return (
+                <tr
+                  key={unit.name}
+                  id={`layer-row-${localRowId(unit.name)}`}
+                  className={`border-t border-slate-100 transition ${
+                    isFocused ? 'bg-cyan-50 ring-1 ring-inset ring-cyan-200' : isDimmed ? 'opacity-50' : ''
+                  }`}
+                >
+                  <td className="px-2 py-2 font-bold text-slate-900">{layerLabel(unit.name)}</td>
+                  <td className="px-2 py-2">{pct(output.current_weight)}</td>
+                  <td className="px-2 py-2">{pct(output.weight_gap)}</td>
+                  <td className="px-2 py-2">{pct(output.period_return)}</td>
+                  <td className="px-2 py-2">{pct(output.benchmark_return)}</td>
+                  <td className="px-2 py-2">{pct(output.benchmark_excess_return)}</td>
+                  <td className="px-2 py-2">{pct(output.mdd)}</td>
+                  <td className="px-2 py-2">{num(output.cagr_mdd_ratio)}</td>
+                  <td className="px-2 py-2"><StatusBadge status={output.status} /></td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -806,13 +827,25 @@ function LayerDashboard({ rows }: { rows: EvaluationRecord[] }) {
   );
 }
 
-function AssetEvaluationTable({ rows }: { rows: EvaluationRecord[] }) {
+function AssetEvaluationTable({
+  focusedLayer,
+  focusedTicker,
+  onTickerFocus,
+  onTickerSelect,
+  rows
+}: {
+  focusedLayer: string | null;
+  focusedTicker: string | null;
+  onTickerFocus: (ticker: string | null) => void;
+  onTickerSelect: (ticker: string) => void;
+  rows: EvaluationRecord[];
+}) {
   const [sortState, setSortState] = useState<SortState<AssetEvaluationColumnId>>(null);
   const sortedRows = useMemo(() => sortRows(rows, assetEvaluationColumns, sortState), [rows, sortState]);
 
   if (!rows.length) return null;
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4">
+    <section id="asset-evaluation-table" className="rounded-lg border border-slate-200 bg-white p-4">
       <h2 className="text-base font-bold text-slate-950">종목 평가 테이블</h2>
       <div className="mt-3 overflow-x-auto">
         <table className="min-w-full text-left text-sm">
@@ -830,20 +863,36 @@ function AssetEvaluationTable({ rows }: { rows: EvaluationRecord[] }) {
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map(({ unit, output }) => (
-              <tr key={unit.name} className="border-t border-slate-100">
-                <td className="px-2 py-2">{layerLabel(unit.parent_layer)}</td>
-                <td className="px-2 py-2 font-bold text-slate-900">{unit.name}</td>
-                <td className="px-2 py-2">{pct(output.current_weight)}</td>
-                <td className="px-2 py-2">{pct(output.layer_internal_weight)}</td>
-                <td className="px-2 py-2">{pct(output.period_return)}</td>
-                <td className="px-2 py-2">{pct(output.cagr)}</td>
-                <td className="px-2 py-2">{pct(output.mdd)}</td>
-                <td className="px-2 py-2">{pct(output.risk_contribution)}</td>
-                <td className="px-2 py-2">{thesisLabel(output.thesis_status)}</td>
-                <td className="px-2 py-2"><StatusBadge status={output.status} /></td>
-              </tr>
-            ))}
+            {sortedRows.map(({ unit, output }) => {
+              const isTickerFocused = focusedTicker === unit.name;
+              const isLayerFocused = focusedLayer === unit.parent_layer;
+              const isDimmed =
+                (focusedTicker !== null && !isTickerFocused) ||
+                (focusedTicker === null && focusedLayer !== null && !isLayerFocused);
+              return (
+                <tr
+                  key={unit.name}
+                  id={`asset-row-${localRowId(unit.name)}`}
+                  className={`cursor-pointer border-t border-slate-100 transition hover:bg-slate-50 ${
+                    isTickerFocused ? 'bg-cyan-50 ring-1 ring-inset ring-cyan-200' : isLayerFocused ? 'bg-cyan-50/50' : isDimmed ? 'opacity-50' : ''
+                  }`}
+                  onClick={() => onTickerSelect(unit.name)}
+                  onMouseEnter={() => onTickerFocus(unit.name)}
+                  onMouseLeave={() => onTickerFocus(null)}
+                >
+                  <td className="px-2 py-2">{layerLabel(unit.parent_layer)}</td>
+                  <td className="px-2 py-2 font-bold text-slate-900">{unit.name}</td>
+                  <td className="px-2 py-2">{pct(output.current_weight)}</td>
+                  <td className="px-2 py-2">{pct(output.layer_internal_weight)}</td>
+                  <td className="px-2 py-2">{pct(output.period_return)}</td>
+                  <td className="px-2 py-2">{pct(output.cagr)}</td>
+                  <td className="px-2 py-2">{pct(output.mdd)}</td>
+                  <td className="px-2 py-2">{pct(output.risk_contribution)}</td>
+                  <td className="px-2 py-2">{thesisLabel(output.thesis_status)}</td>
+                  <td className="px-2 py-2"><StatusBadge status={output.status} /></td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -922,7 +971,7 @@ function ReviewQueue({ evaluation }: { evaluation: EvaluationResponse }) {
   }, [applySurfacePatch, defaultSurface, evaluation.review_queue.length]);
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4">
+    <section id="review-queue" className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center gap-2">
         <ClipboardList className="h-5 w-5 text-cyan-800" />
         <h2 className="text-base font-bold text-slate-950">점검 큐</h2>
@@ -939,6 +988,117 @@ function ReviewQueue({ evaluation }: { evaluation: EvaluationResponse }) {
         </div>
       )}
     </section>
+  );
+}
+
+function EvaluationGraphs({
+  evaluation,
+  focusedLayer,
+  focusedTicker,
+  onLayerFocus,
+  onTickerFocus,
+  onTickerSelect
+}: {
+  evaluation: EvaluationResponse;
+  focusedLayer: string | null;
+  focusedTicker: string | null;
+  onLayerFocus: (layer: string | null) => void;
+  onTickerFocus: (ticker: string | null) => void;
+  onTickerSelect: (ticker: string) => void;
+}) {
+  const { applySurfacePatch } = useGenerativeUi();
+  const defaultSurface = useMemo(() => buildDefaultEvaluationGraphSurface(evaluation), [evaluation]);
+
+  useEffect(() => {
+    applySurfacePatch({
+      target: 'evaluation_graphs',
+      surface: 'EvaluationGraphSurface',
+      mode: 'replace',
+      payload: defaultSurface
+    });
+  }, [applySurfacePatch, defaultSurface]);
+
+  return (
+    <GeneratedSurfaceHost
+      evaluation={evaluation}
+      focusedLayer={focusedLayer}
+      focusedTicker={focusedTicker}
+      onLayerFocus={onLayerFocus}
+      onTickerFocus={onTickerFocus}
+      onTickerSelect={onTickerSelect}
+      target="evaluation_graphs"
+    />
+  );
+}
+
+function EvaluationResults({
+  evaluation,
+  evaluationRun
+}: {
+  evaluation: EvaluationResponse;
+  evaluationRun: EvaluationRun | null;
+}) {
+  const [focusedLayer, setFocusedLayer] = useState<string | null>(null);
+  const [hoveredTicker, setHoveredTicker] = useState<string | null>(null);
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+  const focusedTicker = hoveredTicker ?? selectedTicker;
+
+  useEffect(() => {
+    setFocusedLayer(null);
+    setHoveredTicker(null);
+    setSelectedTicker(null);
+  }, [evaluation]);
+
+  function handleLayerFocus(layer: string | null) {
+    setFocusedLayer(layer);
+    if (layer !== null) {
+      setHoveredTicker(null);
+      setSelectedTicker(null);
+    }
+  }
+
+  function handleTickerFocus(ticker: string | null) {
+    setHoveredTicker(ticker);
+    if (ticker !== null) {
+      setFocusedLayer(null);
+    }
+  }
+
+  function handleTickerSelect(ticker: string) {
+    setFocusedLayer(null);
+    setHoveredTicker(null);
+    setSelectedTicker((current) => (current === ticker ? null : ticker));
+
+    window.requestAnimationFrame(() => {
+      document.getElementById(`asset-row-${localRowId(ticker)}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
+    });
+  }
+
+  return (
+    <>
+      <EvaluationRunHeader evaluationRun={evaluationRun} />
+      <EvaluationGraphs
+        evaluation={evaluation}
+        focusedLayer={focusedLayer}
+        focusedTicker={focusedTicker}
+        onLayerFocus={handleLayerFocus}
+        onTickerFocus={handleTickerFocus}
+        onTickerSelect={handleTickerSelect}
+      />
+      <LayerDashboard focusedLayer={focusedLayer} rows={evaluation.layer_evaluations} />
+      <AssetEvaluationTable
+        focusedLayer={focusedLayer}
+        focusedTicker={focusedTicker}
+        rows={evaluation.asset_evaluations}
+        onTickerFocus={handleTickerFocus}
+        onTickerSelect={handleTickerSelect}
+      />
+      <ReviewQueue evaluation={evaluation} />
+      <JournalDraft rows={evaluation.journal_draft} />
+    </>
   );
 }
 
@@ -2086,13 +2246,7 @@ export function App() {
         <MetricsStrip analysis={analysis} />
 
         {evaluation ? (
-          <>
-            <EvaluationRunHeader evaluationRun={evaluationRun} />
-            <LayerDashboard rows={evaluation.layer_evaluations} />
-            <AssetEvaluationTable rows={evaluation.asset_evaluations} />
-            <ReviewQueue evaluation={evaluation} />
-            <JournalDraft rows={evaluation.journal_draft} />
-          </>
+          <EvaluationResults evaluation={evaluation} evaluationRun={evaluationRun} />
         ) : (
           <section className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-sm font-semibold text-slate-500">
             평가 결과는 적용·분석·평가 실행 버튼을 누르면 여기에 표시됩니다.
