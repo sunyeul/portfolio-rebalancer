@@ -1,10 +1,27 @@
-import { CopilotKit, CopilotPopup, useAgentContext, useFrontendTool } from '@copilotkit/react-core/v2';
+import { CopilotKit, CopilotSidebar, useAgentContext, useFrontendTool } from '@copilotkit/react-core/v2';
 import type { JsonSerializable } from '@copilotkit/react-core/v2';
 import '@copilotkit/react-core/v2/styles.css';
 import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import { z } from 'zod';
 
+import { IPS_PILOT_REVIEW_CATALOG_ID } from '../a2ui/catalogs/ipsPilotReviewCatalog';
+import { useGenerativeUi } from '../a2ui/GenerativeUiContext';
+import { reviewDecisionSchema } from '../a2ui/schemas/journalDraftComposer.schema';
+import type {
+  A2UiAppSurfaceEnvelope,
+  AppSurfaceTarget,
+  ReviewA2UISurfacePayload,
+  ReviewDecision
+} from '../a2ui/types';
+import {
+  buildJournalDraftComposerSurface,
+  buildReviewQueueTriageSurface,
+  defaultReviewDecisionsFromEvaluation,
+  mergeReviewQueueAgentExplanations,
+  reviewItemId
+} from '../a2ui/utils/builders';
+import { applyA2UiAppSurfacePayload } from '../a2ui/utils/validation';
 import {
   type AnalysisResponse,
   type AssetRow,
@@ -37,6 +54,22 @@ const draftJournalInputSchema = z.object({
   tone: z.enum(['brief', 'detailed']).optional()
 });
 
+const agentExplanationInputSchema = z.object({
+  review_item_id: z.string(),
+  text: z.string()
+});
+
+const createReviewQueueTriageInputSchema = z.object({
+  agent_overview: z.string().optional(),
+  agent_explanations: z.array(agentExplanationInputSchema).optional()
+});
+
+const createJournalDraftComposerInputSchema = z.object({
+  decision_context: z.enum(['regular_review', 'market_correction', 'sharp_drop_review', 'rebalance_review']),
+  review_decisions: z.array(reviewDecisionSchema).optional(),
+  include_observe_and_deferred: z.boolean().optional()
+});
+
 export type ReviewCopilotSettings = {
   period: '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'Max';
   asOfDate: string;
@@ -62,8 +95,68 @@ function analysisPeriodFromEvaluationPeriod(period: ReviewCopilotSettings['perio
   return Number(period.replace('M', ''));
 }
 
-function reviewItemId(item: EvaluationResponse['review_queue'][number]) {
-  return `${item.level}:${item.parent_layer ?? 'portfolio'}:${item.name}`;
+function appSurfaceEnvelope(target: AppSurfaceTarget, surface: ReviewA2UISurfacePayload): A2UiAppSurfaceEnvelope {
+  return {
+    catalog_id: IPS_PILOT_REVIEW_CATALOG_ID,
+    target,
+    mode: 'replace',
+    surface,
+    source: {
+      agent: 'reviewCopilot',
+      created_at: new Date().toISOString()
+    }
+  };
+}
+
+function surfaceApplicationResult(
+  message: string,
+  validation: ReturnType<typeof applyA2UiAppSurfacePayload>
+): string {
+  if (!validation.ok) {
+    return validation.fallback_text;
+  }
+
+  return message;
+}
+
+function ToolStatusMessage({
+  pendingLabel,
+  result,
+  status
+}: {
+  pendingLabel: string;
+  result: unknown;
+  status: string;
+}) {
+  if (status !== 'complete') {
+    return (
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-600">
+        {pendingLabel}
+      </div>
+    );
+  }
+
+  if (typeof result !== 'string') {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+        Generated UI를 앱 본문에 반영하지 못했습니다. 대신 텍스트 요약으로 표시합니다.
+      </div>
+    );
+  }
+
+  if (result.includes('반영하지 못했습니다')) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+        {result}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-3 text-sm font-semibold text-cyan-900">
+      {result}
+    </div>
+  );
 }
 
 function compactEvaluationContext(
@@ -147,26 +240,95 @@ export function ReviewCopilotHost({ children }: ReviewCopilotHostProps) {
 }
 
 export function ReviewCopilot({ portfolio, evaluation, settings, onAnalysis, onEvaluation }: ReviewCopilotProps) {
+  const { applySurfacePatch, reviewDecisions, reviewQueueSurface, setReviewDecisions } = useGenerativeUi();
   const context = useMemo(
     () => compactEvaluationContext(portfolio, evaluation, settings),
     [portfolio, evaluation, settings]
   );
+  const agentContext = useMemo(() => ({ ...context, review_decisions: reviewDecisions }), [context, reviewDecisions]);
 
   useAgentContext({
     description:
       'Current IPS Pilot workbench state. Treat statuses as inspection labels only and never as order instructions.',
-    value: context as unknown as JsonSerializable
+    value: agentContext as unknown as JsonSerializable
   });
 
   useFrontendTool(
     {
       name: 'getEvaluationContext',
       description:
-        'Read the current visible IPS Pilot evaluation context, including portfolio, layer evaluations, asset evaluations, Review Queue, warnings, guardrails, and settings.',
+        'Read the current visible IPS Pilot evaluation context, including portfolio, layer evaluations, asset evaluations, Review Queue, review decisions, warnings, guardrails, and settings.',
       parameters: z.object({}),
-      handler: async () => context
+      handler: async () => agentContext
     },
-    [context]
+    [agentContext]
+  );
+
+  useFrontendTool(
+    {
+      name: 'createReviewQueueTriageSurface',
+      description:
+        'Create and apply an ips-pilot-review/v1 ReviewQueueTriageSurface to the Review Queue app surface. Use this for requests to organize, triage, or prioritize Review Queue items.',
+      parameters: createReviewQueueTriageInputSchema,
+      followUp: false,
+      handler: async ({ agent_overview, agent_explanations }) => {
+        const baseSurface = reviewQueueSurface ?? buildReviewQueueTriageSurface(evaluation);
+        const surface =
+          agent_overview || (agent_explanations && agent_explanations.length > 0)
+            ? mergeReviewQueueAgentExplanations(baseSurface, {
+                source: 'requested',
+                created_at: new Date().toISOString(),
+                overview: agent_overview,
+                explanations: agent_explanations
+              })
+            : baseSurface;
+        const validation = applyA2UiAppSurfacePayload(appSurfaceEnvelope('review_queue', surface), applySurfacePatch);
+        if (!validation.ok) {
+          console.error('[review-copilot:a2ui]', validation.validation_errors);
+          return surfaceApplicationResult('', validation);
+        }
+        setReviewDecisions(defaultReviewDecisionsFromEvaluation(evaluation));
+        return surfaceApplicationResult(
+          'Review Queue에 generated triage board를 생성했습니다. 앱 본문에서 각 항목의 처리 방침을 선택하세요.',
+          validation
+        );
+      },
+      render: ({ status, result }) => {
+        return <ToolStatusMessage pendingLabel="Review Queue triage surface 준비 중..." result={result} status={status} />;
+      }
+    },
+    [applySurfacePatch, evaluation, reviewQueueSurface, setReviewDecisions]
+  );
+
+  useFrontendTool(
+    {
+      name: 'createJournalDraftComposerSurface',
+      description:
+        'Create and apply an ips-pilot-review/v1 JournalDraftComposerSurface to the Journal Draft app surface from selected Review Queue dispositions. This creates editable, copyable journal draft blocks only and does not save journal state.',
+      parameters: createJournalDraftComposerInputSchema,
+      followUp: false,
+      handler: async ({ decision_context, review_decisions, include_observe_and_deferred }) => {
+        const decisions = review_decisions ?? reviewDecisions;
+        const surface = buildJournalDraftComposerSurface({
+          evaluation,
+          decisions,
+          decisionContext: decision_context,
+          includeObserveAndDeferred: include_observe_and_deferred
+        });
+        const validation = applyA2UiAppSurfacePayload(appSurfaceEnvelope('journal_draft', surface), applySurfacePatch);
+        if (!validation.ok) {
+          console.error('[review-copilot:a2ui]', validation.validation_errors);
+        }
+        return surfaceApplicationResult(
+          '선택된 review decision을 기반으로 Journal Draft를 생성했습니다. Journal Draft 영역에서 초안을 확인하세요.',
+          validation
+        );
+      },
+      render: ({ status, result }) => {
+        return <ToolStatusMessage pendingLabel="Journal draft composer 준비 중..." result={result} status={status} />;
+      }
+    },
+    [applySurfacePatch, evaluation, reviewDecisions]
   );
 
   useFrontendTool(
@@ -227,5 +389,13 @@ export function ReviewCopilot({ portfolio, evaluation, settings, onAnalysis, onE
     [context]
   );
 
-  return <CopilotPopup labels={REVIEW_COPILOT_LABELS} defaultOpen={false} width={420} />;
+  return (
+    <CopilotSidebar
+      header={{ closeButton: { 'aria-label': 'Review Copilot 접기' } }}
+      labels={REVIEW_COPILOT_LABELS}
+      defaultOpen={true}
+      position="right"
+      width={420}
+    />
+  );
 }

@@ -108,6 +108,26 @@ export type EvaluationResponse = {
   };
 };
 
+export type EvaluationRun = {
+  id: number;
+  snapshot_id: number;
+  settings: {
+    period?: string | null;
+    start_date?: string | null;
+    end_date?: string | null;
+    as_of_date?: string | null;
+    bench?: string | null;
+    layer_benchmarks?: Record<string, string>;
+  };
+  schema_version: number;
+  engine_version: string;
+  ips_config_hash: string;
+  status: 'active' | 'superseded';
+  created_at: string | null;
+  superseded_by_run_id: number | null;
+  is_stale: boolean;
+};
+
 export type PortfolioResponse = {
   assets: AssetRow[];
   warnings: string[];
@@ -150,6 +170,7 @@ export type SnapshotLoadResponse = {
   portfolio: PortfolioResponse;
   analysis: AnalysisResponse | null;
   evaluation: EvaluationResponse | null;
+  evaluation_run: EvaluationRun | null;
 };
 
 async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
@@ -209,6 +230,56 @@ export function runEvaluation(payload: {
   });
 }
 
+export function runSnapshotEvaluation(
+  snapshotId: number,
+  payload: {
+    period?: '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'Max';
+    start_date?: string;
+    end_date?: string;
+    as_of_date?: string;
+    bench?: string;
+    layer_benchmarks?: Record<string, string>;
+  },
+  signal?: AbortSignal
+) {
+  return requestJson<{
+    analysis: AnalysisResponse;
+    evaluation: EvaluationResponse;
+    evaluation_run: EvaluationRun | null;
+  }>(`/api/v1/portfolios/snapshots/${snapshotId}/evaluations/run`, {
+    method: 'POST',
+    signal,
+    body: JSON.stringify(payload)
+  });
+}
+
+export function saveSnapshotEvaluation(snapshotId: number) {
+  return requestJson<{ evaluation: EvaluationResponse; evaluation_run: EvaluationRun }>(
+    `/api/v1/portfolios/snapshots/${snapshotId}/evaluations`,
+    {
+      method: 'POST'
+    }
+  );
+}
+
+export function listSnapshotEvaluationRuns(snapshotId: number) {
+  return requestJson<{ evaluation_runs: EvaluationRun[] }>(
+    `/api/v1/portfolios/snapshots/${snapshotId}/evaluations`,
+    {
+      method: 'GET'
+    }
+  );
+}
+
+export function activateSnapshotEvaluation(snapshotId: number, runId: number) {
+  return requestJson<{ evaluation: EvaluationResponse; evaluation_run: EvaluationRun }>(
+    `/api/v1/portfolios/snapshots/${snapshotId}/evaluations/${runId}/activate`,
+    {
+      method: 'POST'
+    }
+  );
+}
+
 export function listPortfolios() {
   return requestJson<{ portfolios: SavedPortfolio[] }>('/api/v1/portfolios', {
     method: 'GET'
@@ -255,13 +326,10 @@ export function deleteSnapshot(snapshotId: number) {
 
 export function updateSnapshot(
   snapshotId: number,
-  payload: { name?: string; note?: string; rows?: PortfolioRowInput[] }
+  payload: { name?: string; note?: string }
 ) {
   return requestJson<{ snapshot: SnapshotSummary }>(`/api/v1/portfolios/snapshots/${snapshotId}`, {
     method: 'PATCH',
-    body: JSON.stringify({
-      ...payload,
-      rows: payload.rows ? normalizePortfolioRows(payload.rows) : undefined
-    })
+    body: JSON.stringify(payload)
   });
 }

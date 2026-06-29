@@ -19,6 +19,15 @@ IPS Pilot is an IPS inspection workbench built around a single v2 evaluation fra
 - Main result surfaces: Layer Dashboard, Asset Evaluation Table, Review Queue, Journal Draft
 - Guardrails: no automatic buy/sell output, no execution flags, and no order-sizing recommendation surface
 
+## Review Copilot A2UI
+
+Review Copilot may render only the `ips-pilot-review/v1` declarative surfaces:
+
+- `ReviewQueueTriageSurface`
+- `JournalDraftComposerSurface`
+
+The allowed disposition vocabulary is limited to `include_in_journal`, `observe`, `review_thesis`, and `defer_until_next_review`. Buy/sell, order sizing, immediate rebalance, and broker execution actions are blocked by prompt rules, schema validation, and renderer allowlists.
+
 ## Development
 
 ```bash

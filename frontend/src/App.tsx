@@ -19,8 +19,8 @@ import {
   type AnalysisResponse,
   type AssetRow,
   type EvaluationRecord,
+  type EvaluationRun,
   type EvaluationResponse,
-  type ReviewItem,
   type SavedPortfolio,
   type SnapshotLoadResponse,
   type SnapshotSummary,
@@ -31,6 +31,8 @@ import {
   loadSnapshot,
   runAnalysis,
   runEvaluation,
+  runSnapshotEvaluation,
+  saveSnapshotEvaluation,
   saveSnapshot,
   submitPortfolio,
   updateSnapshot
@@ -43,6 +45,16 @@ import {
   type ThesisStatusInput
 } from './lib/schemas';
 import { ReviewCopilot, ReviewCopilotHost } from './copilot/ReviewCopilot';
+import { GeneratedSurfaceHost } from './a2ui/GeneratedSurfaceHost';
+import { GenerativeUiProvider, useGenerativeUi } from './a2ui/GenerativeUiContext';
+import { ReviewQueueTriageSurface } from './a2ui/renderers/ReviewQueueTriageSurface';
+import { requestReviewQueueAgentExplanations } from './a2ui/utils/agentExplanations';
+import {
+  buildReviewQueueTriageSurface,
+  defaultReviewDecisionsFromEvaluation,
+  mergeReviewQueueAgentExplanations
+} from './a2ui/utils/builders';
+import { validateReviewA2UISurface } from './a2ui/utils/validation';
 
 const DEFAULT_BENCHMARK = 'SPY:80,QQQ:20';
 
@@ -82,7 +94,7 @@ type PortfolioInputRow = {
 };
 
 type WorkflowPending = 'portfolio' | 'analysis' | 'evaluation' | null;
-type ManagementPending = 'portfolios' | 'portfolio' | 'save' | 'snapshot' | 'delete' | 'update' | null;
+type ManagementPending = 'portfolios' | 'portfolio' | 'save' | 'snapshot' | 'delete' | 'update' | 'evaluation-save' | null;
 type SnapshotModalMode = 'create' | 'edit';
 type SortDirection = 'asc' | 'desc';
 type SortState<ColumnId extends string> = { column: ColumnId; direction: SortDirection } | null;
@@ -280,6 +292,20 @@ function normalizedLayerBenchmarks(layerBenchmarks: Record<LayerType, string>) {
   ) as Record<LayerType, string>;
 }
 
+function isEvaluationPeriod(value: string | null | undefined): value is '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'Max' {
+  return value === '1M' || value === '3M' || value === '6M' || value === 'YTD' || value === '1Y' || value === 'Max';
+}
+
+function layerBenchmarksFromEvaluationRun(evaluationRun: EvaluationRun | null) {
+  const savedBenchmarks = evaluationRun?.settings.layer_benchmarks ?? {};
+  return Object.fromEntries(
+    layerValues.map((layer) => {
+      const value = savedBenchmarks[layer];
+      return [layer, value ? String(value).trim().toUpperCase() : DEFAULT_LAYER_BENCHMARKS[layer]];
+    })
+  ) as Record<LayerType, string>;
+}
+
 function todayIsoDate() {
   const date = new Date();
   const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
@@ -346,6 +372,35 @@ function ErrorBanner({ message }: { message: string | null }) {
       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
       <span>{message}</span>
     </div>
+  );
+}
+
+function EvaluationRunHeader({ evaluationRun }: { evaluationRun: EvaluationRun | null }) {
+  if (evaluationRun === null) {
+    return (
+      <section className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600">
+        임시 평가 결과입니다. 보유현황 스냅샷을 선택한 뒤 다시 평가하면 평가 기록으로 저장됩니다.
+      </section>
+    );
+  }
+
+  const statusText = evaluationRun.status === 'active' ? '최신 평가' : '이전 평가';
+
+  return (
+    <section className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 md:flex-row md:items-center md:justify-between">
+      <div>
+        평가 기록 #{evaluationRun.id} · {statusText} · 생성 {formatSnapshotTimestamp(evaluationRun.created_at)}
+      </div>
+      {evaluationRun.is_stale ? (
+        <span className="inline-flex w-fit rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-800">
+          재평가 권장
+        </span>
+      ) : (
+        <span className="inline-flex w-fit rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-800">
+          현재 설정과 호환
+        </span>
+      )}
+    </section>
   );
 }
 
@@ -796,35 +851,91 @@ function AssetEvaluationTable({ rows }: { rows: EvaluationRecord[] }) {
   );
 }
 
-function ReviewQueue({ rows }: { rows: ReviewItem[] }) {
+function ReviewQueue({ evaluation }: { evaluation: EvaluationResponse }) {
+  const {
+    applySurfacePatch,
+    clearSurface,
+    reviewDecisions,
+    reviewQueueSurface,
+    setReviewDecisions,
+    updateReviewDecision
+  } = useGenerativeUi();
+  const defaultSurface = useMemo(() => buildReviewQueueTriageSurface(evaluation), [evaluation]);
+  const defaultReviewDecisions = useMemo(() => defaultReviewDecisionsFromEvaluation(evaluation), [evaluation]);
+  const currentReviewItemIds = useMemo(
+    () => new Set(defaultReviewDecisions.map((decision) => decision.review_item_id)),
+    [defaultReviewDecisions]
+  );
+  const defaultSurfaceSignature = useMemo(
+    () =>
+      defaultSurface.groups
+        .flatMap((group) => group.items.map((item) => `${item.id}:${item.status}`))
+        .join('|'),
+    [defaultSurface]
+  );
+  const generatedSurfaceSignature = useMemo(
+    () =>
+      reviewQueueSurface?.groups
+        .flatMap((group) => group.items.map((item) => `${item.id}:${item.status}`))
+        .join('|'),
+    [reviewQueueSurface]
+  );
+  const hasCurrentReviewDecisions =
+    reviewDecisions.length === defaultReviewDecisions.length &&
+    reviewDecisions.every((decision) => currentReviewItemIds.has(decision.review_item_id));
+  const generatedSurfaceMatchesEvaluation =
+    reviewQueueSurface?.evaluation_period.label === evaluation.evaluation_period.label &&
+    reviewQueueSurface.evaluation_period.start_date === evaluation.evaluation_period.start_date &&
+    reviewQueueSurface.evaluation_period.end_date === evaluation.evaluation_period.end_date &&
+    generatedSurfaceSignature === defaultSurfaceSignature;
+
+  useEffect(() => {
+    clearSurface('review_queue');
+    setReviewDecisions(defaultReviewDecisions);
+  }, [clearSurface, defaultReviewDecisions, evaluation, setReviewDecisions]);
+
+  useEffect(() => {
+    if (evaluation.review_queue.length === 0) return;
+    const controller = new AbortController();
+
+    requestReviewQueueAgentExplanations({
+      signal: controller.signal,
+      source: 'automatic',
+      surface: defaultSurface
+    })
+      .then((patch) => {
+        const surface = mergeReviewQueueAgentExplanations(defaultSurface, patch);
+        const validation = validateReviewA2UISurface(surface);
+        if (!validation.ok || validation.surface.component !== 'ReviewQueueTriageSurface') return;
+        applySurfacePatch({
+          target: 'review_queue',
+          surface: 'ReviewQueueTriageSurface',
+          mode: 'replace',
+          payload: validation.surface
+        });
+      })
+      .catch(() => {
+        // Review Copilot runtime is optional for the base inspection board.
+      });
+
+    return () => controller.abort();
+  }, [applySurfacePatch, defaultSurface, evaluation.review_queue.length]);
+
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center gap-2">
         <ClipboardList className="h-5 w-5 text-cyan-800" />
         <h2 className="text-base font-bold text-slate-950">점검 큐</h2>
       </div>
-      {rows.length === 0 ? (
+      {evaluation.review_queue.length === 0 ? (
         <p className="mt-3 text-sm font-semibold text-slate-500">점검 큐가 비어 있습니다.</p>
       ) : (
-        <div className="mt-3 grid gap-3">
-          {rows.map((item) => (
-            <div key={`${item.level}-${item.name}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <StatusBadge status={item.status} />
-                <strong className="text-slate-950">{item.name}</strong>
-                <span className="text-sm font-semibold text-slate-500">{item.level === 'layer' ? '계층' : '종목'}</span>
-                {item.parent_layer && <span className="text-sm font-semibold text-slate-500">{layerLabel(item.parent_layer)}</span>}
-              </div>
-              <div className="mt-2 text-sm text-slate-700">{item.suggested_next_step}</div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {item.triggered_by.map((reason) => (
-                  <span key={reason} className="rounded-md bg-white px-2 py-1 text-xs font-bold text-slate-600">
-                    {reason}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
+        <div className="mt-3">
+          <ReviewQueueTriageSurface
+            surface={generatedSurfaceMatchesEvaluation ? reviewQueueSurface : defaultSurface}
+            decisions={hasCurrentReviewDecisions ? reviewDecisions : defaultReviewDecisions}
+            onDecisionChange={updateReviewDecision}
+          />
         </div>
       )}
     </section>
@@ -847,6 +958,9 @@ function JournalDraft({ rows }: { rows: Array<Record<string, unknown>> }) {
           ))}
         </ul>
       )}
+      <div className="mt-3">
+        <GeneratedSurfaceHost target="journal_draft" />
+      </div>
     </section>
   );
 }
@@ -1017,14 +1131,14 @@ function DeleteSnapshotConfirmModal({
           </div>
           <div className="min-w-0 flex-1">
             <h2 id="delete-snapshot-title" className="text-lg font-bold text-slate-950">
-              스냅샷을 정말 삭제할까요?
+              보유현황 스냅샷을 정말 삭제할까요?
             </h2>
             <p className="mt-1 text-sm font-semibold text-slate-500">
-              삭제하면 이 스냅샷과 저장된 분석/평가 데이터를 되돌릴 수 없습니다.
+              삭제하면 이 보유현황 스냅샷과 저장된 평가 기록을 되돌릴 수 없습니다.
             </p>
           </div>
           <button
-            aria-label="스냅샷 삭제 확인 닫기"
+            aria-label="보유현황 스냅샷 삭제 확인 닫기"
             className="inline-grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-300"
             disabled={isBusy}
             type="button"
@@ -1103,7 +1217,8 @@ function SnapshotModal({
 }) {
   if (!isOpen) return null;
   const isBusy = pending === 'save' || pending === 'update';
-  const title = mode === 'create' ? '스냅샷 추가' : '스냅샷 수정';
+  const title = mode === 'create' ? '보유현황 스냅샷 추가' : '보유현황 스냅샷 정보 수정';
+  const showPositionEditor = mode === 'create';
 
   return (
     <div
@@ -1125,11 +1240,13 @@ function SnapshotModal({
               {title}
             </h2>
             <p className="mt-1 text-sm font-semibold text-slate-500">
-              포트폴리오 행을 편집한 뒤 스냅샷으로 저장합니다.
+              {showPositionEditor
+                ? '현재 포트폴리오 행을 고정된 보유현황 기록으로 저장합니다.'
+                : '보유현황 스냅샷의 이름과 메모만 수정합니다.'}
             </p>
           </div>
           <button
-            aria-label="스냅샷 모달 닫기"
+            aria-label="보유현황 스냅샷 모달 닫기"
             className="inline-grid h-9 w-9 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-300"
             disabled={isBusy}
             type="button"
@@ -1147,7 +1264,7 @@ function SnapshotModal({
                 autoFocus
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
                 disabled={isBusy}
-                placeholder="저장된 스냅샷"
+                placeholder="저장된 보유현황 스냅샷"
                 value={name}
                 onChange={(event) => onNameChange(event.target.value)}
               />
@@ -1164,15 +1281,17 @@ function SnapshotModal({
             </label>
           </div>
 
-          <PortfolioInputTable
-            rows={rows}
-            allocationTotal={allocationTotal}
-            rowErrors={rowErrors}
-            onAdd={onAdd}
-            onDelete={onDelete}
-            onChange={onChange}
-          />
-          {allocationWarning ? (
+          {showPositionEditor ? (
+            <PortfolioInputTable
+              rows={rows}
+              allocationTotal={allocationTotal}
+              rowErrors={rowErrors}
+              onAdd={onAdd}
+              onDelete={onDelete}
+              onChange={onChange}
+            />
+          ) : null}
+          {showPositionEditor && allocationWarning ? (
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
               {allocationWarning}
             </div>
@@ -1186,7 +1305,7 @@ function SnapshotModal({
 
         <div className="flex flex-col gap-3 border-t border-slate-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm font-semibold text-slate-500">
-            입력 합계 {allocationTotal.toFixed(2)}%
+            {showPositionEditor ? `입력 합계 ${allocationTotal.toFixed(2)}%` : '포지션 변경은 새 보유현황 스냅샷으로 저장합니다.'}
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
           <button
@@ -1204,7 +1323,7 @@ function SnapshotModal({
             onClick={onSubmit}
           >
             {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : mode === 'create' ? <Plus className="h-4 w-4" /> : <PencilLine className="h-4 w-4" />}
-            {mode === 'create' ? '추가' : '수정'}
+            {mode === 'create' ? '추가' : '정보 수정'}
           </button>
           </div>
         </div>
@@ -1281,13 +1400,13 @@ function PortfolioContextBar({
           </div>
           <p className="min-h-4 text-xs font-semibold text-slate-500">
             {selectedPortfolio?.latest_snapshot
-              ? `최근 스냅샷 저장 ${formatSnapshotTimestamp(selectedPortfolio.latest_snapshot.updated_at)}`
+              ? `최근 보유현황 저장 ${formatSnapshotTimestamp(selectedPortfolio.latest_snapshot.updated_at)}`
               : '\u00A0'}
           </p>
         </div>
 
         <div className="grid min-w-0 gap-1">
-          <span className="text-sm font-bold text-slate-700">스냅샷 선택</span>
+          <span className="text-sm font-bold text-slate-700">보유현황 스냅샷 선택</span>
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_repeat(3,42px)]">
             <select
               className="min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100 disabled:text-slate-400"
@@ -1298,7 +1417,7 @@ function PortfolioContextBar({
                 onSelectSnapshot(snapshot ?? null);
               }}
             >
-              <option value="">{snapshots.length === 0 ? '스냅샷 없음' : '스냅샷 선택 안 함'}</option>
+              <option value="">{snapshots.length === 0 ? '보유현황 없음' : '보유현황 선택 안 함'}</option>
               {snapshots.map((snapshot) => (
                 <option key={snapshot.id} value={snapshot.id}>
                   {snapshot.name}
@@ -1306,20 +1425,20 @@ function PortfolioContextBar({
               ))}
             </select>
             <button
-              aria-label="스냅샷 추가"
+              aria-label="보유현황 스냅샷 추가"
               className="inline-grid h-[42px] w-full place-items-center rounded-lg bg-slate-900 text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!canOpenSnapshotCreate}
-              title="스냅샷 추가"
+              title="보유현황 스냅샷 추가"
               type="button"
               onClick={onOpenSnapshotCreate}
             >
               <Plus className="h-4 w-4" />
             </button>
             <button
-              aria-label="선택한 스냅샷 수정"
+              aria-label="선택한 보유현황 스냅샷 정보 수정"
               className="inline-grid h-[42px] w-full place-items-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
               disabled={!canEditSnapshot}
-              title="선택한 스냅샷 수정"
+              title="선택한 보유현황 스냅샷 정보 수정"
               type="button"
               onClick={() => {
                 if (selectedSnapshot) onEditSnapshot(selectedSnapshot);
@@ -1328,10 +1447,10 @@ function PortfolioContextBar({
               <PencilLine className="h-4 w-4" />
             </button>
             <button
-              aria-label="선택한 스냅샷 삭제"
+              aria-label="선택한 보유현황 스냅샷 삭제"
               className="inline-grid h-[42px] w-full place-items-center rounded-lg border border-red-200 bg-white text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300"
               disabled={!canDeleteSnapshot}
-              title="선택한 스냅샷 삭제"
+              title="선택한 보유현황 스냅샷 삭제"
               type="button"
               onClick={() => {
                 if (selectedSnapshot) onDeleteSnapshot(selectedSnapshot);
@@ -1362,6 +1481,7 @@ export function App() {
   const [portfolio, setPortfolio] = useState<AssetRow[]>([]);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [evaluation, setEvaluation] = useState<EvaluationResponse | null>(null);
+  const [evaluationRun, setEvaluationRun] = useState<EvaluationRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<WorkflowPending>(null);
   const [savedPortfolios, setSavedPortfolios] = useState<SavedPortfolio[]>([]);
@@ -1383,9 +1503,22 @@ export function App() {
 
   function applyLoadedState(response: SnapshotLoadResponse) {
     const loadedRows = inputRowsFromAssets(response.portfolio.assets);
+    const loadedEvaluationRun = response.evaluation_run;
     setPortfolio(response.portfolio.assets);
     setAnalysis(response.analysis);
     setEvaluation(response.evaluation);
+    setEvaluationRun(loadedEvaluationRun);
+    if (loadedEvaluationRun !== null) {
+      const settings = loadedEvaluationRun.settings;
+      if (isEvaluationPeriod(settings.period)) {
+        setPeriod(settings.period);
+      }
+      const loadedAsOfDate = settings.as_of_date || settings.end_date;
+      if (loadedAsOfDate) {
+        setAsOfDate(loadedAsOfDate);
+      }
+      setLayerBenchmarks(layerBenchmarksFromEvaluationRun(loadedEvaluationRun));
+    }
     setInputRows(loadedRows);
     setNextRowId(loadedRows.length + 1);
   }
@@ -1394,6 +1527,7 @@ export function App() {
     setPortfolio([]);
     setAnalysis(null);
     setEvaluation(null);
+    setEvaluationRun(null);
     setInputRows(initialRows);
     setNextRowId(initialRows.length + 1);
   }
@@ -1460,7 +1594,7 @@ export function App() {
         const loadedSnapshots = await refreshSnapshots(portfolioId);
         if (ignore) return;
         if (loadedSnapshots.length === 0) {
-          setManagementNotice('선택한 포트폴리오에 저장된 스냅샷이 없습니다.');
+          setManagementNotice('선택한 포트폴리오에 저장된 보유현황 스냅샷이 없습니다.');
         }
       } catch (err) {
         if (!ignore) setManagementError(err instanceof Error ? err.message : '포트폴리오 상태를 불러오지 못했습니다.');
@@ -1499,6 +1633,8 @@ export function App() {
   const canRunWorkflow = pending === null && meaningfulRows.length > 0 && rowErrors.size === 0;
   const canRunEvaluationOnly = pending === null && portfolio.length > 0;
   const selectedSnapshot = snapshots.find((snapshot) => snapshot.id === selectedSnapshotId) ?? null;
+  const canSaveEvaluationRun =
+    selectedSnapshotId !== null && evaluation !== null && evaluationRun === null && pending === null && managementPending === null;
   const snapshotMeaningfulRows = useMemo(() => snapshotRows.filter(isMeaningfulRow), [snapshotRows]);
   const snapshotAllocationTotal = useMemo(
     () => snapshotMeaningfulRows.reduce((sum, row) => {
@@ -1513,7 +1649,9 @@ export function App() {
       ? `입력 합계가 100%와 ${(snapshotAllocationTotal - 100).toFixed(2)}%p 차이납니다. 백엔드는 입력 비중을 기준으로 정규화합니다.`
       : null;
   const canSubmitSnapshot =
-    managementPending === null && snapshotModalName.trim() !== '' && snapshotMeaningfulRows.length > 0 && snapshotRowErrors.size === 0;
+    managementPending === null &&
+    snapshotModalName.trim() !== '' &&
+    (snapshotModalMode === 'edit' || (snapshotMeaningfulRows.length > 0 && snapshotRowErrors.size === 0));
   const canCreateSnapshot = selectedPortfolioId !== null && meaningfulRows.length > 0;
   const copilotLayerBenchmarks = useMemo(() => normalizedLayerBenchmarks(layerBenchmarks), [layerBenchmarks]);
   const copilotSettings = useMemo(
@@ -1593,7 +1731,7 @@ export function App() {
     setManagementError(null);
     setManagementNotice(null);
     setSnapshotModalMode('create');
-    setSnapshotModalName(baseSnapshot?.name ?? '저장된 스냅샷');
+    setSnapshotModalName(baseSnapshot?.name ?? '저장된 보유현황 스냅샷');
     setSnapshotModalNote(baseSnapshot?.note ?? '');
     setSnapshotRows(baseRows.map((row, index) => ({ ...row, id: `snapshot-create-${index}` })));
     setNextSnapshotRowId(baseRows.length + 1);
@@ -1615,19 +1753,21 @@ export function App() {
   async function submitSnapshotModal() {
     if (selectedPortfolioId === null) return;
     if (snapshotModalName.trim() === '') {
-      setManagementError('스냅샷 이름을 입력해주세요.');
+      setManagementError('보유현황 스냅샷 이름을 입력해주세요.');
       return;
     }
-    if (!canSubmitSnapshot) {
+    if (snapshotModalMode === 'create' && !canSubmitSnapshot) {
       setManagementError(snapshotMeaningfulRows.length === 0 ? '최소 1개 이상의 티커와 비중을 입력해주세요.' : '입력 오류를 먼저 확인해주세요.');
       return;
     }
 
-    const payload = {
+    const payload: { name: string; note: string; rows?: PortfolioRowInput[] } = {
       name: snapshotModalName.trim(),
-      note: snapshotModalNote,
-      rows: toPortfolioPayload(snapshotRows)
+      note: snapshotModalNote
     };
+    if (snapshotModalMode === 'create') {
+      payload.rows = toPortfolioPayload(snapshotRows);
+    }
 
     setManagementPending(snapshotModalMode === 'create' ? 'save' : 'update');
     setManagementError(null);
@@ -1650,7 +1790,7 @@ export function App() {
       setSnapshotModalOpen(false);
       setToastMessage(`${response.snapshot.name}을 ${snapshotModalMode === 'create' ? '추가' : '수정'}했습니다.`);
     } catch (err) {
-      setManagementError(err instanceof Error ? err.message : '스냅샷을 저장하지 못했습니다.');
+      setManagementError(err instanceof Error ? err.message : '보유현황 스냅샷을 저장하지 못했습니다.');
     } finally {
       setManagementPending(null);
     }
@@ -1668,7 +1808,7 @@ export function App() {
       await refreshPortfolioList(response.snapshot.portfolio_id);
       setToastMessage(`${snapshot.name}을 불러왔습니다.`);
     } catch (err) {
-      setManagementError(err instanceof Error ? err.message : '스냅샷을 불러오지 못했습니다.');
+      setManagementError(err instanceof Error ? err.message : '보유현황 스냅샷을 불러오지 못했습니다.');
     } finally {
       setManagementPending(null);
     }
@@ -1687,7 +1827,7 @@ export function App() {
       setSnapshotPendingDelete(null);
       setToastMessage(`${snapshot.name}을 삭제했습니다.`);
     } catch (err) {
-      setManagementError(err instanceof Error ? err.message : '스냅샷을 삭제하지 못했습니다.');
+      setManagementError(err instanceof Error ? err.message : '보유현황 스냅샷을 삭제하지 못했습니다.');
     } finally {
       setManagementPending(null);
     }
@@ -1705,9 +1845,11 @@ export function App() {
       const analysisBenchmark = evaluationLayerBenchmarks.core;
       setPending('portfolio');
       const portfolioData = await submitPortfolio(toPortfolioPayload(inputRows));
+      setSelectedSnapshotId(null);
       setPortfolio(portfolioData.assets);
       setAnalysis(null);
       setEvaluation(null);
+      setEvaluationRun(null);
 
       setPending('analysis');
       const analysisData = await runAnalysis({
@@ -1719,6 +1861,7 @@ export function App() {
       });
       setAnalysis(analysisData);
       setEvaluation(null);
+      setEvaluationRun(null);
 
       setPending('evaluation');
       const evaluationData = await runEvaluation({
@@ -1728,6 +1871,7 @@ export function App() {
         layer_benchmarks: evaluationLayerBenchmarks
       });
       setEvaluation(evaluationData);
+      setEvaluationRun(null);
       setInputModalOpen(false);
       if (portfolioData.warnings.length > 0) {
         setError(portfolioData.warnings.join(' '));
@@ -1749,25 +1893,40 @@ export function App() {
     try {
       const evaluationLayerBenchmarks = normalizedLayerBenchmarks(layerBenchmarks);
       const analysisBenchmark = evaluationLayerBenchmarks.core;
-      setPending('analysis');
-      const analysisData = await runAnalysis({
-        period: analysisPeriodFromEvaluationPeriod(period),
-        as_of_date: asOfDate,
-        rf: ANALYSIS_DEFAULT_RF,
-        bench: analysisBenchmark,
-        layer_benchmarks: evaluationLayerBenchmarks
-      });
-      setAnalysis(analysisData);
-      setEvaluation(null);
+      if (selectedSnapshotId !== null) {
+        setPending('evaluation');
+        const snapshotEvaluation = await runSnapshotEvaluation(selectedSnapshotId, {
+          period,
+          as_of_date: asOfDate,
+          bench: analysisBenchmark,
+          layer_benchmarks: evaluationLayerBenchmarks
+        });
+        setAnalysis(snapshotEvaluation.analysis);
+        setEvaluation(snapshotEvaluation.evaluation);
+        setEvaluationRun(null);
+      } else {
+        setPending('analysis');
+        const analysisData = await runAnalysis({
+          period: analysisPeriodFromEvaluationPeriod(period),
+          as_of_date: asOfDate,
+          rf: ANALYSIS_DEFAULT_RF,
+          bench: analysisBenchmark,
+          layer_benchmarks: evaluationLayerBenchmarks
+        });
+        setAnalysis(analysisData);
+        setEvaluation(null);
+        setEvaluationRun(null);
 
-      setPending('evaluation');
-      const evaluationData = await runEvaluation({
-        period,
-        as_of_date: asOfDate,
-        bench: analysisBenchmark,
-        layer_benchmarks: evaluationLayerBenchmarks
-      });
-      setEvaluation(evaluationData);
+        setPending('evaluation');
+        const evaluationData = await runEvaluation({
+          period,
+          as_of_date: asOfDate,
+          bench: analysisBenchmark,
+          layer_benchmarks: evaluationLayerBenchmarks
+        });
+        setEvaluation(evaluationData);
+        setEvaluationRun(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '평가 실행에 실패했습니다.');
     } finally {
@@ -1775,8 +1934,35 @@ export function App() {
     }
   }
 
+  async function saveCurrentEvaluationRun() {
+    if (selectedSnapshotId === null || evaluation === null) {
+      setManagementError('보유현황 스냅샷과 평가 결과가 있어야 평가 기록을 저장할 수 있습니다.');
+      return;
+    }
+
+    setManagementPending('evaluation-save');
+    setManagementError(null);
+    setManagementNotice(null);
+    setToastMessage(null);
+    try {
+      const response = await saveSnapshotEvaluation(selectedSnapshotId);
+      setEvaluation(response.evaluation);
+      setEvaluationRun(response.evaluation_run);
+      if (selectedPortfolioId !== null) {
+        await refreshSnapshots(selectedPortfolioId);
+        await refreshPortfolioList(selectedPortfolioId);
+      }
+      setToastMessage(`평가 기록 #${response.evaluation_run.id}을 최신 평가로 저장했습니다.`);
+    } catch (err) {
+      setManagementError(err instanceof Error ? err.message : '평가 기록을 저장하지 못했습니다.');
+    } finally {
+      setManagementPending(null);
+    }
+  }
+
   return (
     <ReviewCopilotHost>
+    <GenerativeUiProvider>
     <main className="min-h-screen bg-slate-100 p-4 text-slate-900 md:p-8">
       <div className="mx-auto grid max-w-7xl gap-5">
         <header className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-5 md:flex-row md:items-center md:justify-between">
@@ -1873,11 +2059,24 @@ export function App() {
                 onClick={runEvaluationOnlyWorkflow}
               >
                 {pending === 'analysis' || pending === 'evaluation' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                평가 실행
+                {selectedSnapshotId === null ? '평가 실행' : '다시 평가'}
+              </button>
+              <button
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+                disabled={!canSaveEvaluationRun}
+                type="button"
+                onClick={saveCurrentEvaluationRun}
+              >
+                {managementPending === 'evaluation-save' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />}
+                평가 기록 저장
               </button>
               {portfolio.length === 0 ? (
                 <p className="text-sm font-semibold text-slate-500">
                   포트폴리오를 입력하면 평가를 실행할 수 있습니다.
+                </p>
+              ) : selectedSnapshotId === null ? (
+                <p className="text-sm font-semibold text-slate-500">
+                  평가 기록 저장은 보유현황 스냅샷을 선택한 뒤 사용할 수 있습니다.
                 </p>
               ) : null}
             </div>
@@ -1888,9 +2087,10 @@ export function App() {
 
         {evaluation ? (
           <>
+            <EvaluationRunHeader evaluationRun={evaluationRun} />
             <LayerDashboard rows={evaluation.layer_evaluations} />
             <AssetEvaluationTable rows={evaluation.asset_evaluations} />
-            <ReviewQueue rows={evaluation.review_queue} />
+            <ReviewQueue evaluation={evaluation} />
             <JournalDraft rows={evaluation.journal_draft} />
           </>
         ) : (
@@ -1961,6 +2161,7 @@ export function App() {
       />
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
     </main>
+    </GenerativeUiProvider>
     </ReviewCopilotHost>
   );
 }

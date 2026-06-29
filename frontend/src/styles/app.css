@@ -16,8 +16,11 @@
 
 body {
   margin: 0;
+  /* CopilotSidebar writes body margin inline to push content; keep the workbench stable and let it overlay. */
+  margin-inline-end: 0 !important;
   min-width: 320px;
   background: #f5f7fb;
+  transition: none !important;
 }
 
 button,
