@@ -8,9 +8,11 @@ import { z } from 'zod';
 import { IPS_PILOT_REVIEW_CATALOG_ID } from '../a2ui/catalogs/ipsPilotReviewCatalog';
 import { useGenerativeUi } from '../a2ui/GenerativeUiContext';
 import { reviewDecisionSchema } from '../a2ui/schemas/journalDraftComposer.schema';
+import { evaluationGraphChartSchema } from '../a2ui/schemas/evaluationGraph.schema';
 import type {
   A2UiAppSurfaceEnvelope,
   AppSurfaceTarget,
+  EvaluationGraphSurfacePayload,
   ReviewA2UISurfacePayload,
   ReviewDecision
 } from '../a2ui/types';
@@ -68,6 +70,12 @@ const createJournalDraftComposerInputSchema = z.object({
   decision_context: z.enum(['regular_review', 'market_correction', 'sharp_drop_review', 'rebalance_review']),
   review_decisions: z.array(reviewDecisionSchema).optional(),
   include_observe_and_deferred: z.boolean().optional()
+});
+
+const applyEvaluationGraphSurfaceInputSchema = z.object({
+  mode: z.enum(['replace', 'append']),
+  title: z.string().min(1).optional(),
+  charts: z.array(evaluationGraphChartSchema).min(1).max(8)
 });
 
 export type ReviewCopilotSettings = {
@@ -225,6 +233,23 @@ function draftJournalNote(
   };
 }
 
+function buildRequestedEvaluationGraphSurface(
+  evaluation: EvaluationResponse,
+  input: z.infer<typeof applyEvaluationGraphSurfaceInputSchema>
+): EvaluationGraphSurfacePayload {
+  return {
+    component: 'EvaluationGraphSurface',
+    catalog_id: IPS_PILOT_REVIEW_CATALOG_ID,
+    title: input.title ?? '요청 기반 평가 그래프',
+    evaluation_period: evaluation.evaluation_period,
+    guardrail_notice: {
+      text: '이 그래프는 계층/종목 평가 테이블 값을 재구성한 점검용 시각화이며, 매수/매도 지시나 주문 수량 산정이 아닙니다.'
+    },
+    mode_hint: input.mode,
+    charts: input.charts
+  };
+}
+
 export function ReviewCopilotHost({ children }: ReviewCopilotHostProps) {
   return (
     <CopilotKit
@@ -329,6 +354,41 @@ export function ReviewCopilot({ portfolio, evaluation, settings, onAnalysis, onE
       }
     },
     [applySurfacePatch, evaluation, reviewDecisions]
+  );
+
+  useFrontendTool(
+    {
+      name: 'applyEvaluationGraphSurface',
+      description:
+        'Apply an ips-pilot-review/v1 EvaluationGraphSurface to the main evaluation graph area. Use replace when the user asks to change, redraw, or show instead of the current graph; use append when the user asks to add another graph. Charts must use only current layer_evaluations or asset_evaluations fields.',
+      parameters: applyEvaluationGraphSurfaceInputSchema,
+      followUp: false,
+      handler: async (input) => {
+        if (!evaluation) {
+          return '평가 결과가 아직 없어 그래프를 본문에 반영하지 못했습니다. 먼저 평가를 실행하세요.';
+        }
+
+        const surface = buildRequestedEvaluationGraphSurface(evaluation, input);
+        const validation = applyA2UiAppSurfacePayload(
+          appSurfaceEnvelope('evaluation_graphs', surface),
+          applySurfacePatch
+        );
+        if (!validation.ok) {
+          console.error('[review-copilot:evaluation-graphs]', validation.validation_errors);
+          return surfaceApplicationResult('', validation);
+        }
+        return surfaceApplicationResult(
+          input.mode === 'append'
+            ? '요청한 평가 그래프를 본문 그래프 영역에 추가했습니다.'
+            : '본문 평가 그래프를 요청한 기준으로 변경했습니다.',
+          validation
+        );
+      },
+      render: ({ status, result }) => {
+        return <ToolStatusMessage pendingLabel="평가 그래프 surface 준비 중..." result={result} status={status} />;
+      }
+    },
+    [applySurfacePatch, evaluation]
   );
 
   useFrontendTool(
