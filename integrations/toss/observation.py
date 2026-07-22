@@ -145,7 +145,7 @@ def _market_amount(item: Mapping[str, Any], key: str, field: str) -> Decimal:
 
 
 def _purchase_amount(item: Mapping[str, Any], field: str) -> Decimal:
-    value = item.get("cost")
+    value = item.get("marketValue")
     if not isinstance(value, Mapping):
         raise ObservationError(f"missing {field}")
     return _decimal(value.get("purchaseAmount"), field)
@@ -423,7 +423,9 @@ class TossObservationService:
                         _market_amount(item, "marketValue", "marketValue.amount")
                     ),
                     market_value_krw=None,
-                    cost_native=float(_purchase_amount(item, "cost.purchaseAmount")),
+                    cost_native=float(
+                        _purchase_amount(item, "marketValue.purchaseAmount")
+                    ),
                     cost_krw=None,
                     profit_loss_native=float(
                         _market_amount(item, "profitLoss", "profitLoss.amount")

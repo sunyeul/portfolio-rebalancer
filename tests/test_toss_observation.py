@@ -138,9 +138,8 @@ def _holdings_response(market_value="7200000"):
                         "amountAfterCost": "7190000",
                     },
                     "cost": {
-                        "purchaseAmount": "6500000",
-                        "amount": "6500000",
-                        "amountAfterCost": "6500000",
+                        "commission": "0",
+                        "tax": "0",
                     },
                     "profitLoss": {
                         "amount": "700000",
@@ -177,6 +176,7 @@ def test_collect_normalizes_holdings_cash_fx_and_orders():
     assert snapshot.account_alias == "toss-brokerage"
     assert snapshot.holdings[0].market_value_native == pytest.approx(7200000)
     assert snapshot.holdings[0].market_value_krw == pytest.approx(7200000)
+    assert snapshot.holdings[0].cost_native == pytest.approx(6500000)
     assert snapshot.cash_by_currency["KRW"] == pytest.approx(1000000)
     assert snapshot.cash_by_currency["USD"] == pytest.approx(100)
     assert snapshot.cash_value_krw == pytest.approx(1140000)
