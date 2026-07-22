@@ -1,294 +1,335 @@
-# Cash and Account Observability Roadmap Design
+# Toss-only Account Inspection Roadmap
 
-**Date:** 2026-07-22  
-**Status:** Approved roadmap; implementation requires phase-specific plans  
+**Created:** 2026-07-22  
+**Revised:** 2026-07-23  
+**Status:** Approved roadmap; Phase 2.5 is the next implementation phase  
 **Product:** IPS Pilot
 
-## Context
+## Product Direction
 
-The user must continue operating the portfolio without relying on new external contributions. The account therefore needs an explicit, durable cash reserve so that market declines do not leave all capital committed. The user also needs to observe principal, account value, and profit/loss history and to inspect whether gains, losses, allocation drift, or thesis damage warrant human review.
+IPS Pilot is a Toss Securities-specific IPS inspection workbench. Toss Open API
+is the only source of account facts and market data. The app observes immutable
+account state, tracks principal and performance, manages brokerage cash as an
+explicit reserve, and produces evidence-backed human review signals.
 
-IPS Pilot remains an IPS inspection workbench. It must not become an automated trading recommender. All outputs remain inspection signals using exactly `OK`, `Watch`, `Review`, and `Action`. `Action` means inspect possible exceptional intervention, not permission to trade.
+The product does not support manual portfolio input, CSV/TSV upload,
+user-entered ticker analysis, yfinance, generic broker adapters, or
+Japan-account-specific behavior. It does not place, prepare, modify, cancel, or
+size orders.
 
-## Product Outcome
+All investment judgments use exactly `OK`, `Watch`, `Review`, and `Action`.
+`Action` means inspect a possible exceptional intervention, not permission to
+trade. Gains, losses, market declines, or cash deviations are evidence, not
+standalone buy/sell triggers.
 
-IPS Pilot will connect to Toss Securities through an official, read-only Open API integration and provide a reproducible view of:
+## User Outcome
+
+The user must operate the portfolio without relying on new external
+contributions. IPS Pilot therefore provides a reproducible Toss-only view of:
 
 - total account value;
 - invested market value;
-- deployable cash and cash weight;
-- current holdings cost basis;
-- unrealized profit/loss;
-- realized profit/loss only for the period the app can substantiate;
-- principal and account-value history from an explicit tracking baseline;
-- cash-policy inspection against a normal `10% / 15% / 20%` minimum, target, and maximum;
-- evidence-backed review signals that combine account state, IPS limits, market context, and thesis status.
+- deployable brokerage cash and gross cash weight;
+- current holdings cost basis and unrealized profit/loss;
+- tracked realized profit/loss only where Toss evidence is sufficient;
+- user-confirmed tracking principal and external cash-flow adjustments;
+- account value, principal, cash, and supported return history;
+- a normal cash policy of `10% / 15% / 20%` minimum, target, and maximum;
+- `core`, `satellite`, and `experiment` exposure;
+- market context derived only from official Toss market data;
+- explainable review items linked to exact snapshots and policy versions.
 
-The integration never creates, modifies, cancels, sizes, or submits an order.
+## Durable Product Decisions
 
-## Confirmed Decisions
-
-- Broker: Toss Securities.
-- Authentication credentials have already been issued.
-- Integration mode: official Open API, read-only application surface.
-- Managed cash: brokerage-account deployable cash only; living and emergency funds are excluded.
+- Broker and account source: Toss Securities only.
+- Integration: official Toss Open API through a server-side read-only allowlist.
+- Managed cash: deployable cash inside the Toss brokerage account only.
 - Base currency: KRW.
-- Currency handling: KRW and foreign-currency cash are converted to KRW, but they may be aggregated only after proving that Toss purchasing-power responses do not overlap.
-- Normal cash policy: minimum 10%, target 15%, maximum 20%.
-- Dynamic policy: composite market and portfolio signals produce a candidate policy change; the user must approve it.
-- Cash is a portfolio reserve, not a fourth investment layer.
-- Existing `core`, `satellite`, and `experiment` layers remain first-class.
+- Account history: immutable Toss snapshots; latest complete snapshot is current.
+- IPS intent: versioned app-owned policy and Toss-instrument profiles.
+- Cash: portfolio reserve, not a fourth investment layer.
+- Layer model: `core`, `satellite`, and `experiment` remain first-class.
+- Default adjustment posture: review future regular-purchase policy before an
+  immediate trade.
+- No compatibility mode: missing Toss data fails closed rather than falling back
+  to manual input, cached generic data, or yfinance.
 
-## Non-Goals
+## Core Data Model
 
-- Brokerage order execution or order preparation.
-- Automatic buy, sell, take-profit, stop-loss, or rebalance instructions.
-- Order quantities, security-level cash amounts, or execution flags.
-- A claim to reconstruct lifetime performance when the broker API cannot substantiate all historical cash flows and corporate actions.
-- Including non-brokerage emergency or household cash.
-- Phase 4 market-regime thresholds or Phase 5 profit/loss review rules in the first implementation delivery. Those phases require separate approved designs.
+```text
+Toss account API
+  -> normalized immutable account snapshot
+  -> account performance history
+  -> Toss-keyed IPS profiles + versioned policy
+  -> deterministic account projection
+  -> OK / Watch / Review / Action inspection
 
-## Core Definitions
+Toss market-data API
+  -> immutable market observations
+  -> market-context evidence
+  -> policy candidate requiring human approval
+```
 
-### Portfolio value
+### Account facts versus IPS intent
+
+Toss owns quantities, prices, average costs, market values, cash, currency,
+orders, and executions. The app never allows users to edit those facts.
+
+The app owns layer classification, thesis status, cash/layer policy versions,
+evaluation runs, and human review records. This metadata annotates
+Toss-observed instruments and cannot form an independent portfolio.
+
+### Value and weight definitions
 
 `total_account_value_krw = invested_market_value_krw + validated_deployable_cash_krw`
 
-The calculation is valid only for a complete account snapshot whose holdings, purchasing power, and exchange-rate observations are mutually consistent.
-
-### Principal and cost basis
-
-These values must remain distinct:
-
-- **tracking principal:** the user-confirmed account capital at the first complete tracking snapshot, adjusted only by verified later external deposits or withdrawals;
-- **current holdings cost basis:** the broker-reported purchase amount for positions currently held;
-- **unrealized profit/loss:** broker-reported or reproducibly calculated current holdings profit/loss;
-- **tracked realized profit/loss:** realized result that can be supported from complete executions after the tracking baseline.
-
-Current holdings cost basis must never be labeled as lifetime principal.
-
-### Weight denominators
-
-- **gross weight:** weight against total account value, including cash;
-- **invested weight:** weight against invested market value, excluding cash.
-
-Cash policy uses gross weight. Existing layer and asset evaluation uses invested weight. The existing generic `weight` field must not silently change meaning.
-
-### Data quality
-
-Every account snapshot has one of four states:
-
-- `complete`: all required observations succeeded and passed reconciliation;
-- `partial`: at least one required observation is missing or inconsistent;
-- `stale`: source data or call timestamps exceed the allowed freshness window;
-- `failed`: no usable snapshot can be produced.
-
-Only `complete` snapshots may produce cash-policy or profit/loss review signals.
-
-## Target Architecture
-
-```text
-Toss Securities Open API
-  -> allowlisted GET-only Toss adapter
-  -> raw response validation and redaction
-  -> normalized account observation
-  -> reconciliation and data-quality classification
-  -> immutable account snapshot
-  -> valuation and performance projection
-  -> v2 inspection evaluation
-  -> dashboard, Review Queue, and journal evidence
-```
-
-### Toss adapter
-
-The adapter uses OAuth 2.0 Client Credentials and the required account header. It exposes only account, holdings, purchasing-power, exchange-rate, and order-history reads supported by the official OpenAPI document.
-
-The transport layer permits only allowlisted GET endpoints plus `POST /oauth2/token`, which is required by OAuth 2.0 Client Credentials. Every order mutation endpoint remains blocked. The application does not generate a full OpenAPI client that would expose order mutation methods. Client secrets and access tokens remain in environment-backed server configuration and process memory; they are never persisted or returned to the browser.
-
-### Immutable account snapshots
-
-Each successful synchronization creates an immutable observation set with:
-
-- account alias rather than raw account number;
-- source call timestamps and synchronization timestamp;
-- holdings with native-currency and KRW-normalized values;
-- purchasing-power observations by currency;
-- applied exchange rates and rate timestamps;
-- reconciliation result and data-quality state;
-- a stable payload fingerprint for idempotency.
-
-Repeated synchronization of the same source state must not create conflicting duplicate history. Partial data is stored as diagnostic evidence but is not promoted to the current evaluable snapshot.
-
-### Existing portfolio snapshots
-
-Existing position snapshots and append-only evaluation runs remain intact. A broker account snapshot may become the source for a new portfolio snapshot, but it does not mutate an existing position snapshot. Each evaluation records the exact account snapshot and position snapshot used.
+- Gross weight uses total account value and is used for cash policy.
+- Invested weight uses invested market value and is used for layer and asset
+  inspection.
+- Tracking principal is the confirmed baseline adjusted only by classified
+  external deposits and withdrawals.
+- Holdings cost basis is not lifetime principal.
+- Partial, stale, failed, or unreconciled observations cannot produce a current
+  evaluation.
 
 ## Roadmap
 
-### Phase 0 — Trust foundation
+### Phase 0 — Trust foundation — Complete
 
-**Purpose:** Protect existing local state and ensure the broker integration cannot mutate the account.
+**Purpose:** Establish safe local persistence and a broker boundary that cannot
+mutate the account.
 
-**Goals**
+**Delivered**
 
-- Introduce explicit SQLite schema versioning and forward-only transactional migrations.
-- Back up the existing database before the first schema migration.
-- Remove destructive initialization patterns from the migration path.
-- Add server-only credential configuration and systematic secret/account-number redaction.
-- Implement an allowlisted read-only broker transport that permits GET observations and only the OAuth token POST.
+- Forward-only transactional SQLite migrations.
+- Environment-only Toss credentials and systematic redaction.
+- OAuth client-credentials flow.
+- Allowlisted account reads and explicit blocking of broker mutations.
+- Machine-readable CLI failure behavior.
 
-**Exit criteria**
+The prior generic-data backup policy is superseded by the approved Phase 2.5
+clean cut. Toss evidence remains protected; generic data is intentionally not
+archived.
 
-- Existing portfolios, snapshots, evaluation runs, configuration, and journal entries survive migration tests.
-- The only non-GET Toss request that can leave the process is `POST /oauth2/token`; every order mutation request is rejected locally.
-- Secrets, tokens, and raw account numbers are absent from persistence, logs, API responses, and frontend state.
-
-### Phase 1 — Toss account observation
+### Phase 1 — Toss account observation — Complete
 
 **Purpose:** Establish a trustworthy, reproducible account snapshot.
 
+**Delivered**
+
+- Account discovery and configured account match.
+- Holdings, KRW/USD buying power, exchange rate, and closed-order reads.
+- Native-currency normalization and KRW reconciliation.
+- Immutable `complete`, `partial`, `stale`, and `failed` snapshots.
+- Idempotent fingerprints, pagination checks, and current-complete selection.
+- `toss-health`, `toss-sync`, and `toss-snapshots` CLI commands.
+
+### Phase 2 — Account value and performance history — Complete
+
+**Purpose:** Track account value and return without claiming evidence that Toss
+cannot substantiate.
+
+**Delivered**
+
+- User-confirmed tracking baseline.
+- Principal, account value, invested value, cash, cost basis, and unrealized
+  profit/loss points.
+- External cash-flow candidates and explicit user classifications.
+- Deterministic execution ledger and bounded realized profit/loss.
+- Immutable performance runs with source fingerprints.
+- Machine-readable performance CLI.
+
+### Phase 2.5 — Toss-only foundation convergence — Next
+
+**Purpose:** Remove the generic product foundation before building policy and
+judgment behavior on top of it.
+
 **Goals**
 
-- Read account metadata, holdings, KRW/USD purchasing power, exchange rate, and paginated closed-order history.
-- Normalize quantities, prices, costs, market values, currencies, executions, commissions, and taxes.
-- Empirically verify whether KRW and USD purchasing power are independent before aggregation.
-- Reconcile normalized totals against broker responses within documented rounding tolerances.
-- Persist immutable `complete`, `partial`, `stale`, and `failed` synchronization results.
+- Upgrade to schema v4 while preserving every Toss observation and performance
+  row.
+- Drop generic portfolio, snapshot, configuration, evaluation, and journal
+  tables without migration or archive.
+- Add Toss-keyed instrument profiles and immutable IPS policy versions.
+- Add a pure account projection with explicit gross and invested denominators.
+- Remove manual/CSV/text inputs, generic saved portfolios, yfinance analysis,
+  Japan-account logic, FastAPI, session middleware, and the existing frontend.
+- Reduce the runtime to the Toss/performance/profile/account-view CLI.
+- Remove obsolete dependencies and adjacent generic-data migration backups
+  after an explicit integrity gate.
 
 **Exit criteria**
 
-- Holdings and market values reconcile with Toss account data.
-- Cash is not double counted across currencies.
-- A partial or stale response cannot replace the latest complete evaluable snapshot.
-- Repeated synchronization is idempotent and pagination does not duplicate executions.
+- Existing Toss snapshot 4, baseline 1, and performance run 1 remain readable.
+- Generic tables, commands, source modules, frontend files, dependencies, and
+  named migration backups are absent.
+- New holdings cannot be silently treated as classified or `OK`.
+- The latest complete snapshot produces a deterministic account projection.
+- No broker mutation or direct trade-language path is introduced.
 
-### Phase 2 — Account-value and performance history
-
-**Purpose:** Track account value and profit/loss without overstating what the available data proves.
-
-**Goals**
-
-- Establish a one-time, user-confirmed tracking-principal baseline at the first complete snapshot.
-- Store total account value, invested market value, deployable cash, current cost basis, unrealized profit/loss, and exchange-rate effect per snapshot.
-- Calculate realized profit/loss only for executions that are complete after the tracking baseline.
-- Detect later external cash flows instead of treating them as investment return; unresolved flows make the affected period non-evaluable.
-- Build history series whose points link back to immutable source snapshots.
-
-**Exit criteria**
-
-- Every displayed value is reproducible from a stored complete snapshot.
-- Tracking principal and current holdings cost basis are never conflated.
-- Performance history states its tracking start and coverage limits.
-- Missing flows, corporate actions, or executions cannot silently become profit/loss.
+The detailed design is
+`docs/superpowers/specs/2026-07-23-toss-only-foundation-convergence-design.md`.
 
 ### Phase 3 — Fixed cash-policy MVP
 
-**Purpose:** Prevent cash depletion using a deterministic IPS reserve policy before introducing market-regime logic.
+**Purpose:** Prevent cash depletion with a deterministic reserve inspection
+policy before adding market timing context.
 
 **Goals**
 
-- Model cash as a separate portfolio reserve.
-- Preserve invested-weight semantics for `core`, `satellite`, and `experiment` evaluation.
-- Evaluate gross cash weight against minimum 10%, target 15%, and maximum 20%.
-- Use `OK`, `Watch`, and `Review` for reserve-policy inspection; cash deviation alone never produces `Action`.
-- Explain the current cash state, triggered threshold, data quality, and next verification task without creating an order-sized gap.
+- Consume only the Phase 2.5 Toss account projection and active policy version.
+- Evaluate gross cash weight against `10% / 15% / 20%`.
+- Preserve invested weights for `core`, `satellite`, and `experiment` checks.
+- Use `OK`, `Watch`, and `Review` for cash reserve inspection; cash deviation
+  alone never produces `Action`.
+- Emit the source snapshot ID, policy version ID, trigger, plain meaning, and
+  verification task.
+- Persist immutable Toss evaluation runs and expose CLI inspection commands.
 
 **Exit criteria**
 
-- Adding cash leaves existing invested-layer allocation semantics and risk contribution intact.
-- The same complete snapshot and policy always produce the same status and triggers.
-- Evaluation, API, CLI, frontend, and Copilot contain no direct buy/sell or order-sized output.
+- Identical snapshot and policy inputs produce identical results.
+- Missing profiles, stale data, or denominator inconsistencies fail closed.
+- Cash and invested-layer denominators cannot be confused.
+- No result sizes an order or directly recommends buying or selling.
 
-Phase 3 is the first operational MVP boundary.
+Phase 3 is the first operational Toss-only inspection MVP.
 
-### Phase 4 — Hybrid market-context review
+### Phase 4 — Toss market-context policy review
 
-**Purpose:** Inspect whether the normal 15% cash target should move within the approved 10%–20% envelope without turning a market decline into a standalone purchase reason.
-
-**Design boundary**
-
-- Candidate signals combine benchmark drawdown, realized volatility, medium/long-term trend, core underweight, thesis validity, and data freshness.
-- A candidate change requires multiple confirming signals, hysteresis, and a cooling period.
-- The user approves a policy candidate; approval changes only future inspection policy and never broker state.
-- Missing, stale, or ambiguous data yields data verification rather than a policy-change candidate.
-
-Phase 4 receives a separate design that fixes exact signal definitions, thresholds, hysteresis, evaluation fixtures, and offline validation before implementation.
-
-### Phase 5 — Profit/loss review signals
-
-**Purpose:** Use gains and losses as evidence for allocation, risk, and thesis review rather than as standalone trade triggers.
-
-**Design boundary**
-
-- A gain alone does not trigger reduction review.
-- A loss alone does not trigger exceptional intervention.
-- Overweight, concentration, risk contribution, reserve shortfall, overlap, and burden may produce `Review` when supported by complete data.
-- `Action` retains its existing meaning: broken thesis plus a hard limit breach.
-- Satellite and experiment positions receive stricter thesis, overlap, holdability, burden, and ETF-substitution checks.
-
-Phase 5 receives a separate adversarially reviewed design before implementation.
-
-### Phase 6 — Operational workbench
-
-**Purpose:** Make source data, policy, inspection results, and human decisions traceable in one workflow.
+**Purpose:** Inspect whether the normal 15% cash target should move within the
+approved 10%–20% envelope using only official Toss market data.
 
 **Goals**
 
-- Show synchronization health and source timestamps.
-- Plot tracking principal, account value, invested value, cash, and supported profit/loss history.
-- Show reserve-policy state and any approved policy candidate.
-- Link Review Queue items and journal decisions to exact account and evaluation snapshots.
-- Keep Review Copilot explanations within the same status vocabulary and guardrails.
+- Extend the read-only allowlist with Toss stock candles, current prices, stock
+  master data, and market-indicator candles.
+- Persist immutable market observations and source timestamps.
+- Define benchmark drawdown, realized volatility, and medium/long trend from
+  Toss daily candles rather than yfinance.
+- Require multiple confirming signals, hysteresis, and a cooling period.
+- Produce only a candidate policy version; human approval activates it.
+- Treat incomplete history, unsupported symbols, or stale market data as a
+  verification task.
+
+Toss officially provides current prices, daily candles, stock metadata, and
+market-indicator candles through its Open API:
+<https://developers.tossinvest.com/docs>.
 
 **Exit criteria**
 
-- Historical decisions can be replayed with their original evidence and policy versions.
-- User approval and deferral actions are auditable.
-- Generated UI and Copilot output cannot introduce trade execution or order sizing.
+- No external market-data source or user-entered benchmark exists.
+- Offline official-response fixtures cover KR, US, index, pagination/window,
+  missing-history, and rate-limit behavior.
+- A market decline alone never becomes an immediate-purchase reason.
+- Approved target changes remain within the policy envelope and never mutate
+  the brokerage account.
 
-## Error Handling and Failure Safety
+Phase 4 requires a separate approved threshold and hysteresis design.
 
-- Authentication failure produces a machine-readable integration error and never falls back to cached data as current.
-- Rate limiting uses bounded backoff and does not create retry storms.
-- A single endpoint failure marks the synchronization partial; it does not fabricate missing values.
-- Exchange-rate absence blocks KRW aggregation for foreign-currency values.
-- Timestamp skew beyond the configured limit blocks evaluation.
-- Unexpected API enum values are retained as unknown source values and surfaced for verification.
-- Reconciliation failure preserves the raw diagnostic record but does not create a current account snapshot.
-- Existing manual portfolio workflows continue to operate when Toss integration is unavailable.
+### Phase 5 — Profit/loss and exceptional-review signals
 
-## Verification Strategy
+**Purpose:** Combine performance evidence with allocation, concentration, risk,
+and thesis integrity without turning gains or losses into automatic trades.
 
-Every phase must pass its own adversarial design gate before implementation and its own verification gate before the next phase begins.
+**Goals**
 
-Required verification categories are:
+- Link tracked gains, losses, cost basis, and drawdown evidence to exact Toss
+  snapshots and performance runs.
+- Treat gains as review evidence only when combined with allocation or risk
+  limits.
+- Treat losses as thesis and holdability review evidence, never a standalone
+  stop-loss instruction.
+- Apply stricter overlap, management-burden, holdability, and ETF-substitution
+  checks to satellite and experiment exposure.
+- Reserve `Action` for broken thesis plus a hard limit breach.
 
-- migration from a real prior-schema fixture without data loss;
-- credential and account-identifier redaction;
-- network tests proving only the OAuth token POST is permitted and every broker mutation method is rejected;
-- official OpenAPI response-contract fixtures without live market dependency;
-- KRW/USD purchasing-power overlap and rounding reconciliation cases;
-- partial, stale, time-skewed, paginated, duplicated, and out-of-order responses;
-- gross-weight and invested-weight denominator invariants;
-- deterministic reserve status classification;
-- guardrail cases proving gains, losses, and cash deviations do not generate direct trade instructions;
-- API, CLI, frontend, and Copilot schema consistency.
+**Exit criteria**
 
-Live Toss verification is optional and explicit. Automated tests must not require real credentials or live market data.
+- Gain alone, loss alone, price decline alone, and cash deviation alone cannot
+  produce direct trade language.
+- Every item states the raw trigger, plain meaning, and human verification task.
+- Outputs contain no order quantity, proposed trade amount, or execution flag.
 
-## Delivery Slicing
+Phase 5 requires a separate adversarially reviewed design.
 
-Phases 0–3 form the first delivery program because they provide a complete, useful cash-observability MVP without depending on unvalidated market-timing rules. Each phase receives its own implementation plan and completion gate.
+### Phase 6 — Toss-only operational workbench
 
-Phases 4–6 are follow-on programs. They cannot be pulled into the Phase 0–3 implementation plan without a new approved design and adversarial review.
+**Purpose:** Rebuild the API and browser workflow from the Toss-only contracts.
 
-## Approval Gates
+**Goals**
 
-Before a phase advances, all of the following must be true:
+- Add an authenticated local API for sync health, snapshots, performance,
+  profiles, policies, evaluations, Review Queue, and human decisions.
+- Show source freshness and reconciliation before any judgment.
+- Plot principal, account value, invested value, cash, and supported return.
+- Manage Toss-instrument IPS profiles without editing broker facts.
+- Link every evaluation and decision to source snapshot and policy IDs.
+- Keep one backend status engine; the API and frontend render rather than
+  reclassify.
 
-1. The phase design is approved.
+**Exit criteria**
+
+- No manual portfolio entry, upload, editable quantity/value, or generic broker
+  mode appears in the UI.
+- Historical decisions replay with their original evidence and policy version.
+- Authentication and secret boundaries prevent browser access to credentials or
+  account identifiers.
+- Generated explanations cannot introduce trade execution or order sizing.
+
+## Failure Safety
+
+- Authentication failure is machine-readable and never promotes cached data to
+  current.
+- Rate limiting uses bounded retry and respects Toss response headers.
+- One missing required endpoint produces a partial observation, not fabricated
+  values.
+- Missing exchange rates block KRW aggregation for foreign-currency values.
+- New or unknown source enums remain visible and fail closed.
+- Unclassified holdings remain reviewable data-quality issues.
+- There is no manual or yfinance fallback in any phase.
+- Order creation, modification, cancellation, and conditional-order endpoints
+  remain blocked locally even though Toss exposes them.
+
+## Verification Program
+
+Every phase passes an adversarial design gate before implementation and a
+verification gate before the next phase starts.
+
+Required coverage includes:
+
+- Toss response normalization, reconciliation, pagination, idempotency, and
+  redaction;
+- destructive v3-to-v4 migration that proves Toss preservation and generic-data
+  removal;
+- snapshot state, freshness, and denominator invariants;
+- baseline, cash-flow, execution, realized-profit/loss, and TWR replay;
+- Toss-symbol profile identity and unclassified-holding behavior;
+- deterministic policy versioning and evaluation classification;
+- official Toss market-data fixtures without live network requirements;
+- repository and lockfile scans proving removed data sources do not return;
+- guardrail fixtures proving no direct buy/sell or order sizing;
+- API, CLI, and frontend contract consistency after Phase 6.
+
+Live Toss verification is explicit and optional. Automated tests use local
+fixtures and never require real credentials.
+
+## Delivery and Approval Gates
+
+- Phases 0–2 are complete evidence infrastructure.
+- Phase 2.5 is a mandatory clean-cut gate; Phase 3 cannot begin while generic
+  runtime or persistence remains.
+- Phase 3 delivers the fixed-policy CLI MVP.
+- Phases 4 and 5 add market and profit/loss judgment only through separate
+  approved designs.
+- Phase 6 restores the browser workbench from Toss-only contracts.
+
+Before any phase advances:
+
+1. Its design is approved.
 2. Adversarial review has no unresolved critical finding.
-3. Existing snapshot and CLI contracts remain compatible or have an approved migration.
+3. Source snapshot and policy inputs are immutable and replayable.
 4. Missing or ambiguous data fails safely.
-5. No direct buy/sell, order sizing, or execution field is introduced.
-6. The smallest complete verification suite passes.
+5. The status vocabulary and action-language guardrails are preserved.
+6. No broker mutation, order sizing, or automatic trade field is introduced.
+7. The smallest complete verification suite passes.

@@ -1,5 +1,10 @@
 # Phase 2 Account-Value and Performance History Design
 
+> **Historical boundary note (2026-07-23):** Phase 2 was implemented while the
+> generic portfolio workflow still existed. The approved Phase 2.5 Toss-only
+> convergence design supersedes every compatibility statement below after
+> preserving the Phase 2 Toss snapshots and performance evidence.
+
 ## Status
 
 Approved design. This phase extends the existing IPS Pilot portfolio workflow; it does not replace manual portfolio snapshots, layer evaluation, Review Queue, or journal behavior.
