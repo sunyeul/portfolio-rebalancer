@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from typing import Any
 
@@ -11,6 +12,9 @@ from integrations.toss.config import TossApiConfig
 
 
 TOKEN_PATH = "/oauth2/token"
+MAX_RATE_LIMIT_RETRIES = 2
+RATE_LIMIT_BACKOFF_SECONDS = (0.25, 0.5)
+MAX_RETRY_AFTER_SECONDS = 2.0
 ALLOWED_GET_PATHS = frozenset(
     {
         "/api/v1/accounts",
@@ -46,6 +50,17 @@ def _assert_allowed(method: str, path: str) -> tuple[str, str]:
     raise TossRequestBlocked("Toss request blocked by read-only policy.")
 
 
+def _retry_delay(retry_after: str | None, attempt: int) -> float:
+    """Return a short bounded delay so a 429 cannot create a retry storm."""
+    try:
+        requested = float(retry_after) if retry_after is not None else None
+    except (TypeError, ValueError):
+        requested = None
+    if requested is not None and requested >= 0:
+        return min(requested, MAX_RETRY_AFTER_SECONDS)
+    return RATE_LIMIT_BACKOFF_SECONDS[attempt]
+
+
 class TossTransport:
     """Send only explicitly allowlisted Toss observation/auth requests."""
 
@@ -66,24 +81,37 @@ class TossTransport:
         data: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         allowed_method, allowed_path = _assert_allowed(method, path)
-        try:
-            response = self._client.request(
-                allowed_method,
-                allowed_path,
-                headers=dict(headers or {}),
-                params=dict(params or {}),
-                data=dict(data or {}),
+        for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+            try:
+                response = self._client.request(
+                    allowed_method,
+                    allowed_path,
+                    headers=dict(headers or {}),
+                    params=dict(params or {}),
+                    data=dict(data or {}),
+                )
+                response.raise_for_status()
+                payload = response.json()
+                break
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                if status == 429 and attempt < MAX_RATE_LIMIT_RETRIES:
+                    delay = _retry_delay(
+                        exc.response.headers.get("Retry-After"), attempt
+                    )
+                    time.sleep(delay)
+                    continue
+                raise TossTransportError(
+                    f"Toss API request failed: status={status} path={allowed_path}"
+                ) from None
+            except (httpx.HTTPError, ValueError, TypeError):
+                raise TossTransportError(
+                    f"Toss API request failed: status=unavailable path={allowed_path}"
+                ) from None
+        else:  # pragma: no cover - the loop either breaks or raises
+            raise TossTransportError(
+                f"Toss API request failed: status=429 path={allowed_path}"
             )
-            response.raise_for_status()
-            payload = response.json()
-        except httpx.HTTPStatusError as exc:
-            raise TossTransportError(
-                f"Toss API request failed: status={exc.response.status_code} path={allowed_path}"
-            ) from None
-        except (httpx.HTTPError, ValueError, TypeError):
-            raise TossTransportError(
-                f"Toss API request failed: status=unavailable path={allowed_path}"
-            ) from None
         if not isinstance(payload, dict):
             raise TossTransportError(
                 f"Toss API request failed: status=invalid-json path={allowed_path}"

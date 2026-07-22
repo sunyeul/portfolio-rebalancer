@@ -105,6 +105,25 @@ def test_transport_error_does_not_echo_response_body_or_credentials(config):
     assert "access-token" not in message
 
 
+def test_transport_retries_rate_limit_with_bounded_backoff(config, monkeypatch):
+    calls = 0
+    delays = []
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            return httpx.Response(429, headers={"Retry-After": "60"})
+        return httpx.Response(200, json={"result": []})
+
+    monkeypatch.setattr("integrations.toss.transport.time.sleep", delays.append)
+    transport = _transport(config, handler)
+
+    assert transport.request_json("GET", "/api/v1/holdings") == {"result": []}
+    assert calls == 3
+    assert delays == [2.0, 2.0]
+
+
 def test_token_provider_caches_token_in_memory_until_refresh_window(config):
     token_calls = 0
     now = [100.0]
