@@ -44,6 +44,14 @@ from storage.account_observation_store import (
     latest_complete as latest_account_snapshot,
     list_snapshots as list_account_snapshots,
 )
+from storage.performance_store import (
+    append_cash_flow_decision,
+    create_baseline,
+    get_performance_run,
+    latest_performance_run,
+    preview_baseline,
+    refresh_performance,
+)
 
 
 LAYER_BENCHMARK_LAYERS = ("core", "satellite", "experiment")
@@ -55,8 +63,10 @@ app = typer.Typer(
 )
 portfolios_app = typer.Typer(help="Inspect saved portfolios.")
 snapshots_app = typer.Typer(help="Inspect saved portfolio snapshots.")
+performance_app = typer.Typer(help="Inspect account performance history.")
 app.add_typer(portfolios_app, name="portfolios")
 app.add_typer(snapshots_app, name="snapshots")
+app.add_typer(performance_app, name="performance")
 
 
 class CliError(Exception):
@@ -677,6 +687,159 @@ def toss_snapshots(
         )
     except Exception as exc:
         _exit_with_command_error("toss-snapshots", exc)
+
+
+@performance_app.command("baseline-preview")
+def performance_baseline_preview(
+    snapshot_id: Annotated[int, typer.Option("--snapshot-id")],
+) -> None:
+    """Preview one complete snapshot as a possible performance baseline."""
+    try:
+        initialize_database()
+        payload = preview_baseline(snapshot_id)
+        if payload is None:
+            raise CliError(
+                "persistence", f"snapshot_id={snapshot_id}를 찾을 수 없습니다."
+            )
+        _emit_json(
+            {
+                "ok": True,
+                "command": "performance baseline-preview",
+                "snapshot": payload,
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("performance baseline-preview", exc)
+
+
+@performance_app.command("baseline-confirm")
+def performance_baseline_confirm(
+    snapshot_id: Annotated[int, typer.Option("--snapshot-id")],
+    expected_principal_krw: Annotated[float, typer.Option("--expected-principal-krw")],
+) -> None:
+    """Confirm one immutable account performance tracking baseline."""
+    try:
+        initialize_database()
+        baseline = create_baseline(snapshot_id, expected_principal_krw)
+        _emit_json(
+            {
+                "ok": True,
+                "command": "performance baseline-confirm",
+                "baseline": baseline,
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("performance baseline-confirm", exc)
+
+
+@performance_app.command("refresh")
+def performance_refresh_command() -> None:
+    """Build and persist one immutable local performance projection."""
+    try:
+        initialize_database()
+        run = refresh_performance()
+        _emit_json(
+            {
+                "ok": True,
+                "command": "performance refresh",
+                "run_id": run["id"],
+                "state": run["state"],
+                "run": run,
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("performance refresh", exc)
+
+
+@performance_app.command("candidates")
+def performance_candidates(
+    run_id: Annotated[int | None, typer.Option("--run-id")] = None,
+) -> None:
+    """List cash-flow candidates attached to a performance run."""
+    try:
+        initialize_database()
+        run = (
+            get_performance_run(run_id)
+            if run_id is not None
+            else latest_performance_run()
+        )
+        if run is None:
+            raise CliError("persistence", "성과 실행을 찾을 수 없습니다.")
+        _emit_json(
+            {
+                "ok": True,
+                "command": "performance candidates",
+                "run_id": run["id"],
+                "candidates": run["candidates"],
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("performance candidates", exc)
+
+
+@performance_app.command("decide-flow")
+def performance_decide_flow(
+    candidate_id: Annotated[int, typer.Option("--candidate-id")],
+    classification: Annotated[str, typer.Option("--classification")],
+    amount_native: Annotated[float | None, typer.Option("--amount-native")] = None,
+    effective_at: Annotated[str | None, typer.Option("--effective-at")] = None,
+    note: Annotated[str, typer.Option("--note")] = "",
+) -> None:
+    """Append a user decision for one cash-flow candidate."""
+    try:
+        initialize_database()
+        decision = append_cash_flow_decision(
+            candidate_id,
+            classification=classification,
+            confirmed_amount_native=amount_native,
+            effective_at=effective_at,
+            note=note,
+        )
+        _emit_json(
+            {
+                "ok": True,
+                "command": "performance decide-flow",
+                "decision": decision,
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("performance decide-flow", exc)
+
+
+@performance_app.command("history")
+def performance_history(
+    latest: Annotated[bool, typer.Option("--latest")] = False,
+    run_id: Annotated[int | None, typer.Option("--run-id")] = None,
+) -> None:
+    """Inspect one local account performance run."""
+    try:
+        initialize_database()
+        if latest and run_id is not None:
+            raise CliError("input", "--latest와 --run-id는 함께 사용할 수 없습니다.")
+        run = (
+            latest_performance_run()
+            if latest or run_id is None
+            else get_performance_run(run_id)
+        )
+        if run is None:
+            raise CliError("persistence", "성과 실행을 찾을 수 없습니다.")
+        _emit_json(
+            {
+                "ok": True,
+                "command": "performance history",
+                "latest": latest,
+                "run_id": run["id"],
+                "run": run,
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("performance history", exc)
 
 
 @portfolios_app.command("list")

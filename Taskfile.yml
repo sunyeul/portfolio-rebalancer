@@ -25,6 +25,16 @@ tasks:
     cmds:
       - uv run ips-pilot toss-sync
 
+  toss-performance-refresh:
+    desc: Refresh local Toss account performance history
+    cmds:
+      - uv run ips-pilot performance refresh
+
+  toss-performance-history:
+    desc: Show the latest local Toss account performance history
+    cmds:
+      - uv run ips-pilot performance history --latest
+
   frontend-dev:
     desc: Run Vite frontend dev server
     dir: frontend

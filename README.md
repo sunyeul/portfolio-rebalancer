@@ -68,6 +68,10 @@ uv run ips-pilot risk --snapshot-id 14
 task toss-health
 task toss-sync
 uv run ips-pilot toss-snapshots --latest
+uv run ips-pilot performance baseline-preview --snapshot-id 4
+uv run ips-pilot performance baseline-confirm --snapshot-id 4 --expected-principal-krw 120802745.17802304
+uv run ips-pilot performance refresh
+uv run ips-pilot performance history --latest
 uv run ips-pilot portfolios list
 uv run ips-pilot snapshots list --portfolio-id 1
 ```
@@ -120,6 +124,20 @@ Legacy experimental commands and scenario-comparison options have been removed f
 `task toss-health` performs a read-only OAuth and brokerage-account discovery check without persisting data; the Taskfile loads `.env` for the command. `task toss-sync` reads holdings, KRW/USD cash buying power, USD/KRW exchange rate, and closed orders, then stores a normalized immutable observation snapshot. `toss-snapshots` reads only local snapshots; `--latest` returns the latest complete evaluable snapshot. Partial, stale, and failed snapshots remain diagnostic evidence and never replace the latest complete snapshot. Direct `uv run ips-pilot toss-health` usage requires exporting the three Toss variables in the shell first.
 
 These commands never create, modify, cancel, size, or execute a broker order. They emit one JSON object to stdout and do not return credentials, access tokens, or the raw brokerage account number.
+
+### Account performance history
+
+Phase 2 extends the immutable Toss observations with a local account-value and performance history. Confirm the first complete snapshot once, then refresh after later `toss-sync` runs:
+
+```bash
+uv run ips-pilot performance baseline-preview --snapshot-id 4
+uv run ips-pilot performance baseline-confirm --snapshot-id 4 --expected-principal-krw 120802745.17802304
+uv run ips-pilot performance refresh
+uv run ips-pilot performance candidates
+uv run ips-pilot performance history --latest
+```
+
+Unexplained cash movements remain candidates until explicitly classified. Partial, stale, or failed account snapshots do not become performance points. Phase 2 does not mutate Toss, existing portfolio snapshots, or IPS evaluation results. `task toss-performance-refresh` and `task toss-performance-history` are convenience wrappers for the last two commands.
 
 ## API
 
