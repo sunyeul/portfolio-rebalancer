@@ -16,6 +16,7 @@ dependencies = [
     "yfinance>=0.2.66",
     "scipy>=1.16.2",
     "typer>=0.12.0",
+    "httpx>=0.28.0",
 ]
 
 [project.scripts]
@@ -29,11 +30,10 @@ build-backend = "setuptools.build_meta"
 py-modules = ["cli", "main"]
 
 [tool.setuptools.packages.find]
-include = ["api*", "core*", "middleware*", "services*", "storage*", "utils*"]
+include = ["api*", "core*", "integrations*", "middleware*", "services*", "storage*", "utils*"]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.0",
     "pytest>=8.0.0",
     "ruff>=0.14.2",
 ]
