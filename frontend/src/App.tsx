@@ -44,18 +44,7 @@ import {
   type PortfolioRowInput,
   type ThesisStatusInput
 } from './lib/schemas';
-import { ReviewCopilot, ReviewCopilotHost } from './copilot/ReviewCopilot';
-import { GeneratedSurfaceHost } from './a2ui/GeneratedSurfaceHost';
-import { GenerativeUiProvider, useGenerativeUi } from './a2ui/GenerativeUiContext';
-import { ReviewQueueTriageSurface } from './a2ui/renderers/ReviewQueueTriageSurface';
-import { requestReviewQueueAgentExplanations } from './a2ui/utils/agentExplanations';
-import {
-  buildDefaultEvaluationGraphSurface,
-  buildReviewQueueTriageSurface,
-  defaultReviewDecisionsFromEvaluation,
-  mergeReviewQueueAgentExplanations
-} from './a2ui/utils/builders';
-import { validateReviewA2UISurface } from './a2ui/utils/validation';
+import { describeReviewTrigger, groupReviewQueueItems } from './lib/reviewQueue';
 
 const DEFAULT_BENCHMARK = 'SPY:80,QQQ:20';
 
@@ -764,13 +753,7 @@ function localRowId(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
 }
 
-function LayerDashboard({
-  focusedLayer,
-  rows
-}: {
-  focusedLayer: string | null;
-  rows: EvaluationRecord[];
-}) {
+function LayerDashboard({ rows }: { rows: EvaluationRecord[] }) {
   const [sortState, setSortState] = useState<SortState<LayerDashboardColumnId>>(null);
   const sortedRows = useMemo(() => sortRows(rows, layerDashboardColumns, sortState), [rows, sortState]);
 
@@ -797,17 +780,8 @@ function LayerDashboard({
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map(({ unit, output }) => {
-              const isFocused = focusedLayer === unit.name;
-              const isDimmed = focusedLayer !== null && !isFocused;
-              return (
-                <tr
-                  key={unit.name}
-                  id={`layer-row-${localRowId(unit.name)}`}
-                  className={`border-t border-slate-100 transition ${
-                    isFocused ? 'bg-cyan-50 ring-1 ring-inset ring-cyan-200' : isDimmed ? 'opacity-50' : ''
-                  }`}
-                >
+            {sortedRows.map(({ unit, output }) => (
+                <tr key={unit.name} id={`layer-row-${localRowId(unit.name)}`} className="border-t border-slate-100 transition">
                   <td className="px-2 py-2 font-bold text-slate-900">{layerLabel(unit.name)}</td>
                   <td className="px-2 py-2">{pct(output.current_weight)}</td>
                   <td className="px-2 py-2">{pct(output.weight_gap)}</td>
@@ -818,8 +792,7 @@ function LayerDashboard({
                   <td className="px-2 py-2">{num(output.cagr_mdd_ratio)}</td>
                   <td className="px-2 py-2"><StatusBadge status={output.status} /></td>
                 </tr>
-              );
-            })}
+            ))}
           </tbody>
         </table>
       </div>
@@ -828,13 +801,11 @@ function LayerDashboard({
 }
 
 function AssetEvaluationTable({
-  focusedLayer,
   focusedTicker,
   onTickerFocus,
   onTickerSelect,
   rows
 }: {
-  focusedLayer: string | null;
   focusedTicker: string | null;
   onTickerFocus: (ticker: string | null) => void;
   onTickerSelect: (ticker: string) => void;
@@ -865,16 +836,13 @@ function AssetEvaluationTable({
           <tbody>
             {sortedRows.map(({ unit, output }) => {
               const isTickerFocused = focusedTicker === unit.name;
-              const isLayerFocused = focusedLayer === unit.parent_layer;
-              const isDimmed =
-                (focusedTicker !== null && !isTickerFocused) ||
-                (focusedTicker === null && focusedLayer !== null && !isLayerFocused);
+              const isDimmed = focusedTicker !== null && !isTickerFocused;
               return (
                 <tr
                   key={unit.name}
                   id={`asset-row-${localRowId(unit.name)}`}
                   className={`cursor-pointer border-t border-slate-100 transition hover:bg-slate-50 ${
-                    isTickerFocused ? 'bg-cyan-50 ring-1 ring-inset ring-cyan-200' : isLayerFocused ? 'bg-cyan-50/50' : isDimmed ? 'opacity-50' : ''
+                    isTickerFocused ? 'bg-cyan-50 ring-1 ring-inset ring-cyan-200' : isDimmed ? 'opacity-50' : ''
                   }`}
                   onClick={() => onTickerSelect(unit.name)}
                   onMouseEnter={() => onTickerFocus(unit.name)}
@@ -900,75 +868,14 @@ function AssetEvaluationTable({
   );
 }
 
+const reviewQueueGroupLabels = {
+  Action: 'Action · 조치 검토 (예외적 개입은 사람 검토)',
+  Review: 'Review · 중점 점검',
+  Watch: 'Watch · 관찰 점검'
+} as const;
+
 function ReviewQueue({ evaluation }: { evaluation: EvaluationResponse }) {
-  const {
-    applySurfacePatch,
-    clearSurface,
-    reviewDecisions,
-    reviewQueueSurface,
-    setReviewDecisions,
-    updateReviewDecision
-  } = useGenerativeUi();
-  const defaultSurface = useMemo(() => buildReviewQueueTriageSurface(evaluation), [evaluation]);
-  const defaultReviewDecisions = useMemo(() => defaultReviewDecisionsFromEvaluation(evaluation), [evaluation]);
-  const currentReviewItemIds = useMemo(
-    () => new Set(defaultReviewDecisions.map((decision) => decision.review_item_id)),
-    [defaultReviewDecisions]
-  );
-  const defaultSurfaceSignature = useMemo(
-    () =>
-      defaultSurface.groups
-        .flatMap((group) => group.items.map((item) => `${item.id}:${item.status}`))
-        .join('|'),
-    [defaultSurface]
-  );
-  const generatedSurfaceSignature = useMemo(
-    () =>
-      reviewQueueSurface?.groups
-        .flatMap((group) => group.items.map((item) => `${item.id}:${item.status}`))
-        .join('|'),
-    [reviewQueueSurface]
-  );
-  const hasCurrentReviewDecisions =
-    reviewDecisions.length === defaultReviewDecisions.length &&
-    reviewDecisions.every((decision) => currentReviewItemIds.has(decision.review_item_id));
-  const generatedSurfaceMatchesEvaluation =
-    reviewQueueSurface?.evaluation_period.label === evaluation.evaluation_period.label &&
-    reviewQueueSurface.evaluation_period.start_date === evaluation.evaluation_period.start_date &&
-    reviewQueueSurface.evaluation_period.end_date === evaluation.evaluation_period.end_date &&
-    generatedSurfaceSignature === defaultSurfaceSignature;
-
-  useEffect(() => {
-    clearSurface('review_queue');
-    setReviewDecisions(defaultReviewDecisions);
-  }, [clearSurface, defaultReviewDecisions, evaluation, setReviewDecisions]);
-
-  useEffect(() => {
-    if (evaluation.review_queue.length === 0) return;
-    const controller = new AbortController();
-
-    requestReviewQueueAgentExplanations({
-      signal: controller.signal,
-      source: 'automatic',
-      surface: defaultSurface
-    })
-      .then((patch) => {
-        const surface = mergeReviewQueueAgentExplanations(defaultSurface, patch);
-        const validation = validateReviewA2UISurface(surface);
-        if (!validation.ok || validation.surface.component !== 'ReviewQueueTriageSurface') return;
-        applySurfacePatch({
-          target: 'review_queue',
-          surface: 'ReviewQueueTriageSurface',
-          mode: 'replace',
-          payload: validation.surface
-        });
-      })
-      .catch(() => {
-        // Review Copilot runtime is optional for the base inspection board.
-      });
-
-    return () => controller.abort();
-  }, [applySurfacePatch, defaultSurface, evaluation.review_queue.length]);
+  const groups = groupReviewQueueItems(evaluation.review_queue);
 
   return (
     <section id="review-queue" className="rounded-lg border border-slate-200 bg-white p-4">
@@ -976,58 +883,59 @@ function ReviewQueue({ evaluation }: { evaluation: EvaluationResponse }) {
         <ClipboardList className="h-5 w-5 text-cyan-800" />
         <h2 className="text-base font-bold text-slate-950">점검 큐</h2>
       </div>
+      <p className="mt-2 text-sm font-semibold text-slate-500">
+        {evaluation.evaluation_period.label}: {evaluation.evaluation_period.start_date} ~ {evaluation.evaluation_period.end_date} ·{' '}
+        {evaluation.review_queue.length}개 항목
+      </p>
+      <p className="mt-2 rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-900">
+        이 목록은 IPS 점검 신호입니다. 매매 지시나 주문 수량 산정이 아닙니다.
+      </p>
       {evaluation.review_queue.length === 0 ? (
         <p className="mt-3 text-sm font-semibold text-slate-500">점검 큐가 비어 있습니다.</p>
       ) : (
-        <div className="mt-3">
-          <ReviewQueueTriageSurface
-            surface={generatedSurfaceMatchesEvaluation ? reviewQueueSurface : defaultSurface}
-            decisions={hasCurrentReviewDecisions ? reviewDecisions : defaultReviewDecisions}
-            onDecisionChange={updateReviewDecision}
-          />
+        <div className="mt-3 grid gap-4">
+          {groups.map((group) => (
+            <section key={group.status} className="grid gap-2">
+              <h3 className="text-sm font-extrabold text-slate-900">{reviewQueueGroupLabels[group.status]}</h3>
+              {group.items.length === 0 ? (
+                <p className="rounded-md border border-dashed border-slate-300 px-3 py-2 text-sm font-semibold text-slate-500">
+                  해당 상태의 점검 항목이 없습니다.
+                </p>
+              ) : (
+                group.items.map((item) => (
+                  <article
+                    key={`${item.level}:${item.parent_layer ?? 'portfolio'}:${item.name}`}
+                    className="rounded-lg border border-slate-200 bg-slate-50 p-3"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <strong className="text-sm text-slate-950">{item.name}</strong>
+                      <StatusBadge status={item.status} />
+                      <span className="text-xs font-semibold text-slate-500">
+                        {item.level === 'layer' ? layerLabel(item.name) : layerLabel(item.parent_layer)}
+                      </span>
+                    </div>
+                    <dl className="mt-3 grid gap-2 text-sm text-slate-700">
+                      <div>
+                        <dt className="font-bold text-slate-500">점검 신호</dt>
+                        <dd className="grid gap-1">
+                          {item.triggered_by.length > 0 ? item.triggered_by.map((code) => (
+                            <span key={code}>{code} · {describeReviewTrigger(code)}</span>
+                          )) : '추가 신호 없음'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="font-bold text-slate-500">다음 점검</dt>
+                        <dd>{item.suggested_next_step}</dd>
+                      </div>
+                    </dl>
+                  </article>
+                ))
+              )}
+            </section>
+          ))}
         </div>
       )}
     </section>
-  );
-}
-
-function EvaluationGraphs({
-  evaluation,
-  focusedLayer,
-  focusedTicker,
-  onLayerFocus,
-  onTickerFocus,
-  onTickerSelect
-}: {
-  evaluation: EvaluationResponse;
-  focusedLayer: string | null;
-  focusedTicker: string | null;
-  onLayerFocus: (layer: string | null) => void;
-  onTickerFocus: (ticker: string | null) => void;
-  onTickerSelect: (ticker: string) => void;
-}) {
-  const { applySurfacePatch } = useGenerativeUi();
-  const defaultSurface = useMemo(() => buildDefaultEvaluationGraphSurface(evaluation), [evaluation]);
-
-  useEffect(() => {
-    applySurfacePatch({
-      target: 'evaluation_graphs',
-      surface: 'EvaluationGraphSurface',
-      mode: 'replace',
-      payload: defaultSurface
-    });
-  }, [applySurfacePatch, defaultSurface]);
-
-  return (
-    <GeneratedSurfaceHost
-      evaluation={evaluation}
-      focusedLayer={focusedLayer}
-      focusedTicker={focusedTicker}
-      onLayerFocus={onLayerFocus}
-      onTickerFocus={onTickerFocus}
-      onTickerSelect={onTickerSelect}
-      target="evaluation_graphs"
-    />
   );
 }
 
@@ -1038,34 +946,20 @@ function EvaluationResults({
   evaluation: EvaluationResponse;
   evaluationRun: EvaluationRun | null;
 }) {
-  const [focusedLayer, setFocusedLayer] = useState<string | null>(null);
   const [hoveredTicker, setHoveredTicker] = useState<string | null>(null);
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const focusedTicker = hoveredTicker ?? selectedTicker;
 
   useEffect(() => {
-    setFocusedLayer(null);
     setHoveredTicker(null);
     setSelectedTicker(null);
   }, [evaluation]);
 
-  function handleLayerFocus(layer: string | null) {
-    setFocusedLayer(layer);
-    if (layer !== null) {
-      setHoveredTicker(null);
-      setSelectedTicker(null);
-    }
-  }
-
   function handleTickerFocus(ticker: string | null) {
     setHoveredTicker(ticker);
-    if (ticker !== null) {
-      setFocusedLayer(null);
-    }
   }
 
   function handleTickerSelect(ticker: string) {
-    setFocusedLayer(null);
     setHoveredTicker(null);
     setSelectedTicker((current) => (current === ticker ? null : ticker));
 
@@ -1080,17 +974,8 @@ function EvaluationResults({
   return (
     <>
       <EvaluationRunHeader evaluationRun={evaluationRun} />
-      <EvaluationGraphs
-        evaluation={evaluation}
-        focusedLayer={focusedLayer}
-        focusedTicker={focusedTicker}
-        onLayerFocus={handleLayerFocus}
-        onTickerFocus={handleTickerFocus}
-        onTickerSelect={handleTickerSelect}
-      />
-      <LayerDashboard focusedLayer={focusedLayer} rows={evaluation.layer_evaluations} />
+      <LayerDashboard rows={evaluation.layer_evaluations} />
       <AssetEvaluationTable
-        focusedLayer={focusedLayer}
         focusedTicker={focusedTicker}
         rows={evaluation.asset_evaluations}
         onTickerFocus={handleTickerFocus}
@@ -1118,9 +1003,6 @@ function JournalDraft({ rows }: { rows: Array<Record<string, unknown>> }) {
           ))}
         </ul>
       )}
-      <div className="mt-3">
-        <GeneratedSurfaceHost target="journal_draft" />
-      </div>
     </section>
   );
 }
@@ -1813,16 +1695,6 @@ export function App() {
     snapshotModalName.trim() !== '' &&
     (snapshotModalMode === 'edit' || (snapshotMeaningfulRows.length > 0 && snapshotRowErrors.size === 0));
   const canCreateSnapshot = selectedPortfolioId !== null && meaningfulRows.length > 0;
-  const copilotLayerBenchmarks = useMemo(() => normalizedLayerBenchmarks(layerBenchmarks), [layerBenchmarks]);
-  const copilotSettings = useMemo(
-    () => ({
-      period,
-      asOfDate,
-      layerBenchmarks: copilotLayerBenchmarks,
-      analysisBenchmark: copilotLayerBenchmarks.core
-    }),
-    [period, asOfDate, copilotLayerBenchmarks]
-  );
   const workflowButtonLabel =
     pending === 'portfolio'
       ? '포트폴리오 적용 중'
@@ -2121,8 +1993,6 @@ export function App() {
   }
 
   return (
-    <ReviewCopilotHost>
-    <GenerativeUiProvider>
     <main className="min-h-screen bg-slate-100 p-4 text-slate-900 md:p-8">
       <div className="mx-auto grid max-w-7xl gap-5">
         <header className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-5 md:flex-row md:items-center md:justify-between">
@@ -2306,16 +2176,7 @@ export function App() {
           if (snapshotPendingDelete) deleteSavedSnapshot(snapshotPendingDelete);
         }}
       />
-      <ReviewCopilot
-        portfolio={portfolio}
-        evaluation={evaluation}
-        settings={copilotSettings}
-        onAnalysis={setAnalysis}
-        onEvaluation={setEvaluation}
-      />
       <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />
     </main>
-    </GenerativeUiProvider>
-    </ReviewCopilotHost>
   );
 }
