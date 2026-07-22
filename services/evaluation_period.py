@@ -68,19 +68,3 @@ def resolve_evaluation_period(
 
     return EvaluationPeriod(label=normalized, start_date=start, end_date=end)
 
-
-def analysis_period_value(evaluation_period: EvaluationPeriod) -> int | str | EvaluationPeriod:
-    """Return a value acceptable by run_analysis."""
-    if evaluation_period.label == "1M":
-        return 1
-    if evaluation_period.label == "3M":
-        return 3
-    if evaluation_period.label == "6M":
-        return 6
-    if evaluation_period.label == "1Y":
-        return 12
-    if evaluation_period.label == "YTD":
-        return "YTD"
-    if evaluation_period.label == "Max":
-        return "Max"
-    return evaluation_period

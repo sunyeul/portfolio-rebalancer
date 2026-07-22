@@ -262,24 +262,6 @@ export function saveSnapshotEvaluation(snapshotId: number) {
   );
 }
 
-export function listSnapshotEvaluationRuns(snapshotId: number) {
-  return requestJson<{ evaluation_runs: EvaluationRun[] }>(
-    `/api/v1/portfolios/snapshots/${snapshotId}/evaluations`,
-    {
-      method: 'GET'
-    }
-  );
-}
-
-export function activateSnapshotEvaluation(snapshotId: number, runId: number) {
-  return requestJson<{ evaluation: EvaluationResponse; evaluation_run: EvaluationRun }>(
-    `/api/v1/portfolios/snapshots/${snapshotId}/evaluations/${runId}/activate`,
-    {
-      method: 'POST'
-    }
-  );
-}
-
 export function listPortfolios() {
   return requestJson<{ portfolios: SavedPortfolio[] }>('/api/v1/portfolios', {
     method: 'GET'

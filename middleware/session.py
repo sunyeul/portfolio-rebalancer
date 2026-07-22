@@ -88,8 +88,6 @@ class SessionManager:
         # DataFrame은 JSON으로 직렬화
         if isinstance(value, pd.DataFrame):
             value = value.to_dict(orient="records")
-        elif isinstance(value, pd.Series):
-            value = value.to_dict()
 
         self._memory_store[session_id][key] = value
 
@@ -110,23 +108,6 @@ class SessionManager:
             return pd.DataFrame(data)
         return data
 
-    def get_series(self, session_id: str, key: str) -> pd.Series | None:
-        """세션에서 Series를 가져옵니다.
-
-        Args:
-            session_id: 세션 ID
-            key: 키
-
-        Returns:
-            Series 또는 None
-        """
-        data = self.get(session_id, key)
-        if data is None:
-            return None
-        if isinstance(data, dict):
-            return pd.Series(data)
-        return data
-
     def delete(self, session_id: str, key: str) -> None:
         """세션에서 키를 삭제합니다.
 
@@ -136,15 +117,6 @@ class SessionManager:
         """
         if session_id in self._memory_store:
             self._memory_store[session_id].pop(key, None)
-
-    def clear(self, session_id: str) -> None:
-        """세션을 완전히 삭제합니다.
-
-        Args:
-            session_id: 세션 ID
-        """
-        self._memory_store.pop(session_id, None)
-
 
 # 전역 세션 관리자 인스턴스
 session_manager = SessionManager()

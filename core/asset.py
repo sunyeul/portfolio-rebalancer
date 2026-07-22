@@ -1,5 +1,5 @@
 from typing import List
-from pydantic import BaseModel, field_validator, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 import re
 
 LAYER_TYPES = {"core", "satellite", "experiment"}
@@ -89,11 +89,7 @@ class Asset(BaseModel):
         self.layer = layer
         return self
 
-    class Config:
-        """Pydantic 설정."""
-
-        # 추가 필드 허용 금지 (스트릭트 모드)
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 def parse_text_to_assets(text: str) -> List[Asset]:

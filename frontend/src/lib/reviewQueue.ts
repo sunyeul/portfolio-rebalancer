@@ -2,8 +2,6 @@ import type { ReviewItem } from './api';
 
 export const reviewQueueStatusOrder = ['Action', 'Review', 'Watch'] as const;
 
-export type ReviewQueueStatus = (typeof reviewQueueStatusOrder)[number];
-
 const reviewTriggerExplanations: Record<string, string> = {
   risk_contribution: '위험 기여도가 커서 이 부담이 의도된 것인지 확인합니다.',
   risk_contribution_high: '위험 기여도가 커서 이 부담이 의도된 것인지 확인합니다.',

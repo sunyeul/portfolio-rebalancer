@@ -34,7 +34,6 @@ include = ["api*", "core*", "middleware*", "services*", "storage*", "utils*"]
 [dependency-groups]
 dev = [
     "httpx>=0.28.0",
-    "ipykernel>=7.0.1",
     "pytest>=8.0.0",
     "ruff>=0.14.2",
 ]
