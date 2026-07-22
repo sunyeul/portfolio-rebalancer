@@ -19,11 +19,10 @@ frontend/node_modules/
 frontend/dist/
 frontend/tsconfig.tsbuildinfo
 
-# Agent runtime dependencies and build output
-agent-runtime/node_modules/
-agent-runtime/dist/
-agent-runtime/tsconfig.tsbuildinfo
-
 # Local SQLite data
 data/*.sqlite3
 data/*.sqlite3-*
+
+# Local agent indexes and memories
+.serena/
+.tokensave/
