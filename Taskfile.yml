@@ -15,6 +15,16 @@ tasks:
     cmds:
       - uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
+  toss-health:
+    desc: Check Toss credentials and read-only account access
+    cmds:
+      - uv run ips-pilot toss-health
+
+  toss-sync:
+    desc: Sync a read-only Toss account observation snapshot
+    cmds:
+      - uv run ips-pilot toss-sync
+
   frontend-dev:
     desc: Run Vite frontend dev server
     dir: frontend

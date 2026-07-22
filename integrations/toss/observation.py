@@ -255,11 +255,18 @@ class TossObservationService:
         if state == SyncState.COMPLETE and self._is_stale(fx_rate):
             state = SyncState.STALE
             quality["stale"] = True
-        total_value_krw = self._overview_total_krw(overview, fx_rate)
-        invested_value_krw = self._sum_optional(
-            item.market_value_krw for item in holdings
+        overview_invested_value_krw = self._overview_total_krw(overview, fx_rate)
+        invested_value_krw = (
+            overview_invested_value_krw
+            if overview_invested_value_krw is not None
+            else self._sum_optional(item.market_value_krw for item in holdings)
         )
         cash_value_krw = self._sum_optional(item.buying_power_krw for item in cash)
+        total_value_krw = (
+            invested_value_krw + cash_value_krw
+            if invested_value_krw is not None and cash_value_krw is not None
+            else None
+        )
         snapshot = NormalizedSnapshot(
             account_alias=ACCOUNT_ALIAS,
             sync_started_at=started_at,

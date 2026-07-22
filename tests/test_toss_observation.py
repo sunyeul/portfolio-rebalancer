@@ -180,6 +180,8 @@ def test_collect_normalizes_holdings_cash_fx_and_orders():
     assert snapshot.cash_by_currency["KRW"] == pytest.approx(1000000)
     assert snapshot.cash_by_currency["USD"] == pytest.approx(100)
     assert snapshot.cash_value_krw == pytest.approx(1140000)
+    assert snapshot.invested_value_krw == pytest.approx(7200000)
+    assert snapshot.total_value_krw == pytest.approx(8340000)
     assert snapshot.orders[0].order_id == "o1"
     assert snapshot.orders[0].filled_amount_native == pytest.approx(650000)
     assert snapshot.reconciliation["cash_currency_check"] == (

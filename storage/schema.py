@@ -145,13 +145,13 @@ CREATE TABLE IF NOT EXISTS broker_holdings (
     last_price REAL NOT NULL,
     average_purchase_price REAL NOT NULL,
     market_value_native REAL NOT NULL,
-    market_value_krw REAL NOT NULL,
+    market_value_krw REAL,
     cost_native REAL NOT NULL,
-    cost_krw REAL NOT NULL,
+    cost_krw REAL,
     profit_loss_native REAL NOT NULL,
-    profit_loss_krw REAL NOT NULL,
+    profit_loss_krw REAL,
     daily_profit_loss_native REAL NOT NULL,
-    daily_profit_loss_krw REAL NOT NULL,
+    daily_profit_loss_krw REAL,
     UNIQUE(snapshot_id, symbol)
 );
 
@@ -160,7 +160,7 @@ CREATE TABLE IF NOT EXISTS broker_cash_observations (
     snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id) ON DELETE CASCADE,
     currency TEXT NOT NULL,
     buying_power_native REAL NOT NULL,
-    buying_power_krw REAL NOT NULL,
+    buying_power_krw REAL,
     UNIQUE(snapshot_id, currency)
 );
 

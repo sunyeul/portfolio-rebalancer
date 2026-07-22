@@ -65,8 +65,8 @@ uv run ips-pilot evaluate --file portfolio.csv --output-dir out
 uv run ips-pilot agent-brief --snapshot-id 14
 uv run ips-pilot review-queue --snapshot-id 14
 uv run ips-pilot risk --snapshot-id 14
-uv run ips-pilot toss-health
-uv run ips-pilot toss-sync --from 2026-01-01 --to 2026-07-23
+task toss-health
+task toss-sync
 uv run ips-pilot toss-snapshots --latest
 uv run ips-pilot portfolios list
 uv run ips-pilot snapshots list --portfolio-id 1
@@ -117,7 +117,7 @@ Legacy experimental commands and scenario-comparison options have been removed f
 
 ### Toss account observation
 
-`toss-health` performs a read-only OAuth and brokerage-account discovery check without persisting data. `toss-sync` reads holdings, KRW/USD cash buying power, USD/KRW exchange rate, and closed orders, then stores a normalized immutable observation snapshot. `toss-snapshots` reads only local snapshots; `--latest` returns the latest complete evaluable snapshot. Partial, stale, and failed snapshots remain diagnostic evidence and never replace the latest complete snapshot.
+`task toss-health` performs a read-only OAuth and brokerage-account discovery check without persisting data; the Taskfile loads `.env` for the command. `task toss-sync` reads holdings, KRW/USD cash buying power, USD/KRW exchange rate, and closed orders, then stores a normalized immutable observation snapshot. `toss-snapshots` reads only local snapshots; `--latest` returns the latest complete evaluable snapshot. Partial, stale, and failed snapshots remain diagnostic evidence and never replace the latest complete snapshot. Direct `uv run ips-pilot toss-health` usage requires exporting the three Toss variables in the shell first.
 
 These commands never create, modify, cancel, size, or execute a broker order. They emit one JSON object to stdout and do not return credentials, access tokens, or the raw brokerage account number.
 
