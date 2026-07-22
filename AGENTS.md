@@ -13,6 +13,7 @@ IPS Pilot is an IPS inspection workbench, not a trading recommender. Keep change
 - When data is missing, stale, or ambiguous, prefer observe, review, or data-verification language.
 - Apply stricter thesis, overlap, burden, and ETF-substitution checks to `satellite` and `experiment` exposure.
 - Keep core/satellite/experiment layers first-class; do not collapse them into ticker-only logic.
+- Treat normalized Toss account snapshots as the only source of holdings, cash, cost, price, order, and execution facts; never reintroduce manual portfolio, yfinance, generic broker, or Japan-account fallback paths.
 
 ## Local Skills
 

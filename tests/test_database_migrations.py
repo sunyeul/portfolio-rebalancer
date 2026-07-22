@@ -48,9 +48,7 @@ def _create_v3_fixture(path):
 def _insert_v3_generic_and_toss_rows(path):
     with sqlite3.connect(path) as conn:
         portfolio_id = int(
-            conn.execute(
-                "INSERT INTO portfolios (name) VALUES ('legacy')"
-            ).lastrowid
+            conn.execute("INSERT INTO portfolios (name) VALUES ('legacy')").lastrowid
         )
         conn.execute(
             "INSERT INTO portfolio_snapshots (portfolio_id, name) VALUES (?, 'legacy')",
@@ -123,7 +121,9 @@ def _table_names(path):
         }
 
 
-def test_fresh_database_uses_latest_schema_without_generic_tables(monkeypatch, tmp_path):
+def test_fresh_database_uses_latest_schema_without_generic_tables(
+    monkeypatch, tmp_path
+):
     path = tmp_path / "fresh.sqlite3"
     _set_database_path(monkeypatch, path)
 
@@ -165,19 +165,28 @@ def test_v3_to_v4_drops_generic_tables_and_preserves_toss_evidence(
     assert _schema_version(path) == 4
     with sqlite3.connect(path) as conn:
         assert GENERIC_TABLES.isdisjoint(_table_names(path))
-        assert conn.execute(
-            "SELECT source_fingerprint FROM broker_account_snapshots WHERE id = ?",
-            (expected["snapshot_id"],),
-        ).fetchone()[0] == expected["snapshot_fingerprint"]
-        assert conn.execute(
-            "SELECT confirmation_fingerprint FROM account_tracking_baselines "
-            "WHERE id = ?",
-            (expected["baseline_id"],),
-        ).fetchone()[0] == expected["baseline_fingerprint"]
-        assert conn.execute(
-            "SELECT input_fingerprint FROM account_performance_runs WHERE id = ?",
-            (expected["run_id"],),
-        ).fetchone()[0] == expected["run_fingerprint"]
+        assert (
+            conn.execute(
+                "SELECT source_fingerprint FROM broker_account_snapshots WHERE id = ?",
+                (expected["snapshot_id"],),
+            ).fetchone()[0]
+            == expected["snapshot_fingerprint"]
+        )
+        assert (
+            conn.execute(
+                "SELECT confirmation_fingerprint FROM account_tracking_baselines "
+                "WHERE id = ?",
+                (expected["baseline_id"],),
+            ).fetchone()[0]
+            == expected["baseline_fingerprint"]
+        )
+        assert (
+            conn.execute(
+                "SELECT input_fingerprint FROM account_performance_runs WHERE id = ?",
+                (expected["run_id"],),
+            ).fetchone()[0]
+            == expected["run_fingerprint"]
+        )
 
 
 def test_failed_v4_migration_rolls_back_all_drops(monkeypatch, tmp_path):
@@ -192,13 +201,19 @@ def test_failed_v4_migration_rolls_back_all_drops(monkeypatch, tmp_path):
 
     assert _schema_version(path) == 3
     with sqlite3.connect(path) as conn:
-        assert conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='portfolios'"
-        ).fetchone() is not None
-        assert conn.execute(
-            "SELECT 1 FROM sqlite_master "
-            "WHERE type='table' AND name='ips_instrument_profiles'"
-        ).fetchone() is None
+        assert (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='portfolios'"
+            ).fetchone()
+            is not None
+        )
+        assert (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type='table' AND name='ips_instrument_profiles'"
+            ).fetchone()
+            is None
+        )
 
 
 def test_v4_migration_creates_no_adjacent_backup(monkeypatch, tmp_path):

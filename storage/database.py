@@ -48,7 +48,9 @@ def initialize_database() -> None:
     path = db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     source_version = _migration_source_version(path)
-    is_real_upgrade = source_version is not None and source_version < LATEST_SCHEMA_VERSION
+    is_real_upgrade = (
+        source_version is not None and source_version < LATEST_SCHEMA_VERSION
+    )
 
     with connect() as conn:
         if is_real_upgrade:

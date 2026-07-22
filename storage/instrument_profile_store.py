@@ -74,9 +74,7 @@ def upsert_profile(
         normalized_layer,
         normalized_status,
         normalized_note,
-    ) = _validate_profile(
-        symbol, market_country, layer, thesis_status, thesis_note
-    )
+    ) = _validate_profile(symbol, market_country, layer, thesis_status, thesis_note)
     from storage.database import connect
 
     with connect() as conn:

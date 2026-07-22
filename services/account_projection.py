@@ -61,9 +61,13 @@ def _project_complete_snapshot(
         market_country = str(holding.get("market_country", "")).strip().upper()
         if not symbol or not market_country:
             raise AccountProjectionError("holding identity is missing")
-        market_value = _finite(holding.get("market_value_krw"), f"{symbol} market_value_krw")
+        market_value = _finite(
+            holding.get("market_value_krw"), f"{symbol} market_value_krw"
+        )
         if market_value < 0:
-            raise AccountProjectionError(f"{symbol} market_value_krw must be nonnegative")
+            raise AccountProjectionError(
+                f"{symbol} market_value_krw must be nonnegative"
+            )
         holding_total += market_value
         profile = profiles.get((market_country, symbol))
         position: dict[str, Any] = {
@@ -83,9 +87,7 @@ def _project_complete_snapshot(
         }
         positions.append(position)
         if profile is None:
-            unclassified.append(
-                {"market_country": market_country, "symbol": symbol}
-            )
+            unclassified.append({"market_country": market_country, "symbol": symbol})
         else:
             classified_value += market_value
             layer_values[profile["layer"]] += market_value

@@ -94,9 +94,7 @@ def test_projection_uses_explicit_gross_and_invested_denominators(
     assert aapl["invested_weight"] == pytest.approx(
         aapl["market_value_krw"] / result["invested_value_krw"]
     )
-    assert result["unclassified"] == [
-        {"market_country": "KR", "symbol": "005930"}
-    ]
+    assert result["unclassified"] == [{"market_country": "KR", "symbol": "005930"}]
     assert result["layer_weights_invested"]["core"] == pytest.approx(2 / 3)
 
 
@@ -112,7 +110,9 @@ def test_latest_projection_reports_the_actual_snapshot_id(monkeypatch, tmp_path)
     assert first["id"] != second["id"]
 
 
-@pytest.mark.parametrize("state", [SyncState.PARTIAL, SyncState.STALE, SyncState.FAILED])
+@pytest.mark.parametrize(
+    "state", [SyncState.PARTIAL, SyncState.STALE, SyncState.FAILED]
+)
 def test_non_complete_snapshot_is_rejected(monkeypatch, tmp_path, state):
     monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "projection.sqlite3"))
     initialize_database()

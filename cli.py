@@ -235,10 +235,7 @@ def profiles_list(
                 "ok": True,
                 "command": "profiles list",
                 "snapshot_id": projection["snapshot_id"],
-                "profiles": [
-                    profiles[key]
-                    for key in sorted(profiles)
-                ],
+                "profiles": [profiles[key] for key in sorted(profiles)],
                 "unclassified": projection["unclassified"],
                 "error": None,
             }

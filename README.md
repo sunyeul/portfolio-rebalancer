@@ -1,133 +1,53 @@
 # IPS Pilot
 
-IPS Pilot is an IPS inspection workbench built around a single v2 evaluation framework. It evaluates portfolio layers and assets with the same model, then classifies each unit as `OK`, `Watch`, `Review`, or `Action`. The output is an inspection signal, not investment advice and not an order instruction.
+IPS Pilot은 Toss증권 계좌의 읽기 전용 관찰 스냅샷을 기반으로 현금·보유자산·성과 추이를 점검하는 CLI입니다. 출력은 관찰 및 검토 신호이며, 주문 지시나 자동 매매 기능이 아닙니다.
 
-## Stack
+## 제품 경계
 
-- Backend: FastAPI, pandas, numpy, scipy, yfinance, Pydantic
-- Frontend: Bun, Vite, React, TypeScript
-- Frontend library: lucide-react
-- Storage: SQLite
+- 유일한 원천은 Toss Open API에서 정규화한 계좌 스냅샷입니다.
+- 보유 종목, 현금, 원가, 현재가, 주문·체결 사실은 Toss 관찰 데이터에서만 취급합니다.
+- 수동 포트폴리오 업로드, CSV/TSV 입력, yfinance, 일본 계좌용 대체 경로는 지원하지 않습니다.
+- OAuth·계좌 조회·잔고/보유/환율/주문 내역 조회만 허용하며 주문 생성·변경·취소·수량 산정·체결은 제품 범위 밖입니다.
+- IPS 분류는 `core`, `satellite`, `experiment` 계층과 `OK`, `Watch`, `Review`, `Action` 어휘를 유지합니다. `Action`은 예외 개입 가능성을 점검하라는 뜻이지 거래 허가가 아닙니다.
 
-## Product Shape
+## 설정
 
-- First-class layers: `core`, `satellite`, `experiment`
-- First-class layer assignment through `layer`
-- Evaluation period support: `1M`, `3M`, `6M`, `YTD`, `1Y`, `Max`, or custom start/end dates
-- Shared layer/asset outputs: weight, target gap, return, layer benchmark return, benchmark excess return, CAGR, MDD, volatility, concentration, risk contribution, efficiency, thesis status, burden, status
-- Main result surfaces: Layer Dashboard, Asset Evaluation Table, Review Queue, Journal Draft
-- Guardrails: no automatic buy/sell output, no execution flags, and no order-sizing recommendation surface
+실제 인증 정보는 `.env` 또는 셸 환경에만 설정합니다.
 
-## Development
+```bash
+TOSS_OPEN_API_CLIENT_ID=...
+TOSS_OPEN_API_CLIENT_SECRET=...
+TOSS_OPEN_API_ACCOUNT_SEQ=...
+```
+
+`TOSS_OPEN_API_ACCOUNT_SEQ`는 계좌 검색 결과에서 사용할 Toss 계좌의 순번입니다. `toss-health`가 자격 증명, OAuth, 계좌 검색, 설정한 계좌 일치를 모두 확인합니다. 인증 정보와 액세스 토큰은 소스, SQLite, 로그, 브라우저 저장소, 테스트 fixture에 저장하지 않습니다.
+
+## 실행
 
 ```bash
 uv sync
-
-cd frontend
-bun install
-cd ..
-
-task run
-task frontend-dev
-```
-
-During development, Vite proxies `/api` requests to `http://localhost:8000`. Production builds are served by FastAPI from `frontend/dist`.
-
-The default SQLite database is `data/portfolio_rebalancer.sqlite3`. Override it with `PORTFOLIO_DB_PATH`.
-
-### Toss Securities integration boundary
-
-The Toss Securities integration is server-only and read-only. Phase 0 permits the OAuth token request and allowlisted account observations, but it exposes no sync API or user-facing account data yet. Order creation, modification, cancellation, sizing, and execution are outside IPS Pilot's product boundary.
-
-Configure credentials only through the local environment variables listed in `.env.example`. Do not place real credentials in source files, SQLite, logs, browser storage, screenshots, or test fixtures.
-
-## Common Commands
-
-```bash
-task run             # FastAPI API server
-task frontend-dev    # Vite dev server
-task dev             # API + frontend dev servers
-task build-frontend  # React production build
-uv run pytest        # backend tests
-```
-
-## CLI
-
-The CLI prints a single JSON object to stdout. `evaluate` is the canonical v2 evaluation command.
-
-```bash
-uv run ips-pilot evaluate --text "VOO 40
-QQQ 60" --period YTD
-uv run ips-pilot evaluate --snapshot-id 14 --period 3M
-uv run ips-pilot evaluate --snapshot-id 14 --start-date 2026-01-01 --end-date 2026-06-30
-uv run ips-pilot evaluate --snapshot-id 14 --layer-benchmark core=SPY:80,QQQ:20 --layer-benchmark satellite=QQQ --layer-benchmark experiment=QQQ
-uv run ips-pilot evaluate --file portfolio.csv --output-dir out
-uv run ips-pilot agent-brief --snapshot-id 14
-uv run ips-pilot review-queue --snapshot-id 14
-uv run ips-pilot risk --snapshot-id 14
 task toss-health
 task toss-sync
 uv run ips-pilot toss-snapshots --latest
-uv run ips-pilot performance baseline-preview --snapshot-id 4
-uv run ips-pilot performance baseline-confirm --snapshot-id 4 --expected-principal-krw 120802745.17802304
-uv run ips-pilot performance refresh
-uv run ips-pilot performance history --latest
-uv run ips-pilot portfolios list
-uv run ips-pilot snapshots list --portfolio-id 1
+uv run ips-pilot account-view --snapshot-id 4
 ```
 
-`evaluate` returns:
+모든 CLI 명령은 stdout에 JSON 객체 하나만 출력합니다. `toss-sync`는 Toss에서 보유 종목, KRW/USD 예수금, USD/KRW 환율, 종료 주문을 읽어 불변 관찰 스냅샷으로 저장합니다. 불완전·오래된·실패 스냅샷은 진단 증거로만 남고 최신 평가 가능한 스냅샷을 대체하지 않습니다.
 
-```json
-{
-  "ok": true,
-  "command": "evaluate",
-  "input": {
-    "source": "snapshot",
-    "snapshot_id": 14,
-    "portfolio_id": 1,
-    "period": "3M",
-    "start_date": "2026-03-24",
-    "end_date": "2026-06-24",
-    "bench": "SPY:80,QQQ:20",
-    "layer_benchmarks": {
-      "core": "SPY:80,QQQ:20",
-      "satellite": "QQQ",
-      "experiment": "QQQ"
-    },
-    "database_path": "data/portfolio_rebalancer.sqlite3"
-  },
-  "evaluation_period": {},
-  "layer_evaluations": [],
-  "asset_evaluations": [],
-  "review_queue": [],
-  "journal_draft": [],
-  "warnings": [],
-  "guardrails": {
-    "not_investment_advice": true,
-    "no_immediate_order_instruction": true
-  },
-  "error": null,
-  "artifacts": {},
-  "saved": {
-    "saved": false
-  }
-}
+## 계좌 관찰과 프로필
+
+`account-view`는 특정 완료 스냅샷을 현금 비중, 투자자산 비중, 계층별 비중, 분류 커버리지로 투영합니다. 분류되지 않은 종목에 임의의 계층이나 상태를 추론하지 않습니다.
+
+```bash
+uv run ips-pilot profiles list
+uv run ips-pilot profiles set --symbol AAPL --market-country US --layer satellite --thesis-status valid --note "전략적 위성"
 ```
 
-Layer benchmarks are the canonical CLI benchmark setting. Use repeated `--layer-benchmark layer=BENCHMARK` options for `core`, `satellite`, and `experiment`; omitted layers default to `SPY:80,QQQ:20` for core and `QQQ` for satellite and experiment. The analysis benchmark is derived from the `core` layer benchmark. Each layer evaluation reports benchmark return and excess return against that layer's benchmark over the same evaluation period.
+프로필은 이미 Toss 스냅샷에서 관찰된 종목에만 설정할 수 있고, 원본 브로커 관찰 행을 변경하지 않습니다. 프로필이 없는 종목은 `classification_coverage`에서 제외되며 추가 검토 대상으로 표시됩니다.
 
-Legacy experimental commands and scenario-comparison options have been removed from the product surface.
+## 성과 추적
 
-### Toss account observation
-
-`task toss-health` performs a read-only OAuth and brokerage-account discovery check without persisting data; the Taskfile loads `.env` for the command. `task toss-sync` reads holdings, KRW/USD cash buying power, USD/KRW exchange rate, and closed orders, then stores a normalized immutable observation snapshot. `toss-snapshots` reads only local snapshots; `--latest` returns the latest complete evaluable snapshot. Partial, stale, and failed snapshots remain diagnostic evidence and never replace the latest complete snapshot. Direct `uv run ips-pilot toss-health` usage requires exporting the three Toss variables in the shell first.
-
-These commands never create, modify, cancel, size, or execute a broker order. They emit one JSON object to stdout and do not return credentials, access tokens, or the raw brokerage account number.
-
-### Account performance history
-
-Phase 2 extends the immutable Toss observations with a local account-value and performance history. Confirm the first complete snapshot once, then refresh after later `toss-sync` runs:
+성과 추적은 Toss 스냅샷 사이의 계좌 평가금과 원금 변동을 별도로 관리합니다. 최초 완료 스냅샷을 기준선으로 한 번 확인한 뒤, 이후 동기화마다 새 성과 포인트를 갱신합니다.
 
 ```bash
 uv run ips-pilot performance baseline-preview --snapshot-id 4
@@ -137,80 +57,17 @@ uv run ips-pilot performance candidates
 uv run ips-pilot performance history --latest
 ```
 
-Unexplained cash movements remain candidates until explicitly classified. Partial, stale, or failed account snapshots do not become performance points. Phase 2 does not mutate Toss, existing portfolio snapshots, or IPS evaluation results. `task toss-performance-refresh` and `task toss-performance-history` are convenience wrappers for the last two commands.
+설명되지 않은 현금 이동은 후보로 남으며 자동으로 입금·출금으로 확정하지 않습니다. 불완전·오래된·실패 스냅샷은 성과 포인트가 되지 않습니다.
 
-## API
+## 저장소와 검증
 
-All application APIs live under `/api/v1`.
-
-Workbench:
-
-- `POST /api/v1/portfolio/manual`
-- `POST /api/v1/portfolio/csv`
-- `POST /api/v1/analysis/run`
-- `POST /api/v1/evaluation/run`
-- `GET /api/v1/evaluation/download-csv`
-
-Saved portfolios and snapshots:
-
-- `GET /api/v1/portfolios`
-- `POST /api/v1/portfolios`
-- `PATCH /api/v1/portfolios/{portfolio_id}`
-- `GET /api/v1/portfolios/{portfolio_id}/current-state`
-- `POST /api/v1/portfolios/{portfolio_id}/current-state`
-- `GET /api/v1/portfolios/{portfolio_id}/snapshots`
-- `POST /api/v1/portfolios/{portfolio_id}/snapshots`
-- `GET /api/v1/portfolios/snapshots/{snapshot_id}`
-- `POST /api/v1/portfolios/snapshots/{snapshot_id}/load`
-- `PATCH /api/v1/portfolios/snapshots/{snapshot_id}`
-- `DELETE /api/v1/portfolios/snapshots/{snapshot_id}`
-
-Config and journal endpoints remain available. Saved snapshots store portfolio positions and metadata; analysis and v2 evaluation outputs are recomputed after loading a snapshot.
-
-CSV download supports only:
-
-- `metrics`
-- `layer_evaluations`
-- `asset_evaluations`
-- `review_queue`
-
-## Input Format
-
-Paste input accepts ticker and allocation:
-
-```text
-VOO 40
-QQQ 25
-SOXX 15
-```
-
-CSV/TSV and manual rows support:
-
-- `ticker`
-- `allocation`
-- `return_total`
-- `layer`: `core`, `satellite`, `experiment`
-- `thesis_status`: `valid`, `watch`, `broken`, `unknown`
-
-## Evaluation Status
-
-- `OK`: no threshold, data, thesis, or burden warning
-- `Watch`: soft warning such as thesis watch/unknown, target gap, low efficiency, or elevated burden
-- `Review`: hard threshold breach, risk overage, broken thesis, or insufficient data
-- `Action`: broken thesis plus at least one hard limit breach
-
-Status labels are inspection signals only.
-
-## Verification
+기본 SQLite 경로는 `data/portfolio_rebalancer.sqlite3`입니다. 스키마는 Toss 계좌 관찰, 성과 추적, 계층/논지 프로필, 정책 버전만 보존합니다. 마이그레이션은 무결성 검사와 secure delete를 수행합니다.
 
 ```bash
-uv run pytest
-
-cd frontend
-bun run typecheck
-bun run build
+uv run ruff format --check .
+uv run ruff check .
+uv run pytest -q
 ```
 
-## Guardrail
+현재 구현은 Phase 2 기반까지 포함하며, 이후 단계에서 현금 정책·성과 설명·IPS 검토 화면을 확장할 수 있습니다. 로드맵과 Toss 전용 수렴 설계는 [`docs/superpowers/specs/2026-07-23-toss-only-foundation-convergence-design.md`](docs/superpowers/specs/2026-07-23-toss-only-foundation-convergence-design.md)와 [`docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md`](docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md)에 있습니다.
 
-This app is for education and prototyping. Results are not investment advice. Market data depends on `yfinance` and network availability.

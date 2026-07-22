@@ -19,6 +19,6 @@ def test_default_policy_is_seeded_once_and_is_replayable(monkeypatch, tmp_path):
     assert first["policy"] == DEFAULT_POLICY
     assert first["policy_hash"] == policy_hash(DEFAULT_POLICY)
     with sqlite3.connect(path) as conn:
-        assert conn.execute(
-            "SELECT COUNT(*) FROM ips_policy_versions"
-        ).fetchone()[0] == 1
+        assert (
+            conn.execute("SELECT COUNT(*) FROM ips_policy_versions").fetchone()[0] == 1
+        )

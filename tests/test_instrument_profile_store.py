@@ -94,9 +94,7 @@ def test_profile_update_does_not_mutate_broker_holding(snapshot_fixture):
             "WHERE symbol = 'AAPL'"
         ).fetchone()
 
-    second = upsert_profile(
-        "AAPL", "US", "satellite", "watch", "Review overlap"
-    )
+    second = upsert_profile("AAPL", "US", "satellite", "watch", "Review overlap")
 
     with sqlite3.connect(snapshot_fixture["path"]) as conn:
         after = conn.execute(
