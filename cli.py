@@ -35,6 +35,15 @@ from storage.portfolio_store import (
     save_current_state,
 )
 from api.v1.serialization import safe_mapping
+from integrations.toss.auth import TossAuthorizedReader, TossTokenProvider
+from integrations.toss.config import TossApiConfig
+from integrations.toss.observation import TossObservationService
+from integrations.toss.transport import TossTransport
+from storage.account_observation_store import (
+    get_snapshot as get_account_snapshot,
+    latest_complete as latest_account_snapshot,
+    list_snapshots as list_account_snapshots,
+)
 
 
 LAYER_BENCHMARK_LAYERS = ("core", "satellite", "experiment")
@@ -74,7 +83,9 @@ def _emit_json(payload: dict[str, Any]) -> None:
     typer.echo(json.dumps(_json_safe(payload), ensure_ascii=False, indent=2))
 
 
-def _empty_v2_payload(command: str, error: dict[str, Any] | None = None) -> dict[str, Any]:
+def _empty_v2_payload(
+    command: str, error: dict[str, Any] | None = None
+) -> dict[str, Any]:
     return {
         "ok": error is None,
         "command": command,
@@ -104,6 +115,23 @@ def _exit_with_error(command: str, exc: Exception) -> None:
         }
     _emit_json(_empty_v2_payload(command, error))
     raise typer.Exit(code=1)
+
+
+def _exit_with_command_error(command: str, exc: Exception) -> None:
+    if isinstance(exc, CliError):
+        error = {"stage": exc.stage, "message": exc.message, "hint": exc.hint}
+    else:
+        error = {"stage": "unexpected", "message": str(exc), "hint": None}
+    _emit_json({"ok": False, "command": command, "error": error})
+    raise typer.Exit(code=1)
+
+
+def _build_toss_service() -> tuple[TossObservationService, TossTransport]:
+    config = TossApiConfig.from_env()
+    transport = TossTransport(config)
+    tokens = TossTokenProvider(config, transport)
+    reader = TossAuthorizedReader(config, transport, tokens)
+    return TossObservationService(config, reader), transport
 
 
 def _selected_sources(*values: Any) -> int:
@@ -166,7 +194,12 @@ def _load_asset_df(
             df = pd.read_csv(file_path, sep=separator)
             assets, warnings = parse_csv_to_assets(df)
             asset_df, validation_warnings = normalize_and_validate_assets(assets)
-            return asset_df, warnings + validation_warnings, {"source": "file", "file": str(file_path)}, None
+            return (
+                asset_df,
+                warnings + validation_warnings,
+                {"source": "file", "file": str(file_path)},
+                None,
+            )
 
         if text is not None:
             assets, warnings = parse_text_to_assets_service(text)
@@ -177,7 +210,10 @@ def _load_asset_df(
         if portfolio_id is not None:
             state = get_current_state(portfolio_id)
             if state is None:
-                raise CliError("input", f"portfolio_id={portfolio_id}의 current-state를 찾을 수 없습니다.")
+                raise CliError(
+                    "input",
+                    f"portfolio_id={portfolio_id}의 current-state를 찾을 수 없습니다.",
+                )
             return (
                 pd.DataFrame(state["session_state"].get("asset_df") or []),
                 [],
@@ -192,7 +228,11 @@ def _load_asset_df(
         return (
             pd.DataFrame(snapshot["session_state"].get("asset_df") or []),
             [],
-            {"source": "snapshot", "snapshot_id": snapshot_id, "portfolio_id": source_portfolio_id},
+            {
+                "source": "snapshot",
+                "snapshot_id": snapshot_id,
+                "portfolio_id": source_portfolio_id,
+            },
             source_portfolio_id,
         )
     except PortfolioInputError as exc:
@@ -212,7 +252,9 @@ def _save_run(
     note: str,
     session_data: dict[str, Any],
 ) -> dict[str, Any]:
-    name = snapshot_name or f"CLI evaluation {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    name = (
+        snapshot_name or f"CLI evaluation {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    )
     snapshot = create_snapshot(portfolio_id, name, note, session_data)
     current_state = save_current_state(portfolio_id, session_data)
     return {
@@ -293,12 +335,16 @@ def _run_v2(
     return payload, asset_df, analysis, input_meta, source_portfolio_id
 
 
-def _session_data(asset_df: pd.DataFrame, analysis, evaluation_payload: dict[str, Any]) -> dict[str, Any]:
+def _session_data(
+    asset_df: pd.DataFrame, analysis, evaluation_payload: dict[str, Any]
+) -> dict[str, Any]:
     return {
         "asset_df": asset_df.to_dict(orient="records"),
         "prices": analysis.prices.reset_index().to_dict(orient="records"),
         "returns": analysis.returns.reset_index().to_dict(orient="records"),
-        "returns_smooth": analysis.returns_smooth.reset_index().to_dict(orient="records"),
+        "returns_smooth": analysis.returns_smooth.reset_index().to_dict(
+            orient="records"
+        ),
         "weights_no_bench": analysis.weights_no_bench.to_dict(),
         "metrics_df": analysis.metrics_df.reset_index().to_dict(orient="records"),
         "portfolio_metrics": analysis.portfolio_metrics,
@@ -341,10 +387,14 @@ def evaluate(
     start_date: Annotated[str | None, typer.Option("--start-date")] = None,
     end_date: Annotated[str | None, typer.Option("--end-date")] = None,
     as_of_date: Annotated[str | None, typer.Option("--as-of-date")] = None,
-    layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
+    layer_benchmark: Annotated[
+        list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)
+    ] = None,
     output_dir: Annotated[Path | None, typer.Option("--output-dir")] = None,
     save: Annotated[bool, typer.Option("--save")] = False,
-    save_to_portfolio_id: Annotated[int | None, typer.Option("--save-to-portfolio-id")] = None,
+    save_to_portfolio_id: Annotated[
+        int | None, typer.Option("--save-to-portfolio-id")
+    ] = None,
     snapshot_name: Annotated[str | None, typer.Option("--snapshot-name")] = None,
     note: Annotated[str, typer.Option("--note")] = "",
 ) -> None:
@@ -379,7 +429,10 @@ def evaluate(
         if target_portfolio_id is None and save:
             target_portfolio_id = source_portfolio_id
         if save and target_portfolio_id is None:
-            raise CliError("persistence", "--save는 DB 입력 또는 --save-to-portfolio-id와 함께 사용해야 합니다.")
+            raise CliError(
+                "persistence",
+                "--save는 DB 입력 또는 --save-to-portfolio-id와 함께 사용해야 합니다.",
+            )
         saved = (
             _save_run(
                 portfolio_id=target_portfolio_id,
@@ -405,7 +458,9 @@ def agent_brief(
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
     period: Annotated[str, typer.Option("--period")] = "3M",
     as_of_date: Annotated[str | None, typer.Option("--as-of-date")] = None,
-    layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
+    layer_benchmark: Annotated[
+        list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)
+    ] = None,
 ) -> None:
     """Emit a compact v2 IPS brief for agents."""
     try:
@@ -455,7 +510,9 @@ def review_queue(
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
     period: Annotated[str, typer.Option("--period")] = "3M",
     as_of_date: Annotated[str | None, typer.Option("--as-of-date")] = None,
-    layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
+    layer_benchmark: Annotated[
+        list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)
+    ] = None,
 ) -> None:
     """Emit v2 review queue only."""
     try:
@@ -495,7 +552,9 @@ def risk(
     snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
     period: Annotated[str, typer.Option("--period")] = "3M",
     as_of_date: Annotated[str | None, typer.Option("--as-of-date")] = None,
-    layer_benchmark: Annotated[list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)] = None,
+    layer_benchmark: Annotated[
+        list[str] | None, typer.Option("--layer-benchmark", help=LAYER_BENCHMARK_HELP)
+    ] = None,
 ) -> None:
     """Emit v2 units with risk-related triggers."""
     try:
@@ -514,7 +573,10 @@ def risk(
         risk_items = [
             item
             for item in payload["review_queue"]
-            if any("risk" in code or "mdd" in code or "volatility" in code for code in item.get("triggered_by", []))
+            if any(
+                "risk" in code or "mdd" in code or "volatility" in code
+                for code in item.get("triggered_by", [])
+            )
         ]
         _emit_json(
             {
@@ -530,6 +592,91 @@ def risk(
         )
     except Exception as exc:
         _exit_with_error("risk", exc)
+
+
+@app.command("toss-health")
+def toss_health() -> None:
+    """Check Toss config, OAuth, account discovery, and account match as JSON."""
+    transport: TossTransport | None = None
+    try:
+        service, transport = _build_toss_service()
+        _emit_json({"ok": True, "command": "toss-health", **service.health()})
+    except Exception as exc:
+        _exit_with_command_error("toss-health", exc)
+    finally:
+        if transport is not None:
+            transport.close()
+
+
+@app.command("toss-sync")
+def toss_sync(
+    from_date: Annotated[str | None, typer.Option("--from")] = None,
+    to_date: Annotated[str | None, typer.Option("--to")] = None,
+    max_order_pages: Annotated[int, typer.Option("--max-order-pages")] = 100,
+) -> None:
+    """Read Toss account observations and persist one immutable snapshot as JSON."""
+    transport: TossTransport | None = None
+    try:
+        initialize_database()
+        service, transport = _build_toss_service()
+        snapshot = service.sync(
+            from_date=from_date,
+            to_date=to_date,
+            max_order_pages=max_order_pages,
+        )
+        _emit_json(
+            {
+                "ok": True,
+                "command": "toss-sync",
+                "snapshot_id": snapshot["id"],
+                "state": snapshot["state"],
+                "snapshot": snapshot,
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("toss-sync", exc)
+    finally:
+        if transport is not None:
+            transport.close()
+
+
+@app.command("toss-snapshots")
+def toss_snapshots(
+    latest: Annotated[bool, typer.Option("--latest")] = False,
+    snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
+    limit: Annotated[int, typer.Option("--limit")] = 20,
+) -> None:
+    """Inspect locally persisted Toss snapshots without contacting Toss."""
+    try:
+        initialize_database()
+        if latest and snapshot_id is not None:
+            raise CliError(
+                "input",
+                "--latest와 --snapshot-id는 함께 사용할 수 없습니다.",
+            )
+        if latest:
+            payload: Any = latest_account_snapshot()
+        elif snapshot_id is not None:
+            payload = get_account_snapshot(snapshot_id)
+            if payload is None:
+                raise CliError(
+                    "persistence", f"snapshot_id={snapshot_id}를 찾을 수 없습니다."
+                )
+        else:
+            payload = list_account_snapshots(limit)
+        _emit_json(
+            {
+                "ok": True,
+                "command": "toss-snapshots",
+                "latest": latest,
+                "snapshot_id": snapshot_id,
+                "snapshots": payload,
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("toss-snapshots", exc)
 
 
 @portfolios_app.command("list")
