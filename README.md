@@ -35,6 +35,12 @@ During development, Vite proxies `/api` requests to `http://localhost:8000`. Pro
 
 The default SQLite database is `data/portfolio_rebalancer.sqlite3`. Override it with `PORTFOLIO_DB_PATH`.
 
+### Toss Securities integration boundary
+
+The Toss Securities integration is server-only and read-only. Phase 0 permits the OAuth token request and allowlisted account observations, but it exposes no sync API or user-facing account data yet. Order creation, modification, cancellation, sizing, and execution are outside IPS Pilot's product boundary.
+
+Configure credentials only through the local environment variables listed in `.env.example`. Do not place real credentials in source files, SQLite, logs, browser storage, screenshots, or test fixtures.
+
 ## Common Commands
 
 ```bash

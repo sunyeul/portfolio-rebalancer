@@ -1,3 +1,6 @@
+import tomllib
+from pathlib import Path
+
 import pytest
 
 from integrations.toss.config import TossApiConfig, TossConfigError
@@ -65,7 +68,21 @@ def test_sensitive_headers_and_known_values_are_redacted():
         "X-Tossinvest-Account": REDACTED,
         "Accept": "application/json",
     }
-    assert redact_known_values(
-        "client-id client-secret access-token account-1234",
-        ["client-id", "client-secret", "access-token", "account-1234"],
-    ) == f"{REDACTED} {REDACTED} {REDACTED} {REDACTED}"
+    assert (
+        redact_known_values(
+            "client-id client-secret access-token account-1234",
+            ["client-id", "client-secret", "access-token", "account-1234"],
+        )
+        == f"{REDACTED} {REDACTED} {REDACTED} {REDACTED}"
+    )
+
+
+def test_toss_runtime_dependencies_and_package_are_declared():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+
+    assert "httpx>=0.28.0" in pyproject["project"]["dependencies"]
+    assert "httpx>=0.28.0" not in pyproject["dependency-groups"]["dev"]
+    assert (
+        "integrations*"
+        in pyproject["tool"]["setuptools"]["packages"]["find"]["include"]
+    )
