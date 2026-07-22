@@ -11,7 +11,7 @@ Remove the entire Review Copilot and A2UI feature set while preserving the ordin
 ## Approach
 
 - Remove the frontend CopilotKit integration, Review Copilot component, A2UI providers, generated-surface code, schemas, renderers, utilities, and their dedicated tests.
-- Render the existing evaluation graph and Review Queue directly from the API evaluation response. The Review Queue continues to use its existing inspection-only status vocabulary and locally managed decision controls; it no longer requests AI-generated explanations.
+- Remove the generated evaluation-graph section. Render the Review Queue directly from the API evaluation response as an inspection-only list of its existing status, trigger, and next-review fields; do not retain agent explanations or unpersisted disposition controls.
 - Remove the Bun `agent-runtime` package and all CopilotKit/OpenAI runtime configuration, Vite proxying, styles, task commands, and documentation references.
 - Keep the Python API and CLI unchanged. Codex analysis continues through the existing CLI commands and saved snapshots rather than an embedded web assistant.
 
