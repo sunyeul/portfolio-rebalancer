@@ -103,7 +103,7 @@ Toss Securities Open API
 
 The adapter uses OAuth 2.0 Client Credentials and the required account header. It exposes only account, holdings, purchasing-power, exchange-rate, and order-history reads supported by the official OpenAPI document.
 
-The transport layer rejects non-GET requests to the Toss domain. The application does not generate a full OpenAPI client that would expose order mutation methods. Client secrets and access tokens remain in environment-backed server configuration and process memory; they are never persisted or returned to the browser.
+The transport layer permits only allowlisted GET endpoints plus `POST /oauth2/token`, which is required by OAuth 2.0 Client Credentials. Every order mutation endpoint remains blocked. The application does not generate a full OpenAPI client that would expose order mutation methods. Client secrets and access tokens remain in environment-backed server configuration and process memory; they are never persisted or returned to the browser.
 
 ### Immutable account snapshots
 
@@ -135,12 +135,12 @@ Existing position snapshots and append-only evaluation runs remain intact. A bro
 - Back up the existing database before the first schema migration.
 - Remove destructive initialization patterns from the migration path.
 - Add server-only credential configuration and systematic secret/account-number redaction.
-- Implement an allowlisted GET-only broker transport with mutation-method rejection.
+- Implement an allowlisted read-only broker transport that permits GET observations and only the OAuth token POST.
 
 **Exit criteria**
 
 - Existing portfolios, snapshots, evaluation runs, configuration, and journal entries survive migration tests.
-- No Toss request using POST, PUT, PATCH, or DELETE can leave the process.
+- The only non-GET Toss request that can leave the process is `POST /oauth2/token`; every order mutation request is rejected locally.
 - Secrets, tokens, and raw account numbers are absent from persistence, logs, API responses, and frontend state.
 
 ### Phase 1 — Toss account observation
@@ -265,7 +265,7 @@ Required verification categories are:
 
 - migration from a real prior-schema fixture without data loss;
 - credential and account-identifier redaction;
-- network tests proving broker mutation methods are rejected;
+- network tests proving only the OAuth token POST is permitted and every broker mutation method is rejected;
 - official OpenAPI response-contract fixtures without live market dependency;
 - KRW/USD purchasing-power overlap and rounding reconciliation cases;
 - partial, stale, time-skewed, paginated, duplicated, and out-of-order responses;
@@ -292,4 +292,3 @@ Before a phase advances, all of the following must be true:
 4. Missing or ambiguous data fails safely.
 5. No direct buy/sell, order sizing, or execution field is introduced.
 6. The smallest complete verification suite passes.
-
