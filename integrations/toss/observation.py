@@ -598,10 +598,13 @@ class TossObservationService:
         market_value = overview.get("marketValue")
         if not isinstance(market_value, Mapping):
             market_value = {}
+        market_amount = market_value.get("amount")
+        if not isinstance(market_amount, Mapping):
+            market_amount = {}
         comparisons = {}
         all_within = True
         for currency, total in by_currency.items():
-            overview_value = market_value.get(currency.lower())
+            overview_value = market_amount.get(currency.lower())
             overview_total = _optional_decimal(
                 overview_value, f"overview.marketValue.{currency.lower()}"
             )
@@ -681,8 +684,15 @@ class TossObservationService:
         market_value = overview.get("marketValue")
         if not isinstance(market_value, Mapping):
             return None
-        krw = _optional_decimal(market_value.get("krw"), "overview.marketValue.krw")
-        usd = _optional_decimal(market_value.get("usd"), "overview.marketValue.usd")
+        market_amount = market_value.get("amount")
+        if not isinstance(market_amount, Mapping):
+            return None
+        krw = _optional_decimal(
+            market_amount.get("krw"), "overview.marketValue.amount.krw"
+        )
+        usd = _optional_decimal(
+            market_amount.get("usd"), "overview.marketValue.amount.usd"
+        )
         if krw is None:
             return None
         if usd is not None and fx_rate is None:

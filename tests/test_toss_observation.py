@@ -110,7 +110,10 @@ def _holdings_response(market_value="7200000"):
     return {
         "result": {
             "totalPurchaseAmount": {"krw": "6500000", "usd": None},
-            "marketValue": {"krw": market_value, "usd": None},
+            "marketValue": {
+                "amount": {"krw": market_value, "usd": None},
+                "amountAfterCost": {"krw": market_value, "usd": None},
+            },
             "profitLoss": {
                 "krw": "700000",
                 "usd": None,
