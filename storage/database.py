@@ -1,29 +1,20 @@
-"""SQLite connection and schema management."""
+"""SQLite connection and Toss-only schema management."""
 
 from __future__ import annotations
 
 import os
 import sqlite3
-from datetime import datetime, timezone
 from pathlib import Path
 
+from storage.policy_store import ensure_default_policy
 from storage.schema import LATEST_SCHEMA_VERSION, migrate, schema_version
 
 
 DEFAULT_DB_PATH = Path("data") / "portfolio_rebalancer.sqlite3"
 
-THESIS_STATUS_SEEDS = [
-    ("unknown", "미정", 0),
-    ("valid", "유효", 10),
-    ("watch", "관찰", 20),
-    ("broken", "훼손", 30),
-]
 
-TARGET_ALLOCATION_SEEDS = [
-    ("core", 0.70, 0.80, 0.90),
-    ("satellite", 0.10, 0.20, 0.30),
-    ("experiment", 0.00, 0.00, 0.05),
-]
+class DatabaseIntegrityError(RuntimeError):
+    """Raised when a migrated database fails SQLite integrity checks."""
 
 
 def db_path() -> Path:
@@ -41,18 +32,36 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+def _assert_integrity(conn: sqlite3.Connection) -> None:
+    """Fail closed when SQLite reports structural corruption."""
+    result = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
+    foreign_keys = conn.execute("PRAGMA foreign_key_check").fetchall()
+    if result != "ok" or foreign_keys:
+        raise DatabaseIntegrityError(
+            f"database integrity failed: integrity={result}, "
+            f"foreign_key_errors={len(foreign_keys)}"
+        )
+
+
 def initialize_database() -> None:
-    """Back up, migrate, and seed the local persistence database."""
+    """Migrate, seed, validate, and vacuum the Toss-only local database."""
     path = db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     source_version = _migration_source_version(path)
-    if source_version is not None:
-        _create_migration_backup(path, source_version)
+    is_real_upgrade = source_version is not None and source_version < LATEST_SCHEMA_VERSION
 
     with connect() as conn:
+        if is_real_upgrade:
+            conn.execute("PRAGMA secure_delete = ON")
         migrate(conn)
-        _seed_lookup(conn, "thesis_statuses", THESIS_STATUS_SEEDS)
-        _seed_target_allocations(conn)
+        ensure_default_policy(conn)
+        _assert_integrity(conn)
+
+    if is_real_upgrade:
+        with connect() as conn:
+            conn.execute("VACUUM")
+        with connect() as conn:
+            _assert_integrity(conn)
 
 
 def _migration_source_version(path: Path) -> int | None:
@@ -74,51 +83,3 @@ def _migration_source_version(path: Path) -> int | None:
     if object_count == 0 or version >= LATEST_SCHEMA_VERSION:
         return None
     return version
-
-
-def _create_migration_backup(path: Path, source_version: int) -> Path:
-    """Create a SQLite-consistent backup before a forward migration."""
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    backup_path = path.with_name(
-        f"{path.name}.pre-v{source_version}-to-v{LATEST_SCHEMA_VERSION}-{stamp}.bak"
-    )
-    with sqlite3.connect(path) as source, sqlite3.connect(backup_path) as target:
-        source.backup(target)
-    return backup_path
-
-
-def _seed_lookup(
-    conn: sqlite3.Connection,
-    table: str,
-    rows: list[tuple[str, str, int]],
-) -> None:
-    for code, label, sort_order in rows:
-        conn.execute(
-            f"""
-            INSERT INTO {table} (code, label, sort_order, is_active)
-            VALUES (?, ?, ?, 1)
-            ON CONFLICT(code) DO UPDATE SET
-                label = excluded.label,
-                sort_order = excluded.sort_order,
-                is_active = 1
-            """,
-            (code, label, sort_order),
-        )
-
-
-def _seed_target_allocations(conn: sqlite3.Connection) -> None:
-    active_layers = [layer for layer, _, _, _ in TARGET_ALLOCATION_SEEDS]
-    placeholders = ",".join("?" for _ in active_layers)
-    conn.execute(
-        f"DELETE FROM ips_target_allocations WHERE layer NOT IN ({placeholders})",
-        active_layers,
-    )
-    for layer, min_value, target_value, max_value in TARGET_ALLOCATION_SEEDS:
-        conn.execute(
-            """
-            INSERT INTO ips_target_allocations (layer, min, target, max)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(layer) DO NOTHING
-            """,
-            (layer, min_value, target_value, max_value),
-        )

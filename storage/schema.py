@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 
-LATEST_SCHEMA_VERSION = 3
+LATEST_SCHEMA_VERSION = 4
 
 
 class SchemaVersionError(RuntimeError):
@@ -324,10 +324,57 @@ CREATE INDEX IF NOT EXISTS idx_perf_candidates_baseline
 """
 
 
+MIGRATION_4_SQL = """
+PRAGMA secure_delete = ON;
+
+DROP TABLE IF EXISTS journal_entries;
+DROP TABLE IF EXISTS snapshot_evaluation_runs;
+DROP TABLE IF EXISTS snapshot_positions;
+DROP TABLE IF EXISTS portfolio_current_states;
+DROP TABLE IF EXISTS portfolio_snapshots;
+DROP TABLE IF EXISTS assets;
+DROP TABLE IF EXISTS portfolios;
+DROP TABLE IF EXISTS ips_action_priorities;
+DROP TABLE IF EXISTS ips_rules;
+DROP TABLE IF EXISTS ips_target_allocations;
+DROP TABLE IF EXISTS thesis_statuses;
+DROP TABLE IF EXISTS analysis_runs;
+
+CREATE TABLE ips_instrument_profiles (
+    account_alias TEXT NOT NULL,
+    market_country TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    layer TEXT NOT NULL CHECK(layer IN ('core', 'satellite', 'experiment')),
+    thesis_status TEXT NOT NULL
+        CHECK(thesis_status IN ('unknown', 'valid', 'watch', 'broken')),
+    thesis_note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(account_alias, market_country, symbol)
+);
+
+CREATE TABLE ips_policy_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_alias TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    policy_json TEXT NOT NULL,
+    policy_hash TEXT NOT NULL UNIQUE,
+    superseded_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(account_alias, version)
+);
+
+CREATE UNIQUE INDEX idx_ips_policy_one_active
+    ON ips_policy_versions(account_alias)
+    WHERE superseded_at IS NULL;
+"""
+
+
 MIGRATIONS = {
     1: MIGRATION_1_SQL,
     2: MIGRATION_2_SQL,
     3: MIGRATION_3_SQL,
+    4: MIGRATION_4_SQL,
 }
 
 
