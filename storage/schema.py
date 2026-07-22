@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 
-LATEST_SCHEMA_VERSION = 2
+LATEST_SCHEMA_VERSION = 3
 
 
 class SchemaVersionError(RuntimeError):
@@ -208,7 +208,127 @@ CREATE INDEX IF NOT EXISTS idx_broker_orders_snapshot
 """
 
 
-MIGRATIONS = {1: MIGRATION_1_SQL, 2: MIGRATION_2_SQL}
+MIGRATION_3_SQL = """
+CREATE TABLE IF NOT EXISTS account_tracking_baselines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_alias TEXT NOT NULL UNIQUE,
+    baseline_snapshot_id INTEGER NOT NULL UNIQUE
+        REFERENCES broker_account_snapshots(id),
+    tracking_started_at TEXT NOT NULL,
+    initial_principal_krw REAL NOT NULL,
+    baseline_fx_rate REAL,
+    confirmed_at TEXT NOT NULL,
+    confirmation_fingerprint TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS account_cash_flow_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    baseline_id INTEGER NOT NULL REFERENCES account_tracking_baselines(id),
+    from_snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id),
+    to_snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id),
+    currency TEXT NOT NULL,
+    observed_delta_native REAL NOT NULL,
+    explained_trade_delta_native REAL NOT NULL,
+    residual_native REAL NOT NULL,
+    residual_krw REAL,
+    materiality_threshold_krw REAL NOT NULL,
+    bridge_basis TEXT NOT NULL CHECK(
+        bridge_basis IN ('filled_at', 'settlement_date', 'none')
+    ),
+    candidate_fingerprint TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS account_cash_flow_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidate_id INTEGER NOT NULL REFERENCES account_cash_flow_candidates(id),
+    classification TEXT NOT NULL CHECK(classification IN (
+        'external_deposit', 'external_withdrawal', 'investment_income',
+        'fee_or_tax', 'internal_fx', 'rounding_or_false_positive',
+        'other_non_external'
+    )),
+    confirmed_amount_native REAL,
+    confirmed_amount_krw REAL,
+    effective_at TEXT,
+    note TEXT NOT NULL DEFAULT '',
+    decided_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS account_performance_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    baseline_id INTEGER NOT NULL REFERENCES account_tracking_baselines(id),
+    through_snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id),
+    input_fingerprint TEXT NOT NULL UNIQUE,
+    engine_version TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('complete', 'partial', 'blocked')),
+    data_quality_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS account_performance_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES account_performance_runs(id),
+    snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id),
+    previous_snapshot_id INTEGER REFERENCES broker_account_snapshots(id),
+    point_at TEXT NOT NULL,
+    evaluation_state TEXT NOT NULL CHECK(
+        evaluation_state IN ('evaluable', 'non_evaluable')
+    ),
+    evaluation_reason TEXT,
+    total_value_krw REAL,
+    invested_value_krw REAL,
+    cash_value_krw REAL,
+    current_cost_basis_krw REAL,
+    unrealized_pnl_krw REAL,
+    tracking_principal_krw REAL,
+    cumulative_external_flow_krw REAL,
+    account_gain_krw REAL,
+    simple_return REAL,
+    interval_twr REAL,
+    segment_id INTEGER,
+    segment_twr REAL,
+    tracked_realized_pnl_krw REAL,
+    actual_realized_pnl_krw REAL,
+    fx_remeasurement_krw REAL,
+    UNIQUE(run_id, snapshot_id)
+);
+
+CREATE TABLE IF NOT EXISTS account_execution_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL REFERENCES account_performance_runs(id),
+    source_snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id),
+    order_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    side TEXT NOT NULL,
+    filled_at TEXT,
+    settlement_date TEXT,
+    filled_quantity_native REAL NOT NULL,
+    filled_amount_native REAL,
+    commission_native REAL,
+    tax_native REAL,
+    actual_basis_before_native REAL,
+    tracking_basis_before_native REAL,
+    actual_realized_pnl_native REAL,
+    tracking_realized_pnl_native REAL,
+    realized_pnl_krw REAL,
+    krw_conversion_snapshot_id INTEGER
+        REFERENCES broker_account_snapshots(id),
+    UNIQUE(run_id, order_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_perf_points_run_snapshot
+    ON account_performance_points(run_id, snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_perf_candidates_baseline
+    ON account_cash_flow_candidates(baseline_id, from_snapshot_id, to_snapshot_id);
+"""
+
+
+MIGRATIONS = {
+    1: MIGRATION_1_SQL,
+    2: MIGRATION_2_SQL,
+    3: MIGRATION_3_SQL,
+}
 
 
 def schema_version(conn: sqlite3.Connection) -> int:
