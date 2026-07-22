@@ -30,7 +30,9 @@ IPS Pilot is an IPS inspection workbench, not a trading recommender. Keep change
 ## Working Rules
 
 - Discover commands, file layout, and API shape from the repo instead of relying on this guide.
+- For codebase navigation, use TokenSave MCP semantic tools first when available; treat `.tokensave/` as local derived data.
 - Use the smallest verification set that covers the change; broaden only when touching shared contracts or cross-surface behavior.
+- Treat adversarial review as a mandatory design gate before implementation; challenge omissions, guardrail regressions, stale references, destructive steps, and verification gaps.
 - Be careful with local SQLite schema and snapshot changes because user state may already exist.
 - Tests should not require live market data unless the user explicitly asks for live-data verification.
 - Keep status rules in one backend source of truth and avoid re-implementing classification logic in API, CLI, or frontend surfaces.
@@ -48,3 +50,5 @@ When asked to update or audit this file:
 5. Prefer one line per durable lesson. Do not record one-off debugging details unless they would prevent likely future mistakes.
 
 Good additions are durable product guardrails, repo-specific gotchas, safety-critical workflow rules, and decisions that are easy to miss even after reading the code. Bad additions are command lists, directory maps, stale paths, broad investment advice, or implementation details obvious from nearby source.
+
+@RTK.md

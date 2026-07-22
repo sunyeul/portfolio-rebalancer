@@ -1,0 +1,8 @@
+[mcp_servers.serena]
+command = "serena"
+args = ["start-mcp-server", "--context=codex", "--project-from-cwd"]
+
+[mcp_servers.tokensave]
+command = "/Users/junhyeong.kim/.local/bin/tokensave"
+args = ["serve"]
+default_tools_approval_mode = "auto"
