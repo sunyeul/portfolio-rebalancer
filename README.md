@@ -7,7 +7,6 @@ IPS Pilot is an IPS inspection workbench built around a single v2 evaluation fra
 - Backend: FastAPI, pandas, numpy, scipy, yfinance, Pydantic
 - Frontend: Bun, Vite, React, TypeScript
 - Frontend libraries: TanStack Query, Zod, lucide-react
-- Review Copilot: CopilotKit v2, Bun sidecar runtime, TanStack AI/OpenAI
 - Storage: SQLite
 
 ## Product Shape
@@ -18,15 +17,6 @@ IPS Pilot is an IPS inspection workbench built around a single v2 evaluation fra
 - Shared layer/asset outputs: weight, target gap, return, layer benchmark return, benchmark excess return, CAGR, MDD, volatility, concentration, risk contribution, efficiency, thesis status, burden, status
 - Main result surfaces: Layer Dashboard, Asset Evaluation Table, Review Queue, Journal Draft
 - Guardrails: no automatic buy/sell output, no execution flags, and no order-sizing recommendation surface
-
-## Review Copilot A2UI
-
-Review Copilot may render only the `ips-pilot-review/v1` declarative surfaces:
-
-- `ReviewQueueTriageSurface`
-- `JournalDraftComposerSurface`
-
-The allowed disposition vocabulary is limited to `include_in_journal`, `observe`, `review_thesis`, and `defer_until_next_review`. Buy/sell, order sizing, immediate rebalance, and broker execution actions are blocked by prompt rules, schema validation, and renderer allowlists.
 
 ## Development
 
@@ -39,17 +29,9 @@ cd ..
 
 task run
 task frontend-dev
-task agent-dev
 ```
 
-During development, Vite proxies `/api` requests to `http://localhost:8000` and `/copilotkit` requests to the Review Copilot runtime at `http://localhost:3001`. Production builds are served by FastAPI from `frontend/dist`.
-
-Review Copilot requires `OPENAI_API_KEY`. Optional runtime settings:
-
-```bash
-COPILOT_MODEL=gpt-4o
-COPILOT_RUNTIME_PORT=3001
-```
+During development, Vite proxies `/api` requests to `http://localhost:8000`. Production builds are served by FastAPI from `frontend/dist`.
 
 The default SQLite database is `data/portfolio_rebalancer.sqlite3`. Override it with `PORTFOLIO_DB_PATH`.
 
@@ -58,8 +40,7 @@ The default SQLite database is `data/portfolio_rebalancer.sqlite3`. Override it 
 ```bash
 task run             # FastAPI API server
 task frontend-dev    # Vite dev server
-task agent-dev       # Review Copilot runtime
-task dev             # API + frontend + Review Copilot dev servers
+task dev             # API + frontend dev servers
 task build-frontend  # React production build
 uv run pytest        # backend tests
 ```

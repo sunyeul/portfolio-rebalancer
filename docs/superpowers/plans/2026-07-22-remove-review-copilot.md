@@ -15,7 +15,7 @@
 - Create: frontend/src/lib/reviewQueue.ts — native Review Queue grouping.
 - Create: frontend/tests/reviewQueue.test.ts — grouping contract test.
 - Modify: frontend/src/App.tsx — direct result rendering and no Copilot wrapper.
-- Modify: frontend/package.json, frontend/bun.lock, frontend/vite.config.ts, frontend/src/styles/app.css, Taskfile.yml, .env.example, README.md.
+- Modify: frontend/package.json, frontend/bun.lock, frontend/vite.config.ts, frontend/src/styles/app.css, Taskfile.yml, .env.example, README.md, .gitignore.
 - Delete: agent-runtime/, frontend/src/copilot/, frontend/src/a2ui/, frontend/tests/a2ui.validation.test.ts.
 - Delete: docs/superpowers/specs/2026-06-27-review-copilot-sidebar-design.md and docs/superpowers/plans/2026-06-27-review-copilot-sidebar.md.
 
@@ -77,6 +77,23 @@ Expected: FAIL because src/lib/reviewQueue does not exist.
 
     export type ReviewQueueStatus = (typeof reviewQueueStatusOrder)[number];
 
+    const reviewTriggerExplanations: Record<string, string> = {
+      risk_contribution: '위험 기여도가 커서 이 부담이 의도된 것인지 확인합니다.',
+      risk_contribution_high: '위험 기여도가 커서 이 부담이 의도된 것인지 확인합니다.',
+      target_gap_outside_tolerance: '현재 비중과 IPS 목표 범위의 차이를 확인합니다.',
+      thesis_watch: '기록된 투자 논리가 관찰 또는 재검토 상태인지 확인합니다.',
+      thesis_broken: '투자 논리가 훼손됐는지 근거를 다시 확인합니다.',
+      volatility_exceeded: '변동성이 허용 기준을 넘었는지 확인합니다.',
+      mdd_exceeded: '낙폭이 점검 기준을 넘었는지 확인합니다.',
+      efficiency_below_threshold: '성과 대비 위험 효율이 낮아졌는지 확인합니다.',
+      high_burden: '관리 부담이나 계층 내 부담이 커졌는지 확인합니다.',
+      max_weight_exceeded: '항목 또는 계층 비중이 상한을 넘었는지 확인합니다.'
+    };
+
+    export function describeReviewTrigger(code: string) {
+      return reviewTriggerExplanations[code] ?? '기록된 점검 신호와 데이터 근거를 확인합니다.';
+    }
+
     export function groupReviewQueueItems(queue: ReviewItem[]) {
       return reviewQueueStatusOrder.map((status) => ({
         status,
@@ -127,7 +144,7 @@ Remove focusedLayer from LayerDashboard and AssetEvaluationTable. Layer rows use
 
 - [ ] **Step 3: Replace ReviewQueue with an API-data-only section**
 
-Use groupReviewQueueItems(evaluation.review_queue), then render Action, Review, and Watch groups. Each item presents only its name, StatusBadge, layer name, triggered_by codes, and suggested_next_step. Add the following fixed notice above the groups:
+Use groupReviewQueueItems(evaluation.review_queue), then render Action, Review, and Watch groups. Show the evaluation period and item count, and present each item with its name, StatusBadge, layer name, raw trigger code plus a fixed human-readable explanation from describeReviewTrigger, and suggested_next_step. The Action heading must state that exceptional intervention is for human review, not permission to trade. Add the following fixed notice above the groups:
 
     이 목록은 IPS 점검 신호입니다. 매매 지시나 주문 수량 산정이 아닙니다.
 
@@ -184,12 +201,13 @@ Reduce the body style to:
       background: #f5f7fb;
     }
 
+Remove the three agent-runtime ignore entries from .gitignore. Preserve the user's local .serena/ and .tokensave/ ignore entries.
+
 - [ ] **Step 3: Delete the feature implementation**
 
     git rm -r frontend/src/copilot frontend/src/a2ui frontend/tests/a2ui.validation.test.ts agent-runtime
-    rm -rf agent-runtime
 
-Expected: source control stages every tracked feature file, and the remaining ignored agent-runtime modules are also gone from the local worktree.
+Expected: source control stages every tracked feature file. Do not delete ignored or untracked local files under agent-runtime without separately inspecting and approving those exact paths; source removal does not require deleting installed dependencies.
 
 - [ ] **Step 4: Build**
 
@@ -206,7 +224,7 @@ Expected: PASS with no CopilotKit chunk or /copilotkit route.
 ### Task 4: Remove obsolete configuration and documentation
 
 **Files:**
-- Modify: Taskfile.yml, .env.example, README.md
+- Modify: Taskfile.yml, .env.example, README.md, .gitignore
 - Delete: docs/superpowers/specs/2026-06-27-review-copilot-sidebar-design.md, docs/superpowers/plans/2026-06-27-review-copilot-sidebar.md
 
 - [ ] **Step 1: Remove agent-dev from Taskfile.yml**
@@ -251,6 +269,7 @@ Replace .env.example with:
 - [ ] **Step 1: Run frontend checks**
 
     cd frontend
+    bun install --frozen-lockfile
     bun test
     bun run typecheck
     bun run build
@@ -259,7 +278,7 @@ Expected: PASS. The native Review Queue test, typecheck, and production build al
 
 - [ ] **Step 2: Run the relevant CLI test**
 
-Run: uv run pytest tests/test_cli.py -q
+Run: uv run pytest tests/test_api_v1.py tests/test_evaluation_units.py tests/test_cli.py -q
 
 Expected: PASS. The single-JSON inspection CLI contract remains unchanged.
 

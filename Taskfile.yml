@@ -21,18 +21,11 @@ tasks:
     cmds:
       - bun run dev
 
-  agent-dev:
-    desc: Run Review Copilot agent runtime
-    dir: agent-runtime
-    cmds:
-      - bun run dev
-
   dev:
-    desc: Run API, frontend, and Review Copilot dev servers
+    desc: Run API and frontend development servers
     deps:
       - run
       - frontend-dev
-      - agent-dev
 
   build-frontend:
     desc: Build React frontend
