@@ -10,6 +10,7 @@ from storage.account_observation_store import (
     get_snapshot,
     insert_snapshot,
     latest_complete,
+    list_complete_snapshots,
     list_snapshots,
 )
 from storage.database import initialize_database
@@ -129,3 +130,30 @@ def test_new_complete_snapshot_replaces_current_evaluable(monkeypatch, tmp_path)
 
     assert latest_complete()["id"] == second["id"]
     assert get_snapshot(first["id"])["is_current_evaluable"] is False
+
+
+def test_list_complete_snapshots_is_deterministic_and_excludes_partial(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "observations.sqlite3"))
+    initialize_database()
+
+    first = insert_snapshot(_snapshot(synced_at="2026-07-23T00:00:00+00:00"))
+    insert_snapshot(
+        _snapshot(
+            state=SyncState.PARTIAL,
+            fingerprint="partial",
+            synced_at="2026-07-23T00:01:00+00:00",
+        )
+    )
+    second = insert_snapshot(
+        _snapshot(
+            fingerprint="complete-2",
+            synced_at="2026-07-23T00:02:00+00:00",
+        )
+    )
+
+    rows = list_complete_snapshots()
+
+    assert [row["id"] for row in rows] == [first["id"], second["id"]]
+    assert all(row["state"] == "complete" for row in rows)

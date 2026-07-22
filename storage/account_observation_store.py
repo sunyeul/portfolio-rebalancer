@@ -274,6 +274,24 @@ def latest_complete(account_alias: str = "toss-brokerage") -> dict[str, Any] | N
         return _row_to_snapshot(conn, row) if row is not None else None
 
 
+def list_complete_snapshots(
+    account_alias: str = "toss-brokerage",
+) -> list[dict[str, Any]]:
+    """Return complete account snapshots in deterministic projection order."""
+    from storage.database import connect
+
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM broker_account_snapshots
+            WHERE account_alias = ? AND state = 'complete'
+            ORDER BY synced_at ASC, id ASC
+            """,
+            (account_alias,),
+        ).fetchall()
+        return [_row_to_snapshot(conn, row) for row in rows]
+
+
 def list_snapshots(limit: int = 20) -> list[dict[str, Any]]:
     """Return recent normalized snapshots, newest first."""
     from storage.database import connect
