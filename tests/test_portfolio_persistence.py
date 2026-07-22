@@ -276,12 +276,20 @@ def test_snapshot_evaluation_runs_are_append_only_with_one_active_run(portfolio_
     first = create_snapshot_evaluation_run(
         snapshot["id"],
         {"period": "3M", "bench": "SPY"},
-        {"evaluation_period": {"label": "3M"}, "layer_evaluations": [], "asset_evaluations": []},
+        {
+            "evaluation_period": {"label": "3M"},
+            "layer_evaluations": [],
+            "asset_evaluations": [],
+        },
     )
     second = create_snapshot_evaluation_run(
         snapshot["id"],
         {"period": "1Y", "bench": "SPY"},
-        {"evaluation_period": {"label": "1Y"}, "layer_evaluations": [], "asset_evaluations": []},
+        {
+            "evaluation_period": {"label": "1Y"},
+            "layer_evaluations": [],
+            "asset_evaluations": [],
+        },
     )
 
     runs = list_snapshot_evaluation_runs(snapshot["id"])
@@ -316,7 +324,11 @@ def test_snapshot_evaluation_run_stale_detection(portfolio_db, monkeypatch):
     create_snapshot_evaluation_run(
         snapshot["id"],
         {"period": "3M", "bench": "SPY"},
-        {"evaluation_period": {"label": "3M"}, "layer_evaluations": [], "asset_evaluations": []},
+        {
+            "evaluation_period": {"label": "3M"},
+            "layer_evaluations": [],
+            "asset_evaluations": [],
+        },
     )
 
     assert get_active_snapshot_evaluation_run(snapshot["id"])["is_stale"] is False
@@ -348,7 +360,11 @@ def test_snapshot_delete_cascades_evaluation_runs(portfolio_db):
     create_snapshot_evaluation_run(
         snapshot["id"],
         {"period": "3M", "bench": "SPY"},
-        {"evaluation_period": {"label": "3M"}, "layer_evaluations": [], "asset_evaluations": []},
+        {
+            "evaluation_period": {"label": "3M"},
+            "layer_evaluations": [],
+            "asset_evaluations": [],
+        },
     )
 
     delete_snapshot(snapshot["id"])

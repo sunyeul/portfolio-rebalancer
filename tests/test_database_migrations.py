@@ -158,39 +158,55 @@ def test_migration_preserves_snapshots_evaluations_ips_config_and_journal(
 
     assert _schema_version(path) == LATEST_SCHEMA_VERSION
     with connect() as conn:
-        assert conn.execute(
-            "SELECT note FROM portfolio_snapshots WHERE id = ?", (snapshot_id,)
-        ).fetchone()["note"] == "keep snapshot"
-        assert conn.execute(
-            "SELECT state_json FROM portfolio_current_states WHERE portfolio_id = ?",
-            (portfolio_id,),
-        ).fetchone()["state_json"] == '{"source":"existing"}'
+        assert (
+            conn.execute(
+                "SELECT note FROM portfolio_snapshots WHERE id = ?", (snapshot_id,)
+            ).fetchone()["note"]
+            == "keep snapshot"
+        )
+        assert (
+            conn.execute(
+                "SELECT state_json FROM portfolio_current_states WHERE portfolio_id = ?",
+                (portfolio_id,),
+            ).fetchone()["state_json"]
+            == '{"source":"existing"}'
+        )
         assert conn.execute(
             "SELECT return_total FROM snapshot_positions WHERE snapshot_id = ?",
             (snapshot_id,),
         ).fetchone()["return_total"] == pytest.approx(0.12)
-        assert conn.execute(
-            "SELECT engine_version FROM snapshot_evaluation_runs WHERE snapshot_id = ?",
-            (snapshot_id,),
-        ).fetchone()["engine_version"] == "existing-engine"
-        assert conn.execute(
-            "SELECT value_json FROM ips_rules WHERE key = 'existing-rule'"
-        ).fetchone()["value_json"] == "true"
-        assert conn.execute(
-            "SELECT priority FROM ips_action_priorities WHERE action_code = 'existing-action'"
-        ).fetchone()["priority"] == 77
+        assert (
+            conn.execute(
+                "SELECT engine_version FROM snapshot_evaluation_runs WHERE snapshot_id = ?",
+                (snapshot_id,),
+            ).fetchone()["engine_version"]
+            == "existing-engine"
+        )
+        assert (
+            conn.execute(
+                "SELECT value_json FROM ips_rules WHERE key = 'existing-rule'"
+            ).fetchone()["value_json"]
+            == "true"
+        )
+        assert (
+            conn.execute(
+                "SELECT priority FROM ips_action_priorities WHERE action_code = 'existing-action'"
+            ).fetchone()["priority"]
+            == 77
+        )
         assert conn.execute(
             "SELECT target FROM ips_target_allocations WHERE layer = 'core'"
         ).fetchone()["target"] == pytest.approx(0.77)
-        assert conn.execute(
-            "SELECT decision_note FROM journal_entries WHERE snapshot_id = ?",
-            (snapshot_id,),
-        ).fetchone()["decision_note"] == "keep journal"
+        assert (
+            conn.execute(
+                "SELECT decision_note FROM journal_entries WHERE snapshot_id = ?",
+                (snapshot_id,),
+            ).fetchone()["decision_note"]
+            == "keep journal"
+        )
 
 
-def test_database_from_newer_schema_is_rejected_without_mutation(
-    monkeypatch, tmp_path
-):
+def test_database_from_newer_schema_is_rejected_without_mutation(monkeypatch, tmp_path):
     path = tmp_path / "future.sqlite3"
     with sqlite3.connect(path) as conn:
         conn.execute("CREATE TABLE sentinel (value TEXT NOT NULL)")
