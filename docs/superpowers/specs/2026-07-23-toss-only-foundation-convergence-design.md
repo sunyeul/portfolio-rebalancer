@@ -164,8 +164,12 @@ The v4 cutover is intentionally destructive for generic portfolio data.
 
 - The migration runs in `BEGIN IMMEDIATE` and rolls back the entire v4 step on
   any SQL failure.
+- The v4 connection enables SQLite `secure_delete` before dropping generic
+  tables so deleted records are overwritten rather than left in free pages.
 - Initialization runs SQLite integrity and foreign-key checks before accepting
   the database for use.
+- A successful v4 cutover runs `VACUUM` after the migration transaction to
+  rebuild the database without pages formerly occupied by generic data.
 - The application stops creating adjacent long-lived `.bak` files before
   migrations.
 - Existing, precisely identified migration backups are removed only in the
@@ -195,9 +199,10 @@ snapshot. It rejects any non-complete snapshot and returns:
 - data-quality and reconciliation evidence copied from the source snapshot.
 
 Denominators stay explicit. Cash policy uses gross weight. Layer and asset
-inspection uses invested weight. Missing KRW values, zero or inconsistent
-denominators, non-complete state, or missing profiles never default to zero or
-`OK`.
+inspection uses invested weight. A zero total value, missing KRW value,
+inconsistent denominator, non-complete state, or missing profile never defaults
+to zero or `OK`. A valid all-cash account may have zero invested value, but its
+invested-weight projection is explicitly non-evaluable.
 
 The projection is pure and is not persisted. Later evaluation runs persist the
 source snapshot ID, active policy version ID, engine version, and derived result
@@ -290,6 +295,7 @@ Ruff and pytest remain development dependencies.
 - A forced v4 SQL failure leaves schema version and all v3 rows unchanged.
 - No new `.bak` file appears.
 - SQLite `integrity_check` returns `ok` and `foreign_key_check` is empty.
+- The post-cutover database has no free pages left from dropped generic tables.
 
 ### Profiles and projection
 
@@ -300,7 +306,8 @@ Ruff and pytest remain development dependencies.
 - Gross and invested weights use different documented denominators.
 - Unclassified identities are deterministic.
 - Partial, stale, and failed snapshots are rejected.
-- Zero, missing, and inconsistent totals fail closed.
+- Zero total value and missing or inconsistent totals fail closed; a reconciled
+  all-cash account keeps only its gross cash weight evaluable.
 
 ### Surface and dependency deletion
 
@@ -317,7 +324,8 @@ Ruff and pytest remain development dependencies.
 
 1. **Data loss is intentional but must be bounded.** Only named generic tables
    and named migration backups are deleted; Toss evidence is asserted before
-   cleanup.
+   cleanup. `secure_delete` plus the post-commit `VACUUM` prevents dropped rows
+   from remaining recoverable inside the active SQLite file.
 2. **Ticker relabeling can corrupt IPS metadata.** Profiles use the Toss symbol
    plus market country and require prior broker observation; names are display
    only.
