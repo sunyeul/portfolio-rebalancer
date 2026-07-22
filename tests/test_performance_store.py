@@ -22,10 +22,16 @@ from storage.performance_store import (
     latest_cash_flow_decisions,
     latest_performance_run,
     list_cash_flow_candidates,
+    refresh_performance,
 )
 
 
-def _snapshot(*, fingerprint="snapshot-1", synced_at="2026-07-23T00:00:00+00:00"):
+def _snapshot(
+    *,
+    fingerprint="snapshot-1",
+    synced_at="2026-07-23T00:00:00+00:00",
+    total=8200000.0,
+):
     return NormalizedSnapshot(
         account_alias="toss-brokerage",
         sync_started_at=synced_at,
@@ -56,8 +62,8 @@ def _snapshot(*, fingerprint="snapshot-1", synced_at="2026-07-23T00:00:00+00:00"
         source_timestamps={},
         data_quality={"issues": []},
         reconciliation={"holdings": {"all_within_tolerance": True}},
-        total_value_krw=8200000.0,
-        invested_value_krw=7200000.0,
+        total_value_krw=total,
+        invested_value_krw=total - 1000000.0,
         cash_value_krw=1000000.0,
         fingerprint=fingerprint,
     )
@@ -187,3 +193,26 @@ def test_performance_run_is_idempotent_and_hides_execution_side(database):
     assert first["id"] == same["id"] == latest_performance_run(baseline["id"])["id"]
     assert hydrated["execution_count"] == 1
     assert "side" not in hydrated["points"][0]
+
+
+def test_refresh_performance_is_idempotent(database):
+    first_snapshot = insert_snapshot(_snapshot())
+    baseline = create_baseline(first_snapshot["id"], 8200000.0)
+    second_snapshot = insert_snapshot(
+        _snapshot(
+            fingerprint="snapshot-2",
+            synced_at="2026-07-23T00:02:00+00:00",
+            total=8400000.0,
+        )
+    )
+
+    first = refresh_performance()
+    second = refresh_performance()
+
+    assert first["id"] == second["id"]
+    assert first["through_snapshot_id"] == second_snapshot["id"]
+    assert [point["snapshot_id"] for point in first["points"]] == [
+        first_snapshot["id"],
+        second_snapshot["id"],
+    ]
+    assert first["baseline_id"] == baseline["id"]

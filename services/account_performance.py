@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping, MutableMapping, Sequence
@@ -577,6 +577,7 @@ def build_projection(
     baseline: TrackingBaseline | Mapping[str, Any],
     snapshots: Sequence[Mapping[str, Any]],
     decisions: Mapping[int, Mapping[str, Any]],
+    candidate_ids: Mapping[str, int] | None = None,
 ) -> PerformanceProjection:
     if not snapshots:
         raise PerformanceCalculationError("no complete snapshots")
@@ -635,6 +636,14 @@ def build_projection(
                     executions,
                 )
             )
+            if candidate_ids:
+                interval_candidates = [
+                    replace(
+                        candidate,
+                        id=candidate_ids.get(candidate.candidate_fingerprint),
+                    )
+                    for candidate in interval_candidates
+                ]
             candidates.extend(interval_candidates)
             interval_issues.extend(
                 detect_quantity_issues(previous, snapshot, executions)

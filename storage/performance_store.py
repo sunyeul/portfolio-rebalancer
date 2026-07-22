@@ -10,6 +10,10 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from services.account_performance import (
+    build_projection,
+)
+from storage.account_observation_store import list_complete_snapshots
 from storage.database import connect
 
 
@@ -370,6 +374,35 @@ def insert_performance_run(projection: Any) -> dict[str, Any]:
                 (run_id, *(execution.get(key) for key in execution_keys)),
             )
         return _hydrate_run(conn, run_id)
+
+
+def refresh_performance(account_alias: str = "toss-brokerage") -> dict[str, Any]:
+    """Build and persist one immutable performance projection."""
+    baseline = get_baseline(account_alias)
+    if baseline is None:
+        raise PerformanceStorageError("tracking baseline is not configured")
+    snapshots = list_complete_snapshots(account_alias)
+    if not snapshots:
+        raise PerformanceStorageError("no complete account snapshots available")
+    first_projection = build_projection(baseline, snapshots, {})
+    candidate_ids: dict[str, int] = {}
+    for candidate in first_projection.candidates:
+        row = insert_cash_flow_candidate(candidate.as_dict())
+        candidate_ids[candidate.candidate_fingerprint] = int(row["id"])
+    if candidate_ids:
+        candidate_rows = list_cash_flow_candidates(int(baseline["id"]))
+        decision_rows = latest_cash_flow_decisions(
+            [int(row["id"]) for row in candidate_rows]
+        )
+    else:
+        decision_rows = {}
+    projection = build_projection(
+        baseline,
+        snapshots,
+        decision_rows,
+        candidate_ids,
+    )
+    return insert_performance_run(projection)
 
 
 def _hydrate_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any]:
