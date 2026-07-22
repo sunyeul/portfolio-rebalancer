@@ -10,11 +10,6 @@ tasks:
     cmds:
       - task --list
 
-  run:
-    desc: Run FastAPI API server
-    cmds:
-      - uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
-
   toss-health:
     desc: Check Toss credentials and read-only account access
     cmds:
@@ -35,23 +30,15 @@ tasks:
     cmds:
       - uv run ips-pilot performance history --latest
 
-  frontend-dev:
-    desc: Run Vite frontend dev server
-    dir: frontend
+  toss-account-view:
+    desc: Show the latest complete Toss account projection
     cmds:
-      - bun run dev
+      - uv run ips-pilot account-view
 
-  dev:
-    desc: Run API and frontend development servers
-    deps:
-      - run
-      - frontend-dev
-
-  build-frontend:
-    desc: Build React frontend
-    dir: frontend
+  toss-profiles:
+    desc: Show Toss instrument IPS profiles and missing classifications
     cmds:
-      - bun run build
+      - uv run ips-pilot profiles list
 
   format:
     desc: Format Python code with ruff
