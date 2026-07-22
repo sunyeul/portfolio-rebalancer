@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 
-LATEST_SCHEMA_VERSION = 1
+LATEST_SCHEMA_VERSION = 2
 
 
 class SchemaVersionError(RuntimeError):
@@ -116,7 +116,99 @@ CREATE TABLE IF NOT EXISTS journal_entries (
 """
 
 
-MIGRATIONS = {1: MIGRATION_1_SQL}
+MIGRATION_2_SQL = """
+CREATE TABLE IF NOT EXISTS broker_account_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_alias TEXT NOT NULL,
+    sync_started_at TEXT NOT NULL,
+    synced_at TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('complete', 'partial', 'stale', 'failed')),
+    is_current_evaluable INTEGER NOT NULL DEFAULT 0,
+    source_fingerprint TEXT NOT NULL,
+    source_timestamps_json TEXT NOT NULL,
+    data_quality_json TEXT NOT NULL,
+    reconciliation_json TEXT NOT NULL,
+    total_value_krw REAL,
+    invested_value_krw REAL,
+    cash_value_krw REAL,
+    UNIQUE(account_alias, source_fingerprint)
+);
+
+CREATE TABLE IF NOT EXISTS broker_holdings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id) ON DELETE CASCADE,
+    symbol TEXT NOT NULL,
+    name TEXT NOT NULL,
+    market_country TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    last_price REAL NOT NULL,
+    average_purchase_price REAL NOT NULL,
+    market_value_native REAL NOT NULL,
+    market_value_krw REAL NOT NULL,
+    cost_native REAL NOT NULL,
+    cost_krw REAL NOT NULL,
+    profit_loss_native REAL NOT NULL,
+    profit_loss_krw REAL NOT NULL,
+    daily_profit_loss_native REAL NOT NULL,
+    daily_profit_loss_krw REAL NOT NULL,
+    UNIQUE(snapshot_id, symbol)
+);
+
+CREATE TABLE IF NOT EXISTS broker_cash_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id) ON DELETE CASCADE,
+    currency TEXT NOT NULL,
+    buying_power_native REAL NOT NULL,
+    buying_power_krw REAL NOT NULL,
+    UNIQUE(snapshot_id, currency)
+);
+
+CREATE TABLE IF NOT EXISTS broker_exchange_rates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id) ON DELETE CASCADE,
+    base_currency TEXT NOT NULL,
+    quote_currency TEXT NOT NULL,
+    rate REAL NOT NULL,
+    mid_rate REAL,
+    valid_from TEXT,
+    valid_until TEXT
+);
+
+CREATE TABLE IF NOT EXISTS broker_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id) ON DELETE CASCADE,
+    order_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    side TEXT NOT NULL,
+    order_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    ordered_at TEXT,
+    canceled_at TEXT,
+    quantity REAL NOT NULL,
+    order_price_native REAL,
+    order_amount_native REAL,
+    filled_quantity REAL NOT NULL,
+    average_filled_price_native REAL,
+    filled_amount_native REAL,
+    commission_native REAL,
+    tax_native REAL,
+    filled_at TEXT,
+    settlement_date TEXT,
+    UNIQUE(snapshot_id, order_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_broker_snapshots_latest
+    ON broker_account_snapshots(account_alias, synced_at, id);
+CREATE INDEX IF NOT EXISTS idx_broker_holdings_snapshot
+    ON broker_holdings(snapshot_id, symbol);
+CREATE INDEX IF NOT EXISTS idx_broker_orders_snapshot
+    ON broker_orders(snapshot_id, order_id);
+"""
+
+
+MIGRATIONS = {1: MIGRATION_1_SQL, 2: MIGRATION_2_SQL}
 
 
 def schema_version(conn: sqlite3.Connection) -> int:

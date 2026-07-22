@@ -31,6 +31,11 @@ def test_fresh_database_uses_latest_schema_without_legacy_tables(monkeypatch, tm
         }
     assert "portfolios" in names
     assert "snapshot_evaluation_runs" in names
+    assert "broker_account_snapshots" in names
+    assert "broker_holdings" in names
+    assert "broker_cash_observations" in names
+    assert "broker_exchange_rates" in names
+    assert "broker_orders" in names
     assert "analysis_runs" not in names
 
 
@@ -236,7 +241,7 @@ def test_existing_database_is_backed_up_once_before_first_migration(
 
     initialize_database()
 
-    backups = list(tmp_path.glob("portfolio.sqlite3.pre-v0-to-v1-*.bak"))
+    backups = list(tmp_path.glob("portfolio.sqlite3.pre-v0-to-v2-*.bak"))
     assert len(backups) == 1
     with sqlite3.connect(backups[0]) as conn:
         assert conn.execute("SELECT value FROM sentinel").fetchone()[0] == "original"
@@ -244,7 +249,7 @@ def test_existing_database_is_backed_up_once_before_first_migration(
 
     initialize_database()
 
-    assert list(tmp_path.glob("portfolio.sqlite3.pre-v0-to-v1-*.bak")) == backups
+    assert list(tmp_path.glob("portfolio.sqlite3.pre-v0-to-v2-*.bak")) == backups
 
 
 def test_fresh_database_does_not_create_a_backup(monkeypatch, tmp_path):
