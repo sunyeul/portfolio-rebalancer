@@ -207,7 +207,7 @@ Remove the three agent-runtime ignore entries from .gitignore. Preserve the user
 
     git rm -r frontend/src/copilot frontend/src/a2ui frontend/tests/a2ui.validation.test.ts agent-runtime
 
-Expected: source control stages every tracked feature file. Do not delete ignored or untracked local files under agent-runtime without separately inspecting and approving those exact paths; source removal does not require deleting installed dependencies.
+Expected: source control stages every tracked feature file. Inspect any remaining agent-runtime directory before cleanup; delete only a confirmed generated dependency cache such as agent-runtime/node_modules, never a blanket path that could contain user files.
 
 - [ ] **Step 4: Build**
 
