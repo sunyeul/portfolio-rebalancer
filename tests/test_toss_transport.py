@@ -167,6 +167,33 @@ def test_authorized_reader_sends_required_headers_without_exposing_them(config):
     assert "42" not in repr(reader)
 
 
+def test_authorized_reader_can_bootstrap_accounts_without_account_header(config):
+    seen_headers = {}
+
+    def handler(request):
+        if request.url.path == "/oauth2/token":
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "access-token",
+                    "token_type": "Bearer",
+                    "expires_in": 3600,
+                },
+            )
+        seen_headers.update(request.headers)
+        return httpx.Response(200, json={"result": []})
+
+    transport = _transport(config, handler)
+    provider = TossTokenProvider(config, transport, clock=lambda: 100.0)
+    reader = TossAuthorizedReader(config, transport, provider)
+
+    assert reader.get_json("/api/v1/accounts", include_account_header=False) == {
+        "result": []
+    }
+    assert seen_headers["authorization"] == "Bearer access-token"
+    assert "x-tossinvest-account" not in seen_headers
+
+
 @pytest.mark.parametrize(
     "payload",
     [

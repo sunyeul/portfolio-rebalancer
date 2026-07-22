@@ -83,13 +83,14 @@ class TossAuthorizedReader:
         path: str,
         *,
         params: Mapping[str, str | int] | None = None,
+        include_account_header: bool = True,
     ) -> dict[str, Any]:
+        headers = {"Authorization": f"Bearer {self._tokens.access_token()}"}
+        if include_account_header:
+            headers["X-Tossinvest-Account"] = str(self._config.account_seq)
         return self._transport.request_json(
             "GET",
             path,
-            headers={
-                "Authorization": f"Bearer {self._tokens.access_token()}",
-                "X-Tossinvest-Account": str(self._config.account_seq),
-            },
+            headers=headers,
             params=params,
         )
