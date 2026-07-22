@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
+
+from storage.schema import LATEST_SCHEMA_VERSION, migrate, schema_version
 
 
 DEFAULT_DB_PATH = Path("data") / "portfolio_rebalancer.sqlite3"
@@ -39,118 +42,49 @@ def connect() -> sqlite3.Connection:
 
 
 def initialize_database() -> None:
-    """Create all persistence tables and seed lookup values."""
+    """Back up, migrate, and seed the local persistence database."""
+    path = db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    source_version = _migration_source_version(path)
+    if source_version is not None:
+        _create_migration_backup(path, source_version)
+
     with connect() as conn:
-        conn.executescript(
-            """
-            DROP TABLE IF EXISTS analysis_metrics;
-            DROP TABLE IF EXISTS evaluation_runs;
-            DROP TABLE IF EXISTS analysis_runs;
-
-            CREATE TABLE IF NOT EXISTS portfolios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                description TEXT NOT NULL DEFAULT '',
-                is_active INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS assets (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ticker TEXT NOT NULL UNIQUE,
-                display_name TEXT,
-                asset_type TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS thesis_statuses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code TEXT NOT NULL UNIQUE,
-                label TEXT NOT NULL,
-                sort_order INTEGER NOT NULL DEFAULT 999,
-                is_active INTEGER NOT NULL DEFAULT 1
-            );
-
-            CREATE TABLE IF NOT EXISTS portfolio_snapshots (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),
-                name TEXT NOT NULL,
-                note TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS portfolio_current_states (
-                portfolio_id INTEGER PRIMARY KEY REFERENCES portfolios(id) ON DELETE CASCADE,
-                state_json TEXT NOT NULL,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS snapshot_positions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                snapshot_id INTEGER NOT NULL REFERENCES portfolio_snapshots(id) ON DELETE CASCADE,
-                asset_id INTEGER NOT NULL REFERENCES assets(id),
-                allocation REAL NOT NULL,
-                weight REAL NOT NULL,
-                return_total REAL,
-                layer TEXT NOT NULL DEFAULT 'core',
-                thesis_status_id INTEGER NOT NULL REFERENCES thesis_statuses(id),
-                position_order INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(snapshot_id, asset_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS snapshot_evaluation_runs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                snapshot_id INTEGER NOT NULL REFERENCES portfolio_snapshots(id) ON DELETE CASCADE,
-                settings_json TEXT NOT NULL,
-                result_json TEXT NOT NULL,
-                schema_version INTEGER NOT NULL,
-                engine_version TEXT NOT NULL,
-                ips_config_hash TEXT NOT NULL,
-                status TEXT NOT NULL CHECK(status IN ('active', 'superseded')),
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                superseded_by_run_id INTEGER REFERENCES snapshot_evaluation_runs(id) ON DELETE SET NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_snapshot_evaluation_runs_snapshot_status
-                ON snapshot_evaluation_runs(snapshot_id, status, id);
-
-            CREATE TABLE IF NOT EXISTS ips_target_allocations (
-                layer TEXT PRIMARY KEY,
-                min REAL NOT NULL,
-                target REAL NOT NULL,
-                max REAL NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS ips_action_priorities (
-                action_code TEXT PRIMARY KEY,
-                label TEXT NOT NULL,
-                priority INTEGER NOT NULL,
-                is_active INTEGER NOT NULL DEFAULT 1
-            );
-
-            CREATE TABLE IF NOT EXISTS ips_rules (
-                key TEXT PRIMARY KEY,
-                value_json TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS journal_entries (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                snapshot_id INTEGER NOT NULL UNIQUE REFERENCES portfolio_snapshots(id) ON DELETE CASCADE,
-                date TEXT NOT NULL,
-                decision_context TEXT NOT NULL,
-                playbook_code TEXT,
-                review_items_json TEXT NOT NULL DEFAULT '[]',
-                decision_note TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-            """
-        )
+        migrate(conn)
         _seed_lookup(conn, "thesis_statuses", THESIS_STATUS_SEEDS)
         _seed_target_allocations(conn)
+
+
+def _migration_source_version(path: Path) -> int | None:
+    """Return a migratable source version only when a real schema exists."""
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+    with sqlite3.connect(path) as conn:
+        version = schema_version(conn)
+        object_count = int(
+            conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM sqlite_master
+                WHERE type IN ('table', 'index', 'trigger', 'view')
+                  AND name NOT LIKE 'sqlite_%'
+                """
+            ).fetchone()[0]
+        )
+    if object_count == 0 or version >= LATEST_SCHEMA_VERSION:
+        return None
+    return version
+
+
+def _create_migration_backup(path: Path, source_version: int) -> Path:
+    """Create a SQLite-consistent backup before a forward migration."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    backup_path = path.with_name(
+        f"{path.name}.pre-v{source_version}-to-v{LATEST_SCHEMA_VERSION}-{stamp}.bak"
+    )
+    with sqlite3.connect(path) as source, sqlite3.connect(backup_path) as target:
+        source.backup(target)
+    return backup_path
 
 
 def _seed_lookup(

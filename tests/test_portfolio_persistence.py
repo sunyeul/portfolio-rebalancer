@@ -151,7 +151,7 @@ def test_snapshot_does_not_persist_analysis_or_evaluation_payloads(portfolio_db)
     }
 
 
-def test_initialize_database_drops_legacy_run_tables(portfolio_db):
+def test_initialize_database_preserves_unversioned_legacy_run_tables(portfolio_db):
     with connect() as conn:
         conn.execute("CREATE TABLE analysis_runs (id INTEGER PRIMARY KEY)")
         conn.execute("CREATE TABLE analysis_metrics (id INTEGER PRIMARY KEY)")
@@ -166,10 +166,15 @@ def test_initialize_database_drops_legacy_run_tables(portfolio_db):
             FROM sqlite_master
             WHERE type = 'table'
               AND name IN ('analysis_runs', 'analysis_metrics', 'evaluation_runs')
+            ORDER BY name
             """
         ).fetchall()
 
-    assert rows == []
+    assert [row["name"] for row in rows] == [
+        "analysis_metrics",
+        "analysis_runs",
+        "evaluation_runs",
+    ]
 
 
 def test_snapshot_update_persists_editable_metadata(portfolio_db):
