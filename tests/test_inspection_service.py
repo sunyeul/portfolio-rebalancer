@@ -1,4 +1,4 @@
-from services.inspection_service import run_inspection
+from services.inspection_service import _select_market_candles, run_inspection
 from integrations.toss.observation import SyncState
 from storage.account_observation_store import insert_snapshot, latest_complete
 from storage.database import initialize_database
@@ -23,3 +23,42 @@ def test_failed_latest_attempt_is_persisted_as_non_evaluable(monkeypatch, tmp_pa
     assert evaluation["result"]["source"]["snapshot_id"] == failed["id"]
     assert evaluation["result"]["review_queue"][0]["kind"] == "source"
     assert complete["id"] != failed["id"]
+
+
+def test_market_candle_selection_uses_only_held_identities(monkeypatch):
+    calls = []
+
+    def fake_selector(**kwargs):
+        calls.append(kwargs)
+        return [{"symbol": kwargs["symbol"]}]
+
+    monkeypatch.setattr(
+        "services.inspection_service.list_adjusted_stock_candles", fake_selector
+    )
+    projection = {
+        "synced_at": "2026-07-22T16:01:04+00:00",
+        "positions": [
+            {"market_country": "US", "symbol": "BBB"},
+            {"market_country": "KR", "symbol": "005930"},
+            {"market_country": "US", "symbol": "BBB"},
+        ],
+    }
+    risk_policy = {"lookback_sessions": 252}
+
+    selected = _select_market_candles(projection, risk_policy)
+
+    assert list(selected) == [("KR", "005930"), ("US", "BBB")]
+    assert calls == [
+        {
+            "market_country": "KR",
+            "symbol": "005930",
+            "through_at": "2026-07-22T16:01:04+00:00",
+            "limit": 252,
+        },
+        {
+            "market_country": "US",
+            "symbol": "BBB",
+            "through_at": "2026-07-22T16:01:04+00:00",
+            "limit": 252,
+        },
+    ]

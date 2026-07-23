@@ -137,6 +137,41 @@ def list_candles(
     return [dict(row) for row in reversed(rows)]
 
 
+def list_adjusted_stock_candles(
+    *,
+    market_country: str,
+    symbol: str,
+    through_at: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Return bounded adjusted Toss stock candles in chronological order."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM (
+                SELECT * FROM toss_market_candles
+                WHERE source_kind = 'stock'
+                  AND market_country = ?
+                  AND symbol = ?
+                  AND interval = '1d'
+                  AND adjusted = 1
+                  AND adjusted_supported = 1
+                  AND datetime(candle_at) <= datetime(?)
+                ORDER BY datetime(candle_at) DESC, id DESC
+                LIMIT ?
+            )
+            ORDER BY datetime(candle_at), id
+            """,
+            (
+                market_country.upper(),
+                symbol.upper(),
+                through_at,
+                max(1, int(limit)),
+            ),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def insert_policy_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
     required = ("account_alias", "base_policy_version_id", "candidate_json")
     missing = [key for key in required if key not in candidate]

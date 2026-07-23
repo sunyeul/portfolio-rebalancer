@@ -15,8 +15,34 @@ from storage.account_observation_store import get_snapshot, list_snapshots
 from storage.database import initialize_database
 from storage.evaluation_store import insert_evaluation_run
 from storage.instrument_profile_store import profile_map
+from storage.market_store import list_adjusted_stock_candles
 from storage.performance_store import latest_performance_run
 from storage.policy_store import get_active_policy
+
+
+def _select_market_candles(
+    projection: dict[str, Any], risk_policy: dict[str, Any]
+) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    """Select local Toss candles for each held identity at one snapshot."""
+    identities = sorted(
+        {
+            (
+                str(position.get("market_country", "")).upper(),
+                str(position.get("symbol", "")).upper(),
+            )
+            for position in projection.get("positions", [])
+            if position.get("market_country") and position.get("symbol")
+        }
+    )
+    return {
+        identity: list_adjusted_stock_candles(
+            market_country=identity[0],
+            symbol=identity[1],
+            through_at=str(projection["synced_at"]),
+            limit=int(risk_policy["lookback_sessions"]),
+        )
+        for identity in identities
+    }
 
 
 def run_inspection(
