@@ -323,7 +323,7 @@ def insert_performance_run(projection: Any) -> dict[str, Any]:
             "cash_value_krw",
             "current_cost_basis_krw",
             "unrealized_pnl_krw",
-            "tracking_principal_krw",
+            "investment_principal_krw",
             "cumulative_external_flow_krw",
             "account_gain_krw",
             "simple_return",

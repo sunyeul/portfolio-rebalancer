@@ -611,7 +611,7 @@ def build_projection(
     candidates: list[CashFlowCandidate] = []
     processed: set[str] = set()
     cumulative_flow = Decimal("0")
-    tracking_principal = baseline_model.initial_principal_krw
+    investment_principal = baseline_model.initial_principal_krw
     segment_id = 0
     segment_twr = Decimal("0")
     previous = None
@@ -669,7 +669,7 @@ def build_projection(
                             amount if classification == "external_deposit" else -amount
                         )
                         cumulative_flow += signed
-                        tracking_principal += signed
+                        investment_principal += signed
                         interval_issues.append(
                             "confirmed external flow requires TWR boundary"
                         )
@@ -719,10 +719,8 @@ def build_projection(
             else None
         )
         simple_return = (
-            gain / baseline_model.initial_principal_krw
-            if gain is not None
-            and cumulative_flow == 0
-            and baseline_model.initial_principal_krw
+            gain / investment_principal
+            if gain is not None and investment_principal > 0
             else None
         )
         interval_twr = None
@@ -754,7 +752,7 @@ def build_projection(
                 "cash_value_krw": _money(cash),
                 "current_cost_basis_krw": _money(_current_cost_basis(snapshot)),
                 "unrealized_pnl_krw": _money(_unrealized(snapshot)),
-                "tracking_principal_krw": _money(tracking_principal),
+                "investment_principal_krw": _money(investment_principal),
                 "cumulative_external_flow_krw": _money(cumulative_flow),
                 "account_gain_krw": _money(gain),
                 "simple_return": _money(simple_return),

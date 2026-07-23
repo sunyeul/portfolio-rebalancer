@@ -111,6 +111,37 @@ def test_baseline_and_no_flow_projection_have_zero_then_positive_twr():
     assert projection.points[0]["interval_twr"] == pytest.approx(0.0)
     assert projection.points[1]["account_gain_krw"] == pytest.approx(200000.0)
     assert projection.points[1]["interval_twr"] == pytest.approx(200000 / 8200000)
+    assert projection.points[0]["investment_principal_krw"] == pytest.approx(8200000.0)
+    assert projection.points[1]["investment_principal_krw"] == pytest.approx(8200000.0)
+    assert projection.points[1]["simple_return"] == pytest.approx(200000 / 8200000)
+
+
+def test_external_flow_changes_investment_principal_and_return_denominator():
+    baseline = _baseline()
+    snapshots = [
+        _snapshot(1),
+        _snapshot(2, total=8420000.0, cash=1020000.0),
+    ]
+    candidates = detect_cash_candidates(baseline.id, snapshots[0], snapshots[1], [])
+    assert len(candidates) == 1
+    candidate_id = 17
+
+    projection = build_projection(
+        baseline,
+        snapshots,
+        {
+            candidate_id: {
+                "classification": "external_deposit",
+                "confirmed_amount_krw": 20000.0,
+            }
+        },
+        {candidates[0].candidate_fingerprint: candidate_id},
+    )
+
+    point = projection.points[1]
+    assert point["investment_principal_krw"] == pytest.approx(8220000.0)
+    assert point["account_gain_krw"] == pytest.approx(200000.0)
+    assert point["simple_return"] == pytest.approx(200000 / 8220000)
 
 
 def test_material_cash_residual_creates_non_evaluable_candidate():

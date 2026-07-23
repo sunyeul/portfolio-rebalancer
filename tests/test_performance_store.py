@@ -151,7 +151,7 @@ def test_performance_run_is_idempotent_and_hides_execution_side(database):
                 "cash_value_krw": 1000000.0,
                 "current_cost_basis_krw": 6500000.0,
                 "unrealized_pnl_krw": 700000.0,
-                "tracking_principal_krw": 8200000.0,
+                "investment_principal_krw": 8200000.0,
                 "cumulative_external_flow_krw": 0.0,
                 "account_gain_krw": 0.0,
                 "simple_return": 0.0,
