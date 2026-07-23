@@ -65,7 +65,9 @@ def test_api_can_read_anchored_performance_and_policy_versions(monkeypatch, tmp_
     assert policy["data"]["policy"]["id"] == 23
 
 
-def test_market_context_passes_composite_series_and_policy_timestamp(monkeypatch, tmp_path):
+def test_market_context_passes_composite_series_and_policy_timestamp(
+    monkeypatch, tmp_path
+):
     monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "api.sqlite3"))
     active = {
         "id": 4,
@@ -188,17 +190,15 @@ def test_api_contract_gate_preserves_historical_result_without_adapter(
     queue = client.get("/api/review-queue").json()
 
     assert inspection["data"]["contract_supported"] is False
-    assert inspection["data"]["evaluation"]["result"]["review_queue"][0][
-        "priority"
-    ] == 2
+    assert (
+        inspection["data"]["evaluation"]["result"]["review_queue"][0]["priority"] == 2
+    )
     assert queue["data"]["contract_supported"] is False
     assert queue["data"]["items"][0]["next_step"] == "legacy wording"
     assert "adjustment_suggestions" not in queue["data"]
 
 
-def test_api_contract_gate_exposes_v2_adjustment_suggestions(
-    monkeypatch, tmp_path
-):
+def test_api_contract_gate_exposes_v2_adjustment_suggestions(monkeypatch, tmp_path):
     monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "api.sqlite3"))
     evaluation = {
         "id": 8,
@@ -209,7 +209,9 @@ def test_api_contract_gate_exposes_v2_adjustment_suggestions(
             "adjustment_suggestions": [
                 {
                     "priority": "P1",
-                    "suggestion": {"code": "review_increase_regular_purchase_allocation"},
+                    "suggestion": {
+                        "code": "review_increase_regular_purchase_allocation"
+                    },
                 }
             ],
             "review_queue": [],
@@ -223,9 +225,10 @@ def test_api_contract_gate_exposes_v2_adjustment_suggestions(
 
     assert inspection["data"]["contract_supported"] is True
     assert queue["data"]["contract_supported"] is True
-    assert queue["data"]["adjustment_suggestions"] == evaluation["result"][
-        "adjustment_suggestions"
-    ]
+    assert (
+        queue["data"]["adjustment_suggestions"]
+        == evaluation["result"]["adjustment_suggestions"]
+    )
 
 
 def test_api_projects_latest_performance_point_into_account_contract(monkeypatch):

@@ -169,10 +169,13 @@ class TossMarketDataService:
         market_country: str = "",
         count: int = 200,
         max_pages: int = 5,
+        target_points: int | None = None,
         adjusted: bool = True,
     ) -> list[NormalizedCandle]:
         if max_pages < 1:
             raise MarketObservationError("max_pages must be positive")
+        if target_points is not None and target_points < 1:
+            raise MarketObservationError("target_points must be positive")
         candles: dict[str, NormalizedCandle] = {}
         before: str | None = None
         seen_cursors: set[str | None] = {None}
@@ -187,6 +190,8 @@ class TossMarketDataService:
             )
             for candle in page:
                 candles[candle.candle_at] = candle
+            if target_points is not None and len(candles) >= target_points:
+                break
             if not next_before:
                 break
             if next_before in seen_cursors:
@@ -195,4 +200,5 @@ class TossMarketDataService:
             before = next_before
         else:
             raise MarketObservationError("candle history exceeds max_pages")
-        return sorted(candles.values(), key=lambda candle: candle.candle_at)
+        ordered = sorted(candles.values(), key=lambda candle: candle.candle_at)
+        return ordered[-target_points:] if target_points is not None else ordered

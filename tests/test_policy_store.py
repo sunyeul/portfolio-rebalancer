@@ -39,7 +39,7 @@ def _allocation_review():
         "cooldown_days": 30,
         "minimum_history_points": 200,
         "max_data_age_days": 7,
-        "max_gap_days": 7,
+        "max_gap_days": 10,
         "drawdown_review": -0.15,
         "volatility_review": 0.30,
         "risk_on_trend": 0.50,
@@ -155,9 +155,7 @@ def test_policy_validation_preserves_allocation_review():
     ("mutator", "message"),
     [
         (
-            lambda value: value["benchmarks"].append(
-                deepcopy(value["benchmarks"][0])
-            ),
+            lambda value: value["benchmarks"].append(deepcopy(value["benchmarks"][0])),
             "duplicate",
         ),
         (

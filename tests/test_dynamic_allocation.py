@@ -265,6 +265,40 @@ def test_cooldown_reports_regime_without_candidate():
     assert result["proposed_policy"] is not None
 
 
+def _candles_with_calendar_gap(gap_days):
+    candles = _candles([100.0] * 220)
+    shift = timedelta(days=gap_days - 1)
+    for candle in candles[:110]:
+        timestamp = datetime.fromisoformat(candle["candle_at"])
+        candle["candle_at"] = (timestamp - shift).isoformat()
+    return candles
+
+
+def test_extended_korean_holiday_gap_is_valid_market_history():
+    policy = build_neutral_policy(_active_policy())
+    series = _series_map([100.0] * 220)
+    series["KR/KOSPI"] = _candles_with_calendar_gap(8)
+    series["KR/KOSDAQ"] = _candles_with_calendar_gap(8)
+
+    result = evaluate_dynamic_allocation(series, active_policy=policy, now=NOW)
+
+    assert result["status"] == "OK"
+    assert result["failed_benchmarks"] == []
+    assert result["benchmarks"]["KR/KOSPI"]["largest_gap_days"] == 8
+
+
+def test_unexplained_eleven_day_gap_fails_closed():
+    policy = build_neutral_policy(_active_policy())
+    series = _series_map([100.0] * 220)
+    series["KR/KOSPI"] = _candles_with_calendar_gap(11)
+
+    result = evaluate_dynamic_allocation(series, active_policy=policy, now=NOW)
+
+    assert result["status"] == "Watch"
+    assert result["reason"] == "market_history_gap"
+    assert result["failed_benchmarks"] == ["KR/KOSPI"]
+
+
 @pytest.mark.parametrize(
     ("mutator", "reason"),
     [

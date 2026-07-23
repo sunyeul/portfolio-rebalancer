@@ -134,7 +134,9 @@ def _allocation_benchmarks(value: Any, errors: list[str]) -> list[dict[str, Any]
                 }
             )
     if set(seen_keys) != set(required):
-        errors.append(f"{path} must contain exactly US/SPY, US/QQQ, KR/KOSPI, KR/KOSDAQ")
+        errors.append(
+            f"{path} must contain exactly US/SPY, US/QQQ, KR/KOSPI, KR/KOSDAQ"
+        )
     for item in result:
         expected = required.get(item["key"])
         actual = (item["source_kind"], item["market_country"], item["symbol"])
@@ -169,13 +171,17 @@ def _allocation_regimes(
         if not isinstance(raw, dict):
             errors.append(f"{item_path} must be an object")
             continue
-        cash_target = _number(raw.get("cash_target"), f"{item_path}.cash_target", errors)
+        cash_target = _number(
+            raw.get("cash_target"), f"{item_path}.cash_target", errors
+        )
         raw_layer_targets = raw.get("layers")
         if not isinstance(raw_layer_targets, dict):
             errors.append(f"{item_path}.layers must be an object")
             continue
         if set(raw_layer_targets) != set(LAYERS):
-            errors.append(f"{item_path}.layers must contain exactly core, satellite, experiment")
+            errors.append(
+                f"{item_path}.layers must contain exactly core, satellite, experiment"
+            )
         layer_targets: dict[str, float] = {}
         for layer in LAYERS:
             target = _number(
@@ -189,8 +195,10 @@ def _allocation_regimes(
             sum(layer_targets.values()), 1.0, abs_tol=SUM_TOLERANCE
         ):
             errors.append(f"{item_path} layer targets must sum to 1")
-        if cash_target is not None and cash is not None and not (
-            cash["minimum"] <= cash_target <= cash["maximum"]
+        if (
+            cash_target is not None
+            and cash is not None
+            and not (cash["minimum"] <= cash_target <= cash["maximum"])
         ):
             errors.append(f"{item_path} cash target must be within cash_reserve range")
         for layer, target in layer_targets.items():

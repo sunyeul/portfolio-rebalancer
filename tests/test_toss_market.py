@@ -161,3 +161,40 @@ def test_rejects_history_that_exceeds_page_bound():
         TossMarketDataService(EndlessReader()).collect_history(
             symbol="KOSPI", source_kind="market_indicator", max_pages=1
         )
+
+
+def test_bounded_history_stops_after_requested_evidence_points():
+    class MoreHistoryReader:
+        def __init__(self):
+            self.calls = 0
+
+        def get_json(self, path, *, params=None, include_account_header=True):
+            self.calls += 1
+            return {
+                "result": {
+                    "candles": [
+                        {
+                            "timestamp": f"2026-01-{day:02d}T09:00:00+09:00",
+                            "openPrice": "10",
+                            "highPrice": "11",
+                            "lowPrice": "9",
+                            "closePrice": "10",
+                            "volume": "1",
+                        }
+                        for day in range(1, 6)
+                    ],
+                    "nextBefore": "more-history",
+                }
+            }
+
+    reader = MoreHistoryReader()
+    candles = TossMarketDataService(reader).collect_history(
+        symbol="KOSPI",
+        source_kind="market_indicator",
+        max_pages=1,
+        target_points=3,
+    )
+
+    assert reader.calls == 1
+    assert len(candles) == 3
+    assert candles[-1].candle_at == "2026-01-05T09:00:00+09:00"

@@ -82,7 +82,7 @@ Every required benchmark must have:
 - at least 200 valid daily observations;
 - no duplicate timestamps or invalid closes;
 - a latest observation no more than seven calendar days old;
-- no adjacent observation gap greater than seven calendar days.
+- no adjacent observation gap greater than ten calendar days, allowing known extended Korean market holidays while still rejecting longer unexplained omissions.
 
 Any failed required input produces `Watch`, `candidate_state=observe`, a machine-readable reason, and no proposed allocation. The output lists the failed benchmark and a verification task.
 

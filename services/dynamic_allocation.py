@@ -35,7 +35,7 @@ DEFAULT_ALLOCATION_REVIEW: dict[str, Any] = {
     "cooldown_days": 30,
     "minimum_history_points": 200,
     "max_data_age_days": 7,
-    "max_gap_days": 7,
+    "max_gap_days": 10,
     "drawdown_review": -0.15,
     "volatility_review": 0.30,
     "risk_on_trend": 0.50,
