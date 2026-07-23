@@ -41,9 +41,9 @@ The Overview becomes a monthly operating summary in this order:
    only when the latest evaluation reports an incomplete source state.
 4. Allocation comparison: cash plus core, satellite, and experiment current
    weights, target markers, status, and explicit denominator labels.
-5. Annual-return target card: actual annual TWR when supported, target,
-   cumulative TWR, supported history, and remaining days before the 365-day
-   comparison gate.
+5. Annual-return target card: actual YTD account TWR when supported, target,
+   cumulative TWR, supported history, and the availability of the January 1
+   anchor. Recent 12-month TWR remains a secondary view.
 6. Cash-reserve panel: current amount/weight plus approved minimum, target, and
    maximum.
 7. Layer review table: current, target, gap, aggregated supported unrealized
@@ -59,7 +59,7 @@ Overview concise without hiding detail.
 - Use existing API fields only. Missing values render as `—` or an explicit
   evidence-collection message.
 - Render all KRW amounts as rounded whole won with no visible fractional part.
-- Label current-holdings unrealized return separately from cumulative and annual
+- Label current-holdings unrealized return separately from cumulative and YTD
   account TWR. Calculate it from the latest persisted performance point's
   `unrealized_pnl_krw / current_cost_basis_krw`; never present it as account
   return.

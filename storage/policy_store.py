@@ -12,7 +12,7 @@ DEFAULT_POLICY: dict[str, Any] = {
     "cash_reserve": {"minimum": 0.10, "target": 0.15, "maximum": 0.20},
     "performance": {
         "annual_return_target": 0.10,
-        "measurement": "trailing_12_month_twr",
+        "measurement": "ytd_twr",
         "minimum_history_days": 365,
     },
     "cadence": {"observation": "weekly", "inspection": "monthly"},

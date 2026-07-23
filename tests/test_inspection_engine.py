@@ -3,12 +3,12 @@ import pytest
 from services.inspection_engine import evaluate_inspection
 
 
-def _policy():
+def _policy(measurement="ytd_twr"):
     return {
         "cash_reserve": {"minimum": 0.1, "target": 0.15, "maximum": 0.2},
         "performance": {
             "annual_return_target": 0.1,
-            "measurement": "trailing_12_month_twr",
+            "measurement": measurement,
             "minimum_history_days": 365,
         },
         "cadence": {"observation": "weekly", "inspection": "monthly"},
@@ -70,7 +70,7 @@ def _projection(cash=0.15, aaa=0.8, bbb=0.2):
     }
 
 
-def test_short_history_is_watch_and_cumulative_return_is_separate():
+def test_ytd_without_year_start_point_is_watch_and_cumulative_return_is_separate():
     result = evaluate_inspection(
         _projection(),
         {
@@ -78,7 +78,7 @@ def test_short_history_is_watch_and_cumulative_return_is_separate():
             "input_fingerprint": "perf",
             "points": [
                 {
-                    "point_at": "2026-01-01T00:00:00Z",
+                    "point_at": "2026-01-15T00:00:00Z",
                     "evaluation_state": "evaluable",
                     "interval_twr": 0.05,
                 }
@@ -92,8 +92,9 @@ def test_short_history_is_watch_and_cumulative_return_is_separate():
     )
     assert result["performance"]["cumulative_twr"] == pytest.approx(0.05)
     assert result["performance"]["annual_twr"] is None
+    assert result["performance"]["ytd_twr"] is None
     assert result["performance"]["status"] == "Watch"
-    assert result["performance"]["triggers"] == ["annual_return_history_insufficient"]
+    assert result["performance"]["triggers"] == ["ytd_return_history_insufficient"]
     aaa = next(item for item in result["instruments"] if item["symbol"] == "AAA")
     bbb = next(item for item in result["instruments"] if item["symbol"] == "BBB")
     assert aaa["layer"] == "core"
@@ -165,6 +166,40 @@ def test_trailing_return_does_not_compound_history_before_window():
         },
     ]
     result = evaluate_inspection(
-        _projection(), {"state": "complete", "points": points}, _policy(), profiles
+        _projection(),
+        {"state": "complete", "points": points},
+        _policy("trailing_12_month_twr"),
+        profiles,
     )
     assert result["performance"]["annual_twr"] == pytest.approx(0.20)
+
+
+def test_ytd_return_compounds_from_the_calendar_year_anchor():
+    profiles = {
+        ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
+        ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
+    }
+    points = [
+        {
+            "point_at": "2025-12-31T00:00:00Z",
+            "evaluation_state": "evaluable",
+            "interval_twr": 0.03,
+        },
+        {
+            "point_at": "2026-01-01T00:00:00Z",
+            "evaluation_state": "evaluable",
+            "interval_twr": 0.02,
+        },
+        {
+            "point_at": "2026-07-22T00:00:00Z",
+            "evaluation_state": "evaluable",
+            "interval_twr": 0.10,
+        },
+    ]
+    result = evaluate_inspection(
+        _projection(), {"state": "complete", "points": points}, _policy(), profiles
+    )
+    assert result["performance"]["ytd_twr"] == pytest.approx(0.10)
+    assert result["performance"]["trailing_12m_twr"] is None
+    assert result["performance"]["annual_twr"] == pytest.approx(0.10)
+    assert result["performance"]["measurement"] == "ytd_twr"

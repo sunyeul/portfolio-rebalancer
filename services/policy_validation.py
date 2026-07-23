@@ -88,8 +88,10 @@ def validate_policy(
     elif minimum_days != 365:
         errors.append("performance.minimum_history_days must be exactly 365")
     measurement = str(performance.get("measurement", "")).strip()
-    if measurement != "trailing_12_month_twr":
-        errors.append("performance.measurement must be trailing_12_month_twr")
+    if measurement not in {"ytd_twr", "trailing_12_month_twr"}:
+        errors.append(
+            "performance.measurement must be ytd_twr or trailing_12_month_twr"
+        )
 
     cadence = policy.get("cadence")
     if not isinstance(cadence, dict):

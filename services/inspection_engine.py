@@ -11,7 +11,7 @@ from typing import Any, Mapping
 from services.policy_validation import LAYERS
 
 
-ENGINE_VERSION = "phase3a-v1"
+ENGINE_VERSION = "phase3a-v2"
 SEVERITY = {"OK": 0, "Watch": 1, "Review": 2, "Action": 3}
 
 
@@ -119,6 +119,47 @@ def _trailing_twr(points: list[Mapping[str, Any]], minimum_days: int) -> float |
     return result - 1.0
 
 
+def _ytd_twr(points: list[Mapping[str, Any]]) -> float | None:
+    """Compound supported intervals after the last point on or before Jan 1."""
+    supported = sorted(
+        (
+            (_timestamp(point.get("point_at")), point)
+            for point in points
+            if point.get("evaluation_state") == "evaluable"
+        ),
+        key=lambda item: item[0] or datetime.min.replace(tzinfo=timezone.utc),
+    )
+    supported = [(timestamp, point) for timestamp, point in supported if timestamp]
+    if not supported:
+        return None
+    year_start = datetime(
+        supported[-1][0].year, 1, 1, tzinfo=timezone.utc
+    )
+    baseline_index = max(
+        (
+            index
+            for index, (timestamp, _) in enumerate(supported)
+            if timestamp <= year_start
+        ),
+        default=-1,
+    )
+    if baseline_index < 0:
+        return None
+    result = 1.0
+    for _, point in supported[baseline_index + 1 :]:
+        value = point.get("interval_twr")
+        if value is None:
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(number) or number <= -1:
+            return None
+        result *= 1 + number
+    return result - 1.0
+
+
 def _unit(
     *,
     kind: str,
@@ -216,40 +257,58 @@ def evaluate_inspection(
 
     performance_policy = policy_dict.get("performance") or {
         "annual_return_target": 0.10,
-        "measurement": "trailing_12_month_twr",
+        "measurement": "ytd_twr",
         "minimum_history_days": 365,
     }
+    measurement = str(performance_policy.get("measurement") or "ytd_twr")
     minimum_days = int(performance_policy.get("minimum_history_days", 365))
     history_days = _history_days(points)
     cumulative = _cumulative_twr(points) if performance_ok else None
-    annual: float | None = (
-        _trailing_twr(points, minimum_days) if history_days >= minimum_days else None
+    ytd = _ytd_twr(points) if performance_ok else None
+    trailing = (
+        _trailing_twr(points, minimum_days)
+        if performance_ok and history_days >= minimum_days
+        else None
     )
+    annual = ytd if measurement == "ytd_twr" else trailing
     annual_target = performance_policy.get("annual_return_target")
     performance_status = "OK"
     performance_triggers: list[str] = []
     if not performance_ok:
         performance_status = "Review"
         performance_triggers.append("performance_not_evaluable")
-    elif history_days < minimum_days:
+    elif measurement == "ytd_twr" and ytd is None:
+        performance_status = "Watch"
+        performance_triggers.append("ytd_return_history_insufficient")
+    elif measurement == "trailing_12_month_twr" and history_days < minimum_days:
         performance_status = "Watch"
         performance_triggers.append("annual_return_history_insufficient")
     elif annual is None:
         performance_status = "Watch"
-        performance_triggers.append("annual_return_points_insufficient")
+        performance_triggers.append(
+            "ytd_return_points_insufficient"
+            if measurement == "ytd_twr"
+            else "annual_return_points_insufficient"
+        )
     elif annual is not None and annual < float(annual_target):
         performance_status = "Watch"
         performance_triggers.append("annual_return_below_target")
     result["performance"] = {
         "status": performance_status,
         "cumulative_twr": cumulative,
+        "ytd_twr": ytd,
+        "trailing_12m_twr": trailing,
         "annual_twr": annual,
         "annual_target": annual_target,
         "history_days": history_days,
         "minimum_history_days": minimum_days,
-        "measurement": performance_policy.get("measurement"),
+        "measurement": measurement,
         "triggers": performance_triggers,
-        "meaning": "계좌 누적 성과와 지원되는 연간 성과를 분리해 관찰합니다.",
+        "meaning": (
+            "올해 누적 계좌 성과와 보유 평가손익을 분리해 관찰합니다."
+            if measurement == "ytd_twr"
+            else "최근 1년 계좌 성과와 보유 평가손익을 분리해 관찰합니다."
+        ),
         "verification_task": "성과 이력과 현금흐름 분류를 확인합니다.",
     }
 

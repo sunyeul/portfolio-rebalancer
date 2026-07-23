@@ -6,7 +6,7 @@
   },
   "performance": {
     "annual_return_target": 0.10,
-    "measurement": "trailing_12_month_twr",
+    "measurement": "ytd_twr",
     "minimum_history_days": 365
   },
   "cadence": {

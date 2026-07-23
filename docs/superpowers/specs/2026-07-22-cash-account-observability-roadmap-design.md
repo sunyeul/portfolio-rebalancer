@@ -34,8 +34,8 @@ contributions. IPS Pilot therefore provides a reproducible Toss-only view of:
 - tracked realized profit/loss only where Toss evidence is sufficient;
 - user-confirmed tracking principal and external cash-flow adjustments;
 - account value, principal, cash, and supported return history;
-- a `10%` annual account-return objective measured by trailing-12-month TWR
-  only after 365 days of evidence;
+- a `10%` annual account-return objective measured by YTD TWR from the
+  January 1 anchor, with trailing-12-month TWR retained as a secondary view;
 - a normal cash policy of `10% / 15% / 20%` minimum, target, and maximum;
 - current, target, permitted range, and gap for cash, layers, and instruments;
 - `core`, `satellite`, and `experiment` exposure;
@@ -56,8 +56,8 @@ contributions. IPS Pilot therefore provides a reproducible Toss-only view of:
   immediate trade.
 - Operating constraint: no recurring external contribution is assumed.
 - Cadence: observe account state weekly and run the full IPS inspection monthly.
-- Return objective: trailing-12-month account TWR target is `10%`; cumulative
-  TWR remains factual history without a separate target.
+- Return objective: YTD account TWR target is `10%`; trailing-12-month and
+  cumulative TWR remain factual secondary views without separate targets.
 - Target hierarchy: cash uses gross account weight; layers and instruments use
   invested weight, and instrument targets sum to their layer target.
 - No compatibility mode: missing Toss data fails closed rather than falling back
@@ -187,13 +187,13 @@ deterministic monthly IPS inspection without creating a trading recommender.
 
 **Goals**
 
-- Extend the immutable policy with a `10%` trailing-12-month TWR objective,
-  weekly observation/monthly review cadence, and per-instrument target ranges.
+- Extend the immutable policy with a `10%` YTD TWR objective, weekly
+  observation/monthly review cadence, and per-instrument target ranges.
 - Validate that layer targets total 100% of invested value and instrument
   targets sum to their assigned layer target.
 - Evaluate gross cash weight against `10% / 15% / 20%` and invested layer and
   instrument weights against their active policy ranges.
-- Separate cumulative return, holding unrealized profit/loss, and
+- Separate cumulative return, holding unrealized profit/loss, YTD TWR, and
   trailing-12-month TWR; do not annualize shorter histories.
 - Derive only regular-purchase-policy, observe, thesis-review, and exceptional
   human-review language.
@@ -227,8 +227,8 @@ visible without duplicating judgment logic in the browser.
 - Rebuild a Toss-only browser foundation with account overview, performance,
   allocation, instrument profile, policy, Review Queue, and source-health
   surfaces.
-- Show account principal, valuation, cash, cumulative TWR, and supported
-  trailing-12-month TWR on one time axis.
+- Show account principal, valuation, cash, cumulative TWR, YTD TWR, and
+  supported trailing-12-month TWR on one time axis.
 - Keep cash, layer, and instrument denominators explicit in every table and
   chart.
 - Render backend statuses and explanations without client-side reclassification.
