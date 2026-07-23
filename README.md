@@ -88,6 +88,26 @@ Bun으로 의존성을 고정 설치하고 `frontend/dist`를 다시 생성합�
 
 정책 파일은 앱이 관리하는 목표·범위·프로필 의도만 담습니다. Toss에서 관찰하지 않은 종목, 현재 보유 종목의 미분류 상태, 목표 합계 오류는 활성화할 수 없습니다. `inspection` 결과는 `OK`, `Watch`, `Review`, `Action`만 사용하며, `Action`도 예외 개입 가능성을 사람이 점검하라는 뜻입니다. 주문 수량이나 실행 플래그는 제공하지 않습니다.
 
+### Phase 5-v2 결과 계약
+
+검사 결과는 `allocation_state`, `status`, `priority`, `suggestion`을
+분리합니다. `allocation_state`는 `complete`, `partial`,
+`not_evaluable` 중 하나이며, 유효한 전액 현금 계좌는 현금만 판정하는
+`partial`입니다. Toss 원천이 오래되었거나 불완전·불일치하면
+`not_evaluable`로 닫고, 차단 큐 항목에 우선순위와 제안을 붙이지 않습니다.
+
+`status`는 `OK`/`Watch`/`Review`/`Action`의 심각도이고, `priority`는
+`P1`(다음 정기매수 전), `P2`(이번 월간 점검), `P3`(다음 정기매수 배분
+반영), `P4`(관찰 유지)의 재검토 시점입니다. `suggestion`은 닫힌 검토
+코드만 사용하며, 주문 방향·수량·실행을 뜻하지 않습니다.
+
+Overview는 `adjustment_suggestions`(현금·레이어·종목의 비중 조정 정책
+검토)를 먼저 보여주고, 현금/투자자산 비중 밴드와 투자 원금·현재 평가금·
+수익률을 보조 정보로 표시합니다. 성과 데이터가 없더라도 현재 Toss
+스냅샷의 비중 판정은 계속할 수 있으며, YTD 목표 수익률 미달·수익·손실·
+drawdown만으로 `Action`이나 거래 제안을 만들지 않습니다. 현금은 총계좌
+기준 전략 자산이고 레이어·종목은 투자자산 기준으로 계산합니다.
+
 Phase 5 손익·예외 검토는 제안 정책을 먼저 읽기 전용으로 확인하는 preview를 지원합니다.
 
 ```bash
@@ -95,7 +115,12 @@ uv run ips-pilot inspection preview --policy-file docs/superpowers/specs/2026-07
 uv run ips-pilot profiles set --symbol NBIS --market-country US --layer satellite --thesis-status watch --overlap-status review --management-burden-status clear --holdability-status clear --etf-substitution-status review --note "위성 투자 논지 재검토" --review-factors-note "중복과 ETF 대체 가능성 확인"
 ```
 
-Preview는 정책을 활성화하거나 평가 행을 저장하지 않습니다. `Action`은 동일 종목의 손상된 논지와 하드 최대 비중 위반이 함께 확인될 때의 예외 검토 신호일 뿐입니다. 시장 동기화, 구조화된 프로필 갱신, 정책 활성화, 최초 `phase5-v1` 평가 저장은 운영자가 별도로 승인한 뒤 수행합니다.
+Preview는 정책을 활성화하거나 평가 행을 저장하지 않습니다. `Action`은
+동일 종목의 손상된 논지와 그 종목 자신의 하드 최대 비중 위반이 함께
+확인될 때의 예외 검토 신호일 뿐입니다. 시장 동기화, 구조화된 프로필
+갱신, 정책 활성화, 최초 `phase5-v2` 평가 저장은 운영자가 별도로 승인한
+뒤 수행합니다. 이전 엔진 버전의 저장 결과는 새 계약으로 추정 변환하지
+않고 명시적인 계약 불일치로 표시합니다.
 
 ## 저장소와 검증
 
@@ -107,4 +132,4 @@ uv run ruff check .
 uv run pytest -q
 ```
 
-현재 구현은 Phase 0–4의 Toss 전용 관찰·대시보드와 Phase 5의 손익·drawdown·예외 검토 신호까지 포함합니다. Phase 6(인증된 의도 편집과 사람의 결정 기록)은 다음 로드맵 단계입니다. 현재 로드맵은 [`docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md`](docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md)에 있으며, 승인된 Pattern B 정책은 [`docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md`](docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md)에 기록되어 있습니다.
+현재 구현은 Phase 0–4의 Toss 전용 관찰·대시보드와 Phase 5의 손익·drawdown·예외 검토 및 `phase5-v2` 결과-first 비중 조정 계약까지 포함합니다. Phase 6(인증된 의도 편집과 사람의 결정 기록)은 다음 로드맵 단계입니다. 현재 로드맵은 [`docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md`](docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md)에 있으며, 승인된 Pattern B 정책은 [`docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md`](docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md)에 기록되어 있습니다.

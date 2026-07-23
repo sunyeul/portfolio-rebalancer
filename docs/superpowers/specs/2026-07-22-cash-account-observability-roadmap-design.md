@@ -22,6 +22,12 @@ All investment judgments use exactly `OK`, `Watch`, `Review`, and `Action`.
 trade. Gains, losses, market declines, or cash deviations are evidence, not
 standalone buy/sell triggers.
 
+The Phase 5-v2 result contract is fixed product semantics: allocation
+evaluability, inspection status, review priority, and the closed suggestion
+vocabulary are separate fields. Numeric cash, layer, instrument, and
+performance thresholds remain versioned IPS policy values and are not changed
+by this contract.
+
 ## User Outcome
 
 The user must operate the portfolio without relying on new external
@@ -54,6 +60,18 @@ contributions. IPS Pilot therefore provides a reproducible Toss-only view of:
 - Layer model: `core`, `satellite`, and `experiment` remain first-class.
 - Default adjustment posture: review future regular-purchase policy before an
   immediate trade.
+- Result-first action contract: `allocation_state` is `complete`, `partial`,
+  or `not_evaluable`; `status`, `priority` (`P1`–`P4`), and the closed
+  `suggestion` codes are independent. `adjustment_suggestions` contains only
+  allocation-policy review items; the full `review_queue` also retains
+  performance and data-quality diagnostics.
+- Queue classes are `blocking`, `adjustment`, and `observation`. Blocking
+  source or reconciliation issues have no priority or suggestion. A valid
+  all-cash account is partial and evaluates cash only because no invested
+  denominator exists.
+- `Action` requires the same instrument's broken thesis and that instrument's
+  own hard maximum breach. Performance targets, gains, losses, drawdown, cash
+  deviation, and layer-only breaches never create `Action` alone.
 - Operating constraint: no recurring external contribution is assumed.
 - Cadence: observe account state weekly and run the full IPS inspection monthly.
 - Return objective: YTD account TWR target is `10%`; trailing-12-month and
@@ -98,8 +116,11 @@ Toss-observed instruments and cannot form an independent portfolio.
 - Tracking principal is the confirmed baseline adjusted only by classified
   external deposits and withdrawals.
 - Holdings cost basis is not lifetime principal.
-- Partial, stale, failed, or unreconciled observations cannot produce a current
-  evaluation.
+- Stale, failed, or unreconciled observations cannot produce a current
+  allocation evaluation. A complete current Toss snapshot with a valid cash
+  denominator may still produce a partial cash-only allocation result when
+  invested value is zero; missing performance does not suppress otherwise
+  valid allocation facts.
 
 ## Roadmap
 
@@ -204,12 +225,16 @@ deterministic monthly IPS inspection without creating a trading recommender.
 **Exit criteria**
 
 - Identical snapshot and policy inputs produce identical results.
-- Missing profiles, stale data, or denominator inconsistencies fail closed.
+- Missing profiles, stale data, or denominator inconsistencies fail closed;
+  a valid all-cash account is the explicit cash-only `partial` exception.
+- Missing performance is descriptive and does not suppress an otherwise valid
+  allocation evaluation. Allocation source failure remains blocking
+  `not_evaluable`.
 - Cash and invested-layer denominators cannot be confused.
 - Annual-return underperformance, profit, loss, or cash deviation alone cannot
   produce `Action`.
-- `Action` requires a broken thesis plus a hard overweight or risk breach and
-  means inspect possible exceptional intervention.
+- `Action` requires the same instrument's broken thesis plus that instrument's
+  own hard maximum breach and means inspect possible exceptional intervention.
 - No result sizes an order or directly recommends buying or selling.
 
 Phase 3A is the operational Toss-only inspection engine. It is the single
@@ -240,8 +265,9 @@ visible without duplicating judgment logic in the browser.
 
 - The dashboard reproduces the Phase 3A CLI result for the same snapshot and
   policy version.
-- Partial, stale, failed, unclassified, insufficient-history, and invalid-policy
-  states have explicit non-evaluable UI states.
+- Stale, failed, unclassified, insufficient-history, and invalid-policy states
+  have explicit non-evaluable UI states; a valid all-cash `partial` result
+  renders cash while withholding layer/instrument judgments.
 - No credential, raw account identifier, order-sized field, or broker mutation
   endpoint reaches the browser.
 - Desktop and narrow viewport verification passes.
@@ -285,6 +311,12 @@ policy change. No broker or active policy mutation is performed.
 **Purpose:** Combine performance evidence with allocation, concentration, risk,
 and thesis integrity without turning gains or losses into automatic trades.
 
+Phase 5-v2 also makes the first operational answer result-first: show only
+allocation-policy review suggestions that can change the next regular-purchase
+decision, then show allocation bands and compact account facts. Status,
+priority, and suggestion remain separate so a performance warning cannot be
+mistaken for an urgent allocation action.
+
 **Goals**
 
 - Link tracked gains, losses, cost basis, and drawdown evidence to exact Toss
@@ -295,7 +327,12 @@ and thesis integrity without turning gains or losses into automatic trades.
   stop-loss instruction.
 - Apply stricter overlap, management-burden, holdability, and ETF-substitution
   checks to satellite and experiment exposure.
-- Reserve `Action` for broken thesis plus a hard limit breach.
+- Reserve `Action` for the same instrument's broken thesis plus its own hard
+  maximum breach.
+- Emit `allocation_state` as `complete`, `partial`, or `not_evaluable`; keep
+  `adjustment_suggestions` separate from the complete `review_queue`.
+- Order queue items by blocking data quality first, then P1–P4 review timing;
+  blocking items have no priority or suggestion.
 
 **Exit criteria**
 
@@ -303,11 +340,16 @@ and thesis integrity without turning gains or losses into automatic trades.
   produce direct trade language.
 - Every item states the raw trigger, plain meaning, and human verification task.
 - Outputs contain no order quantity, proposed trade amount, or execution flag.
+- YTD account return is the annual-target view; missing or below-target YTD is
+  descriptive performance context and cannot suppress valid allocation facts or
+  create `Action`.
 
-Phase 5 is implemented as an offline, read-only review gate. Its persisted
+Phase 5-v2 is implemented as an offline, read-only review gate. Its persisted
 evaluation path remains deliberately separate from operational rollout: live
 Toss market sync, structured factor population, policy activation, and the
-first `phase5-v1` persisted run require explicit operator approval.
+first persisted v2 run require explicit operator approval. Historical v1
+evaluations are not adapted into v2; API, CLI, and dashboard consumers expose
+the contract gate explicitly.
 
 ### Phase 6 — Write-enabled Toss operational workbench
 
