@@ -184,6 +184,18 @@ def test_policy_validate_emits_one_json_object(monkeypatch, tmp_path):
             "measurement": "trailing_12_month_twr",
             "minimum_history_days": 365,
         },
+        "risk_review": {
+            "lookback_sessions": 252,
+            "minimum_history_points": 200,
+            "max_data_age_days": 7,
+            "max_gap_days": 7,
+            "account_drawdown_review": -0.15,
+            "instrument_drawdown_review": {
+                "core": -0.25,
+                "satellite": -0.20,
+                "experiment": -0.15,
+            },
+        },
         "cadence": {"observation": "weekly", "inspection": "monthly"},
         "layers": {
             "core": {"minimum": 0.8, "target": 1.0, "maximum": 1.0},

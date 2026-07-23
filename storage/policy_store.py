@@ -15,6 +15,18 @@ DEFAULT_POLICY: dict[str, Any] = {
         "measurement": "ytd_twr",
         "minimum_history_days": 365,
     },
+    "risk_review": {
+        "lookback_sessions": 252,
+        "minimum_history_points": 200,
+        "max_data_age_days": 7,
+        "max_gap_days": 7,
+        "account_drawdown_review": -0.15,
+        "instrument_drawdown_review": {
+            "core": -0.25,
+            "satellite": -0.20,
+            "experiment": -0.15,
+        },
+    },
     "cadence": {"observation": "weekly", "inspection": "monthly"},
     "layers": {
         "core": {"minimum": 0.70, "target": 0.80, "maximum": 0.90},
@@ -238,6 +250,7 @@ def policy_template(
     )
     active = get_active_policy(account_alias)
     policy = dict(active["policy"]) if active is not None else dict(DEFAULT_POLICY)
+    policy.setdefault("risk_review", DEFAULT_POLICY["risk_review"])
     policy["instruments"] = [
         {
             "market_country": position["market_country"],

@@ -51,6 +51,28 @@ def _range(value: Any, path: str, errors: list[str]) -> dict[str, float] | None:
     return result if len(result) == 3 else None
 
 
+def _positive_integer(value: Any, path: str, errors: list[str]) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        errors.append(f"{path} must be a positive integer")
+        return None
+    return value
+
+
+def _negative_rate(value: Any, path: str, errors: list[str]) -> float | None:
+    if isinstance(value, bool):
+        errors.append(f"{path} must be greater than -1 and less than 0")
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        errors.append(f"{path} must be greater than -1 and less than 0")
+        return None
+    if not math.isfinite(number) or not -1 < number < 0:
+        errors.append(f"{path} must be greater than -1 and less than 0")
+        return None
+    return number
+
+
 def _identity(
     item: dict[str, Any], index: int, errors: list[str]
 ) -> tuple[str, str] | None:
@@ -92,6 +114,78 @@ def validate_policy(
         errors.append(
             "performance.measurement must be ytd_twr or trailing_12_month_twr"
         )
+
+    risk_review: dict[str, Any] = {}
+    raw_risk_review = policy.get("risk_review")
+    if not isinstance(raw_risk_review, dict):
+        errors.append("risk_review must be an object")
+        raw_risk_review = {}
+    lookback_sessions = _positive_integer(
+        raw_risk_review.get("lookback_sessions"),
+        "risk_review.lookback_sessions",
+        errors,
+    )
+    minimum_history_points = _positive_integer(
+        raw_risk_review.get("minimum_history_points"),
+        "risk_review.minimum_history_points",
+        errors,
+    )
+    max_data_age_days = _positive_integer(
+        raw_risk_review.get("max_data_age_days"),
+        "risk_review.max_data_age_days",
+        errors,
+    )
+    max_gap_days = _positive_integer(
+        raw_risk_review.get("max_gap_days"),
+        "risk_review.max_gap_days",
+        errors,
+    )
+    if (
+        lookback_sessions is not None
+        and minimum_history_points is not None
+        and minimum_history_points > lookback_sessions
+    ):
+        errors.append(
+            "risk_review.minimum_history_points must be <= risk_review.lookback_sessions"
+        )
+    account_drawdown_review = _negative_rate(
+        raw_risk_review.get("account_drawdown_review"),
+        "risk_review.account_drawdown_review",
+        errors,
+    )
+    raw_instrument_drawdown = raw_risk_review.get("instrument_drawdown_review")
+    instrument_drawdown_review: dict[str, float] = {}
+    if not isinstance(raw_instrument_drawdown, dict):
+        errors.append("risk_review.instrument_drawdown_review must be an object")
+        raw_instrument_drawdown = {}
+    if set(raw_instrument_drawdown) != set(LAYERS):
+        errors.append(
+            "risk_review.instrument_drawdown_review must contain exactly core, satellite, experiment"
+        )
+    for layer in LAYERS:
+        parsed = _negative_rate(
+            raw_instrument_drawdown.get(layer),
+            f"risk_review.instrument_drawdown_review.{layer}",
+            errors,
+        )
+        if parsed is not None:
+            instrument_drawdown_review[layer] = parsed
+    if (
+        lookback_sessions is not None
+        and minimum_history_points is not None
+        and max_data_age_days is not None
+        and max_gap_days is not None
+        and account_drawdown_review is not None
+        and len(instrument_drawdown_review) == len(LAYERS)
+    ):
+        risk_review = {
+            "lookback_sessions": lookback_sessions,
+            "minimum_history_points": minimum_history_points,
+            "max_data_age_days": max_data_age_days,
+            "max_gap_days": max_gap_days,
+            "account_drawdown_review": account_drawdown_review,
+            "instrument_drawdown_review": instrument_drawdown_review,
+        }
 
     cadence = policy.get("cadence")
     if not isinstance(cadence, dict):
@@ -191,6 +285,7 @@ def validate_policy(
             "measurement": measurement,
             "minimum_history_days": minimum_days,
         },
+        "risk_review": risk_review,
         "cadence": {"observation": observation, "inspection": inspection},
         "layers": layers,
         "instruments": sorted(
