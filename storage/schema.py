@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 
-LATEST_SCHEMA_VERSION = 8
+LATEST_SCHEMA_VERSION = 9
 
 
 class SchemaVersionError(RuntimeError):
@@ -494,6 +494,12 @@ ALTER TABLE ips_evaluation_runs ADD COLUMN market_evidence_json TEXT NOT NULL DE
 """
 
 
+MIGRATION_9_SQL = """
+ALTER TABLE account_performance_points
+    RENAME COLUMN tracking_principal_krw TO investment_principal_krw;
+"""
+
+
 MIGRATIONS = {
     1: MIGRATION_1_SQL,
     2: MIGRATION_2_SQL,
@@ -503,6 +509,7 @@ MIGRATIONS = {
     6: MIGRATION_6_SQL,
     7: MIGRATION_7_SQL,
     8: MIGRATION_8_SQL,
+    9: MIGRATION_9_SQL,
 }
 
 

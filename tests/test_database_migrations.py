@@ -14,6 +14,7 @@ from storage.schema import (
     MIGRATION_5_SQL,
     MIGRATION_6_SQL,
     MIGRATION_7_SQL,
+    MIGRATION_8_SQL,
     SchemaVersionError,
 )
 
@@ -115,6 +116,61 @@ def _create_v7_fixture(path):
         conn.execute("PRAGMA user_version = 7")
 
 
+def _create_v8_performance_fixture(path):
+    _create_v7_fixture(path)
+    with sqlite3.connect(path) as conn:
+        conn.executescript(MIGRATION_8_SQL)
+        conn.execute("PRAGMA user_version = 8")
+        snapshot_id = int(
+            conn.execute(
+                """
+                INSERT INTO broker_account_snapshots (
+                    account_alias, sync_started_at, synced_at, state,
+                    is_current_evaluable, source_fingerprint,
+                    source_timestamps_json, data_quality_json,
+                    reconciliation_json, total_value_krw,
+                    invested_value_krw, cash_value_krw
+                ) VALUES (
+                    'toss-brokerage', '2026-07-22T00:00:00Z',
+                    '2026-07-22T00:01:00Z', 'complete', 1,
+                    'phase9-source', '{}', '{}', '{}', 100.0, 90.0, 10.0
+                )
+                """
+            ).lastrowid
+        )
+        baseline_id = int(
+            conn.execute(
+                """
+                INSERT INTO account_tracking_baselines (
+                    account_alias, baseline_snapshot_id, tracking_started_at,
+                    initial_principal_krw, confirmed_at, confirmation_fingerprint
+                ) VALUES ('toss-brokerage', ?, '2026-07-22T00:02:00Z', 100.0, '2026-07-22T00:03:00Z', 'phase9-baseline')
+                """,
+                (snapshot_id,),
+            ).lastrowid
+        )
+        run_id = int(
+            conn.execute(
+                """
+                INSERT INTO account_performance_runs (
+                    baseline_id, through_snapshot_id, input_fingerprint,
+                    engine_version, state, data_quality_json
+                ) VALUES (?, ?, 'phase9-run', 'test', 'complete', '{}')
+                """,
+                (baseline_id, snapshot_id),
+            ).lastrowid
+        )
+        conn.execute(
+            """
+            INSERT INTO account_performance_points (
+                run_id, snapshot_id, point_at, evaluation_state,
+                tracking_principal_krw, account_gain_krw, simple_return
+            ) VALUES (?, ?, '2026-07-22T00:01:00Z', 'evaluable', 82.0, 18.0, 0.2195)
+            """,
+            (run_id, snapshot_id),
+        )
+
+
 def _insert_v3_generic_and_toss_rows(path):
     with sqlite3.connect(path) as conn:
         portfolio_id = int(
@@ -199,7 +255,7 @@ def test_fresh_database_uses_latest_schema_without_generic_tables(
 
     initialize_database()
 
-    assert _schema_version(path) == LATEST_SCHEMA_VERSION == 8
+    assert _schema_version(path) == LATEST_SCHEMA_VERSION == 9
     names = _table_names(path)
     assert GENERIC_TABLES.isdisjoint(names)
     assert {
@@ -254,7 +310,7 @@ def test_v3_to_v4_drops_generic_tables_and_preserves_toss_evidence(
 
     initialize_database()
 
-    assert _schema_version(path) == 8
+    assert _schema_version(path) == 9
     with sqlite3.connect(path) as conn:
         assert GENERIC_TABLES.isdisjoint(_table_names(path))
         assert (
@@ -306,6 +362,27 @@ def test_v7_to_v8_preserves_profile_and_evaluation_rows(monkeypatch, tmp_path):
     assert json.loads(evaluation["result_json"]) == {"status": "Review"}
     assert evaluation["market_evidence_fingerprint"] is None
     assert json.loads(evaluation["market_evidence_json"]) == {}
+
+
+def test_v8_to_v9_renames_principal_column_without_losing_values(monkeypatch, tmp_path):
+    path = tmp_path / "v8.sqlite3"
+    _create_v8_performance_fixture(path)
+    _set_database_path(monkeypatch, path)
+
+    initialize_database()
+
+    with sqlite3.connect(path) as conn:
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(account_performance_points)")
+        }
+        value = conn.execute(
+            "SELECT investment_principal_krw FROM account_performance_points"
+        ).fetchone()[0]
+    assert _schema_version(path) == LATEST_SCHEMA_VERSION == 9
+    assert "investment_principal_krw" in columns
+    assert "tracking_principal_krw" not in columns
+    assert value == pytest.approx(82.0)
 
 
 def test_failed_v4_migration_rolls_back_all_drops(monkeypatch, tmp_path):
