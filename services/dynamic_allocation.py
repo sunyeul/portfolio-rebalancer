@@ -115,10 +115,10 @@ def _proportional_values(
     subtotal = 0.0
     for item in ordered[:-1]:
         identity = _identity(item)
-        value = total * float(weights.get(identity, 0.0)) / denominator
+        value = round(total * float(weights.get(identity, 0.0)) / denominator, 12)
         result[identity] = value
         subtotal += value
-    result[_identity(ordered[-1])] = total - subtotal
+    result[_identity(ordered[-1])] = round(total - subtotal, 12)
     return result
 
 
