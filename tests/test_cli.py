@@ -271,7 +271,11 @@ def test_inspection_show_marks_v1_contract_unsupported(monkeypatch):
         "engine_version": "phase5-v1",
         "performance_run_id": None,
         "policy_version_id": 3,
-        "result": {"state": "complete", "review_queue": []},
+        "result": {
+            "engine_version": "phase5-v2",
+            "state": "complete",
+            "review_queue": [],
+        },
     }
     monkeypatch.setattr("cli.initialize_database", lambda: None)
     monkeypatch.setattr("cli.get_evaluation_run", lambda run_id: evaluation)

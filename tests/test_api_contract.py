@@ -174,6 +174,7 @@ def test_api_contract_gate_preserves_historical_result_without_adapter(
         "id": 4,
         "engine_version": "phase5-v1",
         "result": {
+            "engine_version": "phase5-v2",
             "state": "complete",
             "review_queue": [
                 {

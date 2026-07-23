@@ -32,18 +32,13 @@ SUPPORTED_INSPECTION_ENGINE_VERSION = "phase5-v2"
 def _contract_supported(evaluation: dict[str, Any] | None) -> bool:
     """Return whether an evaluation uses the approved v2 result contract.
 
-    Persisted runs keep the engine version on the wrapper while preview-style
-    payloads may expose the result directly.  Both forms are checked strictly;
-    no historical payload is adapted into the v2 action vocabulary.
+    API evaluation payloads are persisted wrappers, so only their top-level
+    engine version is authoritative.  No nested result is adapted into a v2
+    wrapper at read time.
     """
     if not isinstance(evaluation, dict):
         return False
-    if evaluation.get("engine_version") == SUPPORTED_INSPECTION_ENGINE_VERSION:
-        return True
-    result = evaluation.get("result")
-    return isinstance(result, dict) and result.get(
-        "engine_version"
-    ) == SUPPORTED_INSPECTION_ENGINE_VERSION
+    return evaluation.get("engine_version") == SUPPORTED_INSPECTION_ENGINE_VERSION
 
 
 def _error(message: str, status_code: int = 200) -> JSONResponse:

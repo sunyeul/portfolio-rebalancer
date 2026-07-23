@@ -70,12 +70,7 @@ def _contract_supported(evaluation: dict[str, Any] | None) -> bool:
     """Gate consumers on the approved v2 evaluation contract only."""
     if not isinstance(evaluation, dict):
         return False
-    if evaluation.get("engine_version") == SUPPORTED_INSPECTION_ENGINE_VERSION:
-        return True
-    result = evaluation.get("result")
-    return isinstance(result, dict) and result.get(
-        "engine_version"
-    ) == SUPPORTED_INSPECTION_ENGINE_VERSION
+    return evaluation.get("engine_version") == SUPPORTED_INSPECTION_ENGINE_VERSION
 
 
 class CliError(Exception):
