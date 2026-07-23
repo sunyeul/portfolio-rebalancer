@@ -63,6 +63,21 @@ app.add_typer(inspection_app, name="inspection")
 app.add_typer(market_app, name="market")
 
 
+SUPPORTED_INSPECTION_ENGINE_VERSION = "phase5-v2"
+
+
+def _contract_supported(evaluation: dict[str, Any] | None) -> bool:
+    """Gate consumers on the approved v2 evaluation contract only."""
+    if not isinstance(evaluation, dict):
+        return False
+    if evaluation.get("engine_version") == SUPPORTED_INSPECTION_ENGINE_VERSION:
+        return True
+    result = evaluation.get("result")
+    return isinstance(result, dict) and result.get(
+        "engine_version"
+    ) == SUPPORTED_INSPECTION_ENGINE_VERSION
+
+
 class CliError(Exception):
     """Raised for user-facing CLI errors that should become JSON."""
 
@@ -412,6 +427,7 @@ def inspection_preview_command(
                 "metadata": policy_metadata(normalized),
                 "evaluation": preview["evaluation"],
                 "preview": preview,
+                "contract_supported": _contract_supported(preview.get("evaluation")),
                 "error": None,
             }
         )
@@ -434,6 +450,7 @@ def inspection_run_command(
                 "snapshot_id": evaluation["snapshot_id"],
                 "state": evaluation["state"],
                 "evaluation": evaluation,
+                "contract_supported": _contract_supported(evaluation),
                 "error": None,
             }
         )
@@ -465,6 +482,7 @@ def inspection_show_command(
                 "performance_run_id": evaluation["performance_run_id"],
                 "policy_version_id": evaluation["policy_version_id"],
                 "evaluation": evaluation,
+                "contract_supported": _contract_supported(evaluation),
                 "error": None,
             }
         )

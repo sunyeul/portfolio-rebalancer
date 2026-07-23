@@ -201,6 +201,85 @@ def test_inspection_preview_emits_one_non_persisting_json_object(monkeypatch, tm
     assert payload["command"] == "inspection preview"
     assert payload["persisted"] is False
     assert payload["snapshot_id"] == 7
+    assert payload["contract_supported"] is False
+
+
+def test_inspection_preview_contract_gate_accepts_v2_result(monkeypatch, tmp_path):
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(json.dumps({"risk_review": {"lookback_sessions": 252}}))
+    monkeypatch.setattr("cli.initialize_database", lambda: None)
+    monkeypatch.setattr("cli.list_observed_identities", lambda: [])
+    monkeypatch.setattr(
+        "services.policy_validation.validate_policy",
+        lambda payload, identities: payload,
+    )
+    monkeypatch.setattr(
+        "cli.preview_inspection",
+        lambda policy, snapshot_id=None: {
+            "persisted": False,
+            "snapshot_id": snapshot_id,
+            "evaluation": {
+                "engine_version": "phase5-v2",
+                "state": "complete",
+            },
+        },
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "inspection",
+            "preview",
+            "--policy-file",
+            str(policy_path),
+            "--snapshot-id",
+            "7",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert _payload(result)["contract_supported"] is True
+
+
+def test_inspection_run_and_show_expose_v2_contract_gate(monkeypatch):
+    evaluation = {
+        "id": 11,
+        "snapshot_id": 7,
+        "state": "complete",
+        "engine_version": "phase5-v2",
+        "performance_run_id": None,
+        "policy_version_id": 3,
+        "result": {"engine_version": "phase5-v2", "state": "complete"},
+    }
+    monkeypatch.setattr("cli.run_inspection", lambda snapshot_id=None: evaluation)
+    run_result = runner.invoke(app, ["inspection", "run", "--snapshot-id", "7"])
+    assert run_result.exit_code == 0
+    assert _payload(run_result)["contract_supported"] is True
+
+    monkeypatch.setattr("cli.initialize_database", lambda: None)
+    monkeypatch.setattr("cli.get_evaluation_run", lambda run_id: evaluation)
+    show_result = runner.invoke(app, ["inspection", "show", "--run-id", "11"])
+    assert show_result.exit_code == 0
+    assert _payload(show_result)["contract_supported"] is True
+
+
+def test_inspection_show_marks_v1_contract_unsupported(monkeypatch):
+    evaluation = {
+        "id": 12,
+        "snapshot_id": 7,
+        "state": "complete",
+        "engine_version": "phase5-v1",
+        "performance_run_id": None,
+        "policy_version_id": 3,
+        "result": {"state": "complete", "review_queue": []},
+    }
+    monkeypatch.setattr("cli.initialize_database", lambda: None)
+    monkeypatch.setattr("cli.get_evaluation_run", lambda run_id: evaluation)
+
+    result = runner.invoke(app, ["inspection", "show", "--run-id", "12"])
+
+    assert result.exit_code == 0
+    assert _payload(result)["contract_supported"] is False
 
 
 def test_inspection_preview_rejects_missing_policy_file():

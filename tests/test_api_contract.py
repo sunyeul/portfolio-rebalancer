@@ -166,6 +166,73 @@ def test_api_returns_persisted_phase5_evidence_without_reclassification(
     assert profiles["data"]["profiles"][0]["overlap_status"] == "review"
 
 
+def test_api_contract_gate_preserves_historical_result_without_adapter(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "api.sqlite3"))
+    evaluation = {
+        "id": 4,
+        "engine_version": "phase5-v1",
+        "result": {
+            "state": "complete",
+            "review_queue": [
+                {
+                    "kind": "cash",
+                    "identity": "cash_reserve",
+                    "status": "Review",
+                    "priority": 2,
+                    "next_step": "legacy wording",
+                }
+            ],
+        },
+    }
+    monkeypatch.setattr("api.app.latest_evaluation_run", lambda: evaluation)
+    client = TestClient(create_app())
+
+    inspection = client.get("/api/inspection").json()
+    queue = client.get("/api/review-queue").json()
+
+    assert inspection["data"]["contract_supported"] is False
+    assert inspection["data"]["evaluation"]["result"]["review_queue"][0][
+        "priority"
+    ] == 2
+    assert queue["data"]["contract_supported"] is False
+    assert queue["data"]["items"][0]["next_step"] == "legacy wording"
+    assert "adjustment_suggestions" not in queue["data"]
+
+
+def test_api_contract_gate_exposes_v2_adjustment_suggestions(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "api.sqlite3"))
+    evaluation = {
+        "id": 8,
+        "engine_version": "phase5-v2",
+        "result": {
+            "engine_version": "phase5-v2",
+            "state": "complete",
+            "adjustment_suggestions": [
+                {
+                    "priority": "P1",
+                    "suggestion": {"code": "review_thesis_or_constraints"},
+                }
+            ],
+            "review_queue": [],
+        },
+    }
+    monkeypatch.setattr("api.app.latest_evaluation_run", lambda: evaluation)
+    client = TestClient(create_app())
+
+    inspection = client.get("/api/inspection").json()
+    queue = client.get("/api/review-queue").json()
+
+    assert inspection["data"]["contract_supported"] is True
+    assert queue["data"]["contract_supported"] is True
+    assert queue["data"]["adjustment_suggestions"] == evaluation["result"][
+        "adjustment_suggestions"
+    ]
+
+
 def test_api_projects_latest_performance_point_into_account_contract(monkeypatch):
     evaluation = {
         "performance_run_id": 9,

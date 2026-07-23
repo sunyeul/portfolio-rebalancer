@@ -26,6 +26,26 @@ from storage.policy_store import get_active_policy, get_policy_version
 from services.market_context import evaluate_market_context
 
 
+SUPPORTED_INSPECTION_ENGINE_VERSION = "phase5-v2"
+
+
+def _contract_supported(evaluation: dict[str, Any] | None) -> bool:
+    """Return whether an evaluation uses the approved v2 result contract.
+
+    Persisted runs keep the engine version on the wrapper while preview-style
+    payloads may expose the result directly.  Both forms are checked strictly;
+    no historical payload is adapted into the v2 action vocabulary.
+    """
+    if not isinstance(evaluation, dict):
+        return False
+    if evaluation.get("engine_version") == SUPPORTED_INSPECTION_ENGINE_VERSION:
+        return True
+    result = evaluation.get("result")
+    return isinstance(result, dict) and result.get(
+        "engine_version"
+    ) == SUPPORTED_INSPECTION_ENGINE_VERSION
+
+
 def _error(message: str, status_code: int = 200) -> JSONResponse:
     return JSONResponse(
         {"ok": False, "data": None, "error": {"message": message}},
@@ -230,21 +250,33 @@ def create_app() -> FastAPI:
 
     @app.get("/api/inspection", response_model=ApiEnvelope)
     async def inspection() -> dict[str, Any]:
+        evaluation = _evaluation_view(latest_evaluation_run())
         return {
             "ok": True,
-            "data": {"evaluation": _evaluation_view(latest_evaluation_run())},
+            "data": {
+                "evaluation": evaluation,
+                "contract_supported": _contract_supported(evaluation),
+            },
             "error": None,
         }
 
     @app.get("/api/review-queue", response_model=ApiEnvelope)
     async def review_queue() -> dict[str, Any]:
         evaluation = latest_evaluation_run()
+        contract_supported = _contract_supported(evaluation)
+        result = (evaluation or {}).get("result", {})
+        data: dict[str, Any] = {
+            "items": result.get("review_queue", []),
+            "run_id": evaluation["id"] if evaluation else None,
+            "contract_supported": contract_supported,
+        }
+        if contract_supported:
+            data["adjustment_suggestions"] = result.get(
+                "adjustment_suggestions", []
+            )
         return {
             "ok": True,
-            "data": {
-                "items": (evaluation or {}).get("result", {}).get("review_queue", []),
-                "run_id": evaluation["id"] if evaluation else None,
-            },
+            "data": data,
             "error": None,
         }
 
