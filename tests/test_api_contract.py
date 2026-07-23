@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from api.app import create_app
+from services.dynamic_allocation import DEFAULT_ALLOCATION_REVIEW
 from storage.account_observation_store import insert_snapshot
 from tests.test_account_observation_store import _snapshot
 
@@ -64,36 +65,45 @@ def test_api_can_read_anchored_performance_and_policy_versions(monkeypatch, tmp_
     assert policy["data"]["policy"]["id"] == 23
 
 
-def test_market_context_passes_policy_timestamp_to_cooling_gate(monkeypatch, tmp_path):
+def test_market_context_passes_composite_series_and_policy_timestamp(monkeypatch, tmp_path):
     monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "api.sqlite3"))
     active = {
         "id": 4,
         "account_alias": "toss-brokerage",
         "created_at": "2026-07-20T00:00:00+00:00",
-        "policy": {"cash_reserve": {"target": 0.15}},
+        "policy": {
+            "cash_reserve": {"target": 0.05},
+            "allocation_review": DEFAULT_ALLOCATION_REVIEW,
+        },
     }
     captured = {}
     monkeypatch.setattr("api.app.get_active_policy", lambda: active)
     monkeypatch.setattr("api.app.list_candles", lambda **_: [])
 
-    def fake_evaluate(candles, **kwargs):
+    def fake_evaluate(series, **kwargs):
+        captured["series"] = series
         captured.update(kwargs)
         return {
             "status": "Watch",
             "candidate_state": "observe",
-            "history_points": 0,
-            "current_target": 0.15,
-            "proposed_target": None,
+            "regime": None,
             "verification_task": "verify",
         }
 
-    monkeypatch.setattr("api.app.evaluate_market_context", fake_evaluate)
+    monkeypatch.setattr("api.app.evaluate_dynamic_allocation", fake_evaluate)
     monkeypatch.setattr("api.app.latest_policy_candidate", lambda *args: None)
     client = TestClient(create_app())
 
     response = client.get("/api/market-context")
 
     assert response.status_code == 200
+    assert set(captured["series"]) == {
+        "US/SPY",
+        "US/QQQ",
+        "KR/KOSPI",
+        "KR/KOSDAQ",
+    }
+    assert captured["active_policy"] is active["policy"]
     assert captured["last_change_at"] == active["created_at"]
 
 
@@ -119,36 +129,21 @@ def test_api_returns_persisted_phase5_evidence_without_reclassification(
             "review_queue": [
                 {
                     "identity": "US/AAA",
-                    "status": "Action",
-                    "triggers": ["broken_thesis_and_hard_maximum_breach"],
+                    "status": "Review",
+                    "triggers": ["instrument_out_of_range"],
                 }
             ],
         },
         "market_evidence": {"US/AAA": {"state": "complete"}},
     }
     monkeypatch.setattr("api.app.latest_evaluation_run", lambda: evaluation)
-    monkeypatch.setattr(
-        "api.app.list_profiles",
-        lambda: [
-            {
-                "market_country": "US",
-                "symbol": "AAA",
-                "overlap_status": "review",
-                "management_burden_status": "clear",
-                "holdability_status": "unknown",
-                "etf_substitution_status": "not_applicable",
-                "review_factors_note": "review",
-            }
-        ],
-    )
     client = TestClient(create_app())
 
     inspection = client.get("/api/inspection").json()
-    profiles = client.get("/api/profiles").json()
 
     assert (
         inspection["data"]["evaluation"]["result"]["review_queue"][0]["status"]
-        == "Action"
+        == "Review"
     )
     assert (
         inspection["data"]["evaluation"]["result"]["account"][
@@ -163,7 +158,6 @@ def test_api_returns_persisted_phase5_evidence_without_reclassification(
         inspection["data"]["evaluation"]["market_evidence"]["US/AAA"]["state"]
         == "complete"
     )
-    assert profiles["data"]["profiles"][0]["overlap_status"] == "review"
 
 
 def test_api_contract_gate_preserves_historical_result_without_adapter(
@@ -215,7 +209,7 @@ def test_api_contract_gate_exposes_v2_adjustment_suggestions(
             "adjustment_suggestions": [
                 {
                     "priority": "P1",
-                    "suggestion": {"code": "review_thesis_or_constraints"},
+                    "suggestion": {"code": "review_increase_regular_purchase_allocation"},
                 }
             ],
             "review_queue": [],

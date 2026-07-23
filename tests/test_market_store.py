@@ -1,6 +1,4 @@
 import pytest
-
-from services.market_context import evaluate_market_context
 from storage.database import initialize_database
 from storage.market_store import (
     insert_candles,
@@ -45,14 +43,22 @@ def test_market_candles_and_policy_candidates_are_idempotent(monkeypatch, tmp_pa
         {
             "account_alias": "toss-brokerage",
             "base_policy_version_id": 1,
-            "candidate_json": evaluate_market_context([candle]),
+            "candidate_json": {
+                "status": "Watch",
+                "candidate_state": "observe",
+                "reason": "market_history_insufficient",
+            },
         }
     )
     again = insert_policy_candidate(
         {
             "account_alias": "toss-brokerage",
             "base_policy_version_id": 1,
-            "candidate_json": evaluate_market_context([candle]),
+            "candidate_json": {
+                "status": "Watch",
+                "candidate_state": "observe",
+                "reason": "market_history_insufficient",
+            },
         }
     )
     assert candidate["id"] == again["id"]

@@ -251,6 +251,16 @@ def target_summary(policy: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def allocation_benchmarks(policy: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return the validated benchmark specifications for an active policy."""
+    config = policy.get("allocation_review")
+    if not isinstance(config, dict) or not isinstance(config.get("benchmarks"), list):
+        raise DynamicAllocationError(
+            "allocation_review benchmark configuration is required"
+        )
+    return deepcopy(config["benchmarks"])
+
+
 def _timestamp(value: Any) -> datetime | None:
     if not isinstance(value, str):
         return None
