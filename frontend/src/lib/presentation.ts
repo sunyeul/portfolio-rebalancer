@@ -56,3 +56,10 @@ export function formatAllocationReason(value: unknown) {
   if (typeof value !== "string" || !value.length) return "현재 비중 조정 판단에 필요한 자료를 확인할 수 없습니다.";
   return allocationReasonLabels[value] ?? value;
 }
+
+export function formatQueuePriority(priority: unknown, label: unknown) {
+  const readableLabel = typeof label === "string" && label.length ? label : null;
+  const readablePriority = typeof priority === "string" && priority.length ? priority : null;
+  if (readableLabel) return readablePriority ? `${readablePriority} · ${readableLabel}` : readableLabel;
+  return readablePriority ?? "검토 시점 미상";
+}

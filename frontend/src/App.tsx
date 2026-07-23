@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, BarChart3, CircleAlert, CircleCheck, Layers3, PanelLeftClose, PanelLeftOpen, RefreshCw, ShieldCheck, WalletCards, type LucideIcon } from "lucide-react";
 import { Evaluation, getJson, type InspectionData, type InspectionItem, type JsonObject, type PerformanceRun } from "./lib/api";
-import { evidenceValue, finiteNumber, formatAccountReturn, formatAllocationReason, formatKrw as money, formatPercent as percent, formatSignedKrw as signedMoney, supportedRate } from "./lib/presentation";
+import { evidenceValue, finiteNumber, formatAccountReturn, formatAllocationReason, formatKrw as money, formatPercent as percent, formatQueuePriority, formatSignedKrw as signedMoney, supportedRate } from "./lib/presentation";
 
 const statusLabel: Record<string, string> = { OK: "OK", Watch: "Watch", Review: "Review", Action: "Action" };
 const sidebarStorageKey = "ips-pilot.sidebar-collapsed";
@@ -165,7 +165,7 @@ function ReviewQueue({ items, compact = false }: { items: InspectionItem[]; comp
     <div className="queue-heading"><div><p className="eyebrow">REVIEW QUEUE</p><h2>{compact ? "우선 확인 항목" : "전체 확인 항목"}</h2></div><span className="queue-count">{items.length}</span></div>
     {compact && <p className="review-queue-order">백엔드 순서 · 최대 3개</p>}
     {items.length === 0 && <div className="queue-empty"><CircleCheck size={18} />현재 확인 항목 없음</div>}
-    <div className="review-queue-list">{items.map((item, index) => <article className="queue-item" key={`${String(item.kind)}-${String(item.identity)}-${index}`}><div className="queue-top"><div className="queue-axis"><Status value={item.status} />{item.priority && <span className="priority-label">{String(item.priority)} · {String(item.priority_label ?? "검토 시점 미상")}</span>}</div><small>{queueKindLabel[String(item.kind)] ?? String(item.kind ?? "근거")}</small></div><strong>{String(item.identity ?? "—")}</strong>{item.suggestion?.label && <p className="queue-suggestion">{String(item.suggestion.label)}</p>}<p>{String(item.meaning ?? "점검 의미 근거가 필요합니다.")}</p><span>{String(item.verification_task ?? "확인 과제 근거가 필요합니다.")}</span>{item.evidence_refs !== undefined && <details className="evidence-detail"><summary>근거 연결</summary><pre>{String(JSON.stringify(item.evidence_refs as JsonObject, null, 2) ?? "")}</pre></details>}</article>)}</div>
+    <div className="review-queue-list">{items.map((item, index) => <article className="queue-item" key={`${String(item.kind)}-${String(item.identity)}-${index}`}><div className="queue-top"><div className="queue-axis"><Status value={item.status} />{(item.priority || item.priority_label) && <span className="priority-label">{formatQueuePriority(item.priority, item.priority_label)}</span>}</div><small>{queueKindLabel[String(item.kind)] ?? String(item.kind ?? "근거")}</small></div><strong>{String(item.identity ?? "—")}</strong>{item.suggestion?.label && <p className="queue-suggestion">{String(item.suggestion.label)}</p>}<p>{String(item.meaning ?? "점검 의미 근거가 필요합니다.")}</p><span>{String(item.verification_task ?? "확인 과제 근거가 필요합니다.")}</span>{item.evidence_refs !== undefined && <details className="evidence-detail"><summary>근거 연결</summary><pre>{String(JSON.stringify(item.evidence_refs as JsonObject, null, 2) ?? "")}</pre></details>}</article>)}</div>
     <div className="queue-footer">이 목록은 읽기 전용 검사 신호이며, 상태와 순서는 백엔드 평가를 그대로 따릅니다.</div>
   </section>;
 }

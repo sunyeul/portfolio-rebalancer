@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { evidenceValue, formatAccountReturn, formatAllocationReason, formatKrw, formatSignedKrw, supportedRate } from "../src/lib/presentation";
+import { evidenceValue, formatAccountReturn, formatAllocationReason, formatKrw, formatQueuePriority, formatSignedKrw, supportedRate } from "../src/lib/presentation";
 
 test("KRW formatting removes fractional won", () => {
   expect(formatKrw(120802745.17802304)).toBe("120,802,745 KRW");
@@ -34,4 +34,9 @@ test("allocation blocking reasons remain human-readable without inventing a deci
   );
   expect(formatAllocationReason("unknown_reason")).toBe("unknown_reason");
   expect(formatAllocationReason(null)).toContain("비중 조정 판단");
+});
+
+test("blocking queue items keep their priority label even without a priority code", () => {
+  expect(formatQueuePriority(null, "평가 차단")).toBe("평가 차단");
+  expect(formatQueuePriority("P1", "다음 정기매수 전")).toBe("P1 · 다음 정기매수 전");
 });
