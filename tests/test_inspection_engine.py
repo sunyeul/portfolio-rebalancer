@@ -94,6 +94,10 @@ def test_short_history_is_watch_and_cumulative_return_is_separate():
     assert result["performance"]["annual_twr"] is None
     assert result["performance"]["status"] == "Watch"
     assert result["performance"]["triggers"] == ["annual_return_history_insufficient"]
+    aaa = next(item for item in result["instruments"] if item["symbol"] == "AAA")
+    bbb = next(item for item in result["instruments"] if item["symbol"] == "BBB")
+    assert aaa["layer"] == "core"
+    assert bbb["layer"] == "satellite"
 
 
 def test_broken_thesis_and_hard_maximum_is_action_without_order_semantics():

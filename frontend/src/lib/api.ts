@@ -1,4 +1,11 @@
 export type Envelope<T> = { ok: boolean; data: T | null; error: { message: string } | null };
+export type JsonObject = Record<string, unknown>;
+
+export type PerformanceRun = JsonObject & {
+  id?: number;
+  state?: string;
+  points?: Array<JsonObject>;
+};
 
 export type Evaluation = {
   id?: number;
@@ -7,17 +14,18 @@ export type Evaluation = {
   engine_version?: string;
   state?: "complete" | "not_evaluable" | "failed";
   non_evaluable_reason?: string | null;
-  account?: Record<string, unknown>;
+  profile_snapshot?: Array<Record<string, unknown>>;
+  account?: JsonObject;
   result?: {
     engine_version?: string;
-    account?: Record<string, unknown>;
+    account?: JsonObject;
     state?: string;
     source?: Record<string, unknown>;
-    performance?: Record<string, unknown>;
-    cash?: Record<string, unknown>;
-    layers?: Array<Record<string, unknown>>;
-    instruments?: Array<Record<string, unknown>>;
-    review_queue?: Array<Record<string, unknown>>;
+    performance?: JsonObject;
+    cash?: JsonObject;
+    layers?: Array<JsonObject>;
+    instruments?: Array<JsonObject>;
+    review_queue?: Array<JsonObject>;
   };
   snapshot_id?: number;
 };

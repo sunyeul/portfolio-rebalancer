@@ -123,6 +123,35 @@ def get_active_policy(
     }
 
 
+def get_policy_version(
+    version_id: int, account_alias: str = "toss-brokerage"
+) -> dict[str, Any] | None:
+    """Return one immutable policy version for an anchored evaluation."""
+    from storage.database import connect
+
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, account_alias, version, policy_json, policy_hash,
+                   superseded_at, created_at
+            FROM ips_policy_versions
+            WHERE id = ? AND account_alias = ?
+            """,
+            (version_id, account_alias),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": int(row["id"]),
+        "account_alias": row["account_alias"],
+        "version": int(row["version"]),
+        "policy": json.loads(row["policy_json"]),
+        "policy_hash": row["policy_hash"],
+        "superseded_at": row["superseded_at"],
+        "created_at": row["created_at"],
+    }
+
+
 def list_observed_identities(
     account_alias: str = "toss-brokerage",
 ) -> list[tuple[str, str]]:

@@ -44,3 +44,54 @@ def test_api_source_contract_redacts_order_and_execution_fields(monkeypatch, tmp
     )
     encoded = str(payloads)
     assert all(field not in encoded for field in forbidden)
+
+
+def test_api_can_read_anchored_performance_and_policy_versions(monkeypatch, tmp_path):
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "api.sqlite3"))
+    monkeypatch.setattr(
+        "api.app.get_performance_run", lambda run_id: {"id": run_id, "points": []}
+    )
+    monkeypatch.setattr(
+        "api.app.get_policy_version",
+        lambda version_id: {"id": version_id, "version": version_id, "policy": {}},
+    )
+    client = TestClient(create_app())
+
+    performance = client.get("/api/performance?run_id=17").json()
+    policy = client.get("/api/policy?version_id=23").json()
+
+    assert performance["data"]["run"]["id"] == 17
+    assert policy["data"]["policy"]["id"] == 23
+
+
+def test_market_context_passes_policy_timestamp_to_cooling_gate(monkeypatch, tmp_path):
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "api.sqlite3"))
+    active = {
+        "id": 4,
+        "account_alias": "toss-brokerage",
+        "created_at": "2026-07-20T00:00:00+00:00",
+        "policy": {"cash_reserve": {"target": 0.15}},
+    }
+    captured = {}
+    monkeypatch.setattr("api.app.get_active_policy", lambda: active)
+    monkeypatch.setattr("api.app.list_candles", lambda **_: [])
+
+    def fake_evaluate(candles, **kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "Watch",
+            "candidate_state": "observe",
+            "history_points": 0,
+            "current_target": 0.15,
+            "proposed_target": None,
+            "verification_task": "verify",
+        }
+
+    monkeypatch.setattr("api.app.evaluate_market_context", fake_evaluate)
+    monkeypatch.setattr("api.app.latest_policy_candidate", lambda *args: None)
+    client = TestClient(create_app())
+
+    response = client.get("/api/market-context")
+
+    assert response.status_code == 200
+    assert captured["last_change_at"] == active["created_at"]

@@ -34,6 +34,7 @@ def test_help_exposes_only_toss_product_commands():
         "account-view",
         "policy",
         "inspection",
+        "market",
         "web",
     ):
         assert command in result.stdout
@@ -132,6 +133,45 @@ def test_web_rejects_non_loopback_binding():
     result = runner.invoke(app, ["web", "--host", "0.0.0.0"])
     assert result.exit_code == 1
     assert _payload(result)["error"]["stage"] == "input"
+
+
+def test_market_context_persists_candidate_without_activation(monkeypatch):
+    candidate_calls = []
+    active = {
+        "id": 8,
+        "account_alias": "toss-brokerage",
+        "created_at": "2026-07-01T00:00:00+00:00",
+        "policy": {"cash_reserve": {"target": 0.15}},
+    }
+    monkeypatch.setattr("cli.initialize_database", lambda: None)
+    monkeypatch.setattr("cli.get_active_policy", lambda: active)
+    monkeypatch.setattr("cli.list_candles", lambda **_: [{"close_price": 1}])
+    monkeypatch.setattr(
+        "cli.evaluate_market_context",
+        lambda candles, **kwargs: {
+            "status": "Review",
+            "candidate_state": "candidate",
+            "current_target": 0.15,
+            "proposed_target": 0.2,
+            "history_points": 200,
+            "verification_task": "verify",
+        },
+    )
+
+    def persist(candidate):
+        candidate_calls.append(candidate)
+        return {"id": 3, **candidate}
+
+    monkeypatch.setattr("cli.insert_policy_candidate", persist)
+    monkeypatch.setattr("cli.latest_policy_candidate", lambda *args: {"id": 3})
+
+    result = runner.invoke(app, ["market", "context"])
+
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["candidate"]["id"] == 3
+    assert candidate_calls[0]["base_policy_version_id"] == 8
+    assert payload["activation"] == "human approval required; active policy unchanged"
 
 
 def test_policy_validate_emits_one_json_object(monkeypatch, tmp_path):

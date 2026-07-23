@@ -20,8 +20,10 @@ from storage.account_observation_store import (
 from storage.database import initialize_database
 from storage.evaluation_store import latest_evaluation_run
 from storage.instrument_profile_store import list_profiles
-from storage.performance_store import latest_performance_run
-from storage.policy_store import get_active_policy
+from storage.market_store import latest_policy_candidate, list_candles
+from storage.performance_store import get_performance_run, latest_performance_run
+from storage.policy_store import get_active_policy, get_policy_version
+from services.market_context import evaluate_market_context
 
 
 def _error(message: str, status_code: int = 200) -> JSONResponse:
@@ -146,12 +148,22 @@ def create_app() -> FastAPI:
             return _error(str(exc))
 
     @app.get("/api/performance", response_model=ApiEnvelope)
-    async def performance() -> dict[str, Any]:
-        return {"ok": True, "data": {"run": latest_performance_run()}, "error": None}
+    async def performance(run_id: int | None = None) -> dict[str, Any]:
+        run = (
+            get_performance_run(run_id)
+            if run_id is not None
+            else latest_performance_run()
+        )
+        return {"ok": True, "data": {"run": run}, "error": None}
 
     @app.get("/api/policy", response_model=ApiEnvelope)
-    async def policy() -> dict[str, Any]:
-        return {"ok": True, "data": {"policy": get_active_policy()}, "error": None}
+    async def policy(version_id: int | None = None) -> dict[str, Any]:
+        selected = (
+            get_policy_version(version_id)
+            if version_id is not None
+            else get_active_policy()
+        )
+        return {"ok": True, "data": {"policy": selected}, "error": None}
 
     @app.get("/api/profiles", response_model=ApiEnvelope)
     async def profiles() -> dict[str, Any]:
@@ -176,6 +188,37 @@ def create_app() -> FastAPI:
             },
             "error": None,
         }
+
+    @app.get("/api/market-context", response_model=ApiEnvelope)
+    async def market_context() -> dict[str, Any]:
+        try:
+            active = get_active_policy()
+            if active is None:
+                return _error("활성 정책을 찾을 수 없습니다.")
+            cash_policy = active["policy"].get("cash_reserve", {})
+            candles = list_candles(
+                source_kind="market_indicator", market_country="KR", symbol="KOSPI"
+            )
+            context = evaluate_market_context(
+                candles,
+                current_target=float(cash_policy.get("target", 0.15)),
+                last_change_at=active.get("created_at"),
+            )
+            return {
+                "ok": True,
+                "data": {
+                    "benchmark": "KR/KOSPI",
+                    "policy_version_id": active["id"],
+                    "context": context,
+                    "latest_candidate": latest_policy_candidate(
+                        active["account_alias"], active["id"]
+                    ),
+                    "activation": "human approval required; active policy unchanged",
+                },
+                "error": None,
+            }
+        except Exception as exc:
+            return _error(str(exc))
 
     frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
     if frontend_dist.exists():

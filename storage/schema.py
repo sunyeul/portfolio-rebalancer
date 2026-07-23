@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 
-LATEST_SCHEMA_VERSION = 5
+LATEST_SCHEMA_VERSION = 7
 
 
 class SchemaVersionError(RuntimeError):
@@ -397,12 +397,96 @@ CREATE INDEX IF NOT EXISTS idx_ips_evaluation_runs_snapshot
 """
 
 
+MIGRATION_6_SQL = """
+CREATE TABLE IF NOT EXISTS toss_market_candles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_kind TEXT NOT NULL CHECK(source_kind IN ('stock', 'market_indicator')),
+    market_country TEXT NOT NULL DEFAULT '',
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL CHECK(interval = '1d'),
+    candle_at TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    open_price REAL NOT NULL,
+    high_price REAL NOT NULL,
+    low_price REAL NOT NULL,
+    close_price REAL NOT NULL,
+    volume REAL NOT NULL,
+    adjusted INTEGER NOT NULL CHECK(adjusted IN (0, 1)),
+    source_fingerprint TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(source_kind, market_country, symbol, interval, candle_at, adjusted)
+);
+
+CREATE INDEX IF NOT EXISTS idx_toss_market_candles_lookup
+    ON toss_market_candles(source_kind, symbol, interval, candle_at);
+
+CREATE TABLE IF NOT EXISTS ips_policy_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_alias TEXT NOT NULL,
+    base_policy_version_id INTEGER NOT NULL REFERENCES ips_policy_versions(id),
+    state TEXT NOT NULL CHECK(state IN ('candidate', 'approved', 'rejected')),
+    candidate_json TEXT NOT NULL,
+    candidate_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_ips_policy_candidates_account_created
+    ON ips_policy_candidates(account_alias, created_at, id);
+"""
+
+
+MIGRATION_7_SQL = """
+CREATE TABLE toss_market_candles_v7 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_kind TEXT NOT NULL CHECK(source_kind IN ('stock', 'market_indicator')),
+    market_country TEXT NOT NULL DEFAULT '',
+    symbol TEXT NOT NULL,
+    interval TEXT NOT NULL CHECK(interval = '1d'),
+    candle_at TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    open_price REAL NOT NULL,
+    high_price REAL NOT NULL,
+    low_price REAL NOT NULL,
+    close_price REAL NOT NULL,
+    volume REAL NOT NULL,
+    adjusted INTEGER NOT NULL CHECK(adjusted IN (0, 1)),
+    adjusted_supported INTEGER NOT NULL DEFAULT 1 CHECK(adjusted_supported IN (0, 1)),
+    source_fingerprint TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(
+        source_kind, market_country, symbol, interval, candle_at, adjusted,
+        source_fingerprint
+    )
+);
+
+INSERT INTO toss_market_candles_v7 (
+    id, source_kind, market_country, symbol, interval, candle_at, currency,
+    open_price, high_price, low_price, close_price, volume, adjusted,
+    adjusted_supported, source_fingerprint, created_at
+)
+SELECT
+    id, source_kind, market_country, symbol, interval, candle_at, currency,
+    open_price, high_price, low_price, close_price, volume, adjusted,
+    CASE WHEN source_kind = 'stock' THEN 1 ELSE 0 END,
+    source_fingerprint, created_at
+FROM toss_market_candles;
+
+DROP TABLE toss_market_candles;
+ALTER TABLE toss_market_candles_v7 RENAME TO toss_market_candles;
+
+CREATE INDEX IF NOT EXISTS idx_toss_market_candles_lookup
+    ON toss_market_candles(source_kind, symbol, interval, candle_at);
+"""
+
+
 MIGRATIONS = {
     1: MIGRATION_1_SQL,
     2: MIGRATION_2_SQL,
     3: MIGRATION_3_SQL,
     4: MIGRATION_4_SQL,
     5: MIGRATION_5_SQL,
+    6: MIGRATION_6_SQL,
+    7: MIGRATION_7_SQL,
 }
 
 

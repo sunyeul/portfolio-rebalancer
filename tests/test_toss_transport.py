@@ -56,6 +56,23 @@ def test_transport_permits_allowlisted_observation_get(config):
 
 
 @pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/prices",
+        "/api/v1/candles",
+        "/api/v1/stocks",
+        "/api/v1/market-indicators/KOSPI/candles",
+    ],
+)
+def test_transport_permits_official_market_observation_paths(config, path):
+    transport = _transport(
+        config, lambda request: httpx.Response(200, json={"result": {}})
+    )
+
+    assert transport.request_json("GET", path)["result"] == {}
+
+
+@pytest.mark.parametrize(
     ("method", "path"),
     [
         ("POST", "/api/v1/orders"),

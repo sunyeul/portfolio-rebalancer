@@ -1,0 +1,163 @@
+{
+  "cash_reserve": {
+    "minimum": 0.10,
+    "target": 0.15,
+    "maximum": 0.20
+  },
+  "performance": {
+    "annual_return_target": 0.10,
+    "measurement": "trailing_12_month_twr",
+    "minimum_history_days": 365
+  },
+  "cadence": {
+    "observation": "weekly",
+    "inspection": "monthly"
+  },
+  "layers": {
+    "core": {
+      "minimum": 0.70,
+      "target": 0.75,
+      "maximum": 0.80
+    },
+    "satellite": {
+      "minimum": 0.15,
+      "target": 0.20,
+      "maximum": 0.25
+    },
+    "experiment": {
+      "minimum": 0.02,
+      "target": 0.05,
+      "maximum": 0.08
+    }
+  },
+  "instruments": [
+    {
+      "market_country": "US",
+      "symbol": "SPY",
+      "layer": "core",
+      "minimum": 0.20,
+      "target": 0.25,
+      "maximum": 0.30
+    },
+    {
+      "market_country": "US",
+      "symbol": "VOO",
+      "layer": "core",
+      "minimum": 0.15,
+      "target": 0.20,
+      "maximum": 0.25
+    },
+    {
+      "market_country": "US",
+      "symbol": "QQQ",
+      "layer": "core",
+      "minimum": 0.08,
+      "target": 0.12,
+      "maximum": 0.16
+    },
+    {
+      "market_country": "US",
+      "symbol": "SCHD",
+      "layer": "core",
+      "minimum": 0.06,
+      "target": 0.10,
+      "maximum": 0.14
+    },
+    {
+      "market_country": "KR",
+      "symbol": "069500",
+      "layer": "core",
+      "minimum": 0.05,
+      "target": 0.08,
+      "maximum": 0.11
+    },
+    {
+      "market_country": "US",
+      "symbol": "AMZN",
+      "layer": "satellite",
+      "minimum": 0.01,
+      "target": 0.025,
+      "maximum": 0.04
+    },
+    {
+      "market_country": "US",
+      "symbol": "GOOGL",
+      "layer": "satellite",
+      "minimum": 0.02,
+      "target": 0.035,
+      "maximum": 0.05
+    },
+    {
+      "market_country": "US",
+      "symbol": "MU",
+      "layer": "satellite",
+      "minimum": 0.015,
+      "target": 0.03,
+      "maximum": 0.045
+    },
+    {
+      "market_country": "US",
+      "symbol": "NVDA",
+      "layer": "satellite",
+      "minimum": 0.01,
+      "target": 0.02,
+      "maximum": 0.03
+    },
+    {
+      "market_country": "US",
+      "symbol": "TSLA",
+      "layer": "satellite",
+      "minimum": 0.01,
+      "target": 0.025,
+      "maximum": 0.04
+    },
+    {
+      "market_country": "US",
+      "symbol": "GLD",
+      "layer": "satellite",
+      "minimum": 0.02,
+      "target": 0.025,
+      "maximum": 0.05
+    },
+    {
+      "market_country": "KR",
+      "symbol": "005930",
+      "layer": "satellite",
+      "minimum": 0.005,
+      "target": 0.015,
+      "maximum": 0.025
+    },
+    {
+      "market_country": "KR",
+      "symbol": "000660",
+      "layer": "satellite",
+      "minimum": 0.005,
+      "target": 0.015,
+      "maximum": 0.025
+    },
+    {
+      "market_country": "US",
+      "symbol": "NBIS",
+      "layer": "satellite",
+      "minimum": 0.00,
+      "target": 0.01,
+      "maximum": 0.02
+    },
+    {
+      "market_country": "US",
+      "symbol": "SOXL",
+      "layer": "experiment",
+      "minimum": 0.01,
+      "target": 0.03,
+      "maximum": 0.05
+    },
+    {
+      "market_country": "US",
+      "symbol": "SPCX",
+      "layer": "experiment",
+      "minimum": 0.00,
+      "target": 0.02,
+      "maximum": 0.03
+    }
+  ]
+}

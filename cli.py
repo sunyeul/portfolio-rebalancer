@@ -13,9 +13,11 @@ import typer
 from integrations.toss.auth import TossAuthorizedReader, TossTokenProvider
 from integrations.toss.config import TossApiConfig
 from integrations.toss.observation import TossObservationService
+from integrations.toss.market import TossMarketDataService
 from integrations.toss.transport import TossTransport
 from services.account_projection import build_account_projection
 from services.inspection_service import run_inspection
+from services.market_context import evaluate_market_context
 from storage.account_observation_store import (
     get_snapshot as get_account_snapshot,
     list_snapshots as list_account_snapshots,
@@ -28,6 +30,12 @@ from storage.policy_store import (
     get_active_policy,
     list_observed_identities,
     policy_template,
+)
+from storage.market_store import (
+    insert_candles,
+    insert_policy_candidate,
+    latest_policy_candidate,
+    list_candles,
 )
 from storage.performance_store import (
     append_cash_flow_decision,
@@ -47,10 +55,12 @@ performance_app = typer.Typer(help="Inspect Toss account performance history.")
 profiles_app = typer.Typer(help="Manage Toss instrument IPS profiles.")
 policy_app = typer.Typer(help="Inspect and activate versioned Toss IPS policies.")
 inspection_app = typer.Typer(help="Run and inspect deterministic Toss evaluations.")
+market_app = typer.Typer(help="Inspect official Toss market context.")
 app.add_typer(performance_app, name="performance")
 app.add_typer(profiles_app, name="profiles")
 app.add_typer(policy_app, name="policy")
 app.add_typer(inspection_app, name="inspection")
+app.add_typer(market_app, name="market")
 
 
 class CliError(Exception):
@@ -92,6 +102,14 @@ def _build_toss_service() -> tuple[TossObservationService, TossTransport]:
     tokens = TossTokenProvider(config, transport)
     reader = TossAuthorizedReader(config, transport, tokens)
     return TossObservationService(config, reader), transport
+
+
+def _build_toss_market_service() -> tuple[TossMarketDataService, TossTransport]:
+    config = TossApiConfig.from_env()
+    transport = TossTransport(config)
+    tokens = TossTokenProvider(config, transport)
+    reader = TossAuthorizedReader(config, transport, tokens)
+    return TossMarketDataService(reader), transport
 
 
 @app.command("toss-health")
@@ -403,6 +421,135 @@ def inspection_show_command(
         )
     except Exception as exc:
         _exit_with_command_error("inspection show", exc)
+
+
+@market_app.command("sync")
+def market_sync_command(
+    symbols: Annotated[str | None, typer.Option("--symbols")] = None,
+    max_pages: Annotated[int, typer.Option("--max-pages")] = 5,
+) -> None:
+    """Read official Toss daily candles and persist immutable observations."""
+    transport: TossTransport | None = None
+    try:
+        initialize_database()
+        service, transport = _build_toss_market_service()
+        identities = list_observed_identities()
+        requested = [
+            item.strip() for item in (symbols or "").split(",") if item.strip()
+        ]
+        stock_symbols = requested or [
+            f"{country}/{symbol}" for country, symbol in identities
+        ]
+        stored: list[dict[str, Any]] = []
+        for identity in stock_symbols:
+            if "/" in identity:
+                market_country, symbol = identity.split("/", 1)
+            else:
+                market_country, symbol = "", identity
+            candles = service.collect_history(
+                symbol=symbol,
+                market_country=market_country,
+                source_kind="stock",
+                max_pages=max_pages,
+            )
+            stored.extend(insert_candles(item.as_dict() for item in candles))
+        benchmark = service.collect_history(
+            symbol="KOSPI",
+            source_kind="market_indicator",
+            market_country="KR",
+            max_pages=max_pages,
+        )
+        stored.extend(insert_candles(item.as_dict() for item in benchmark))
+        active = get_active_policy()
+        context = None
+        candidate = None
+        if active is not None:
+            context = evaluate_market_context(
+                list_candles(
+                    source_kind="market_indicator",
+                    market_country="KR",
+                    symbol="KOSPI",
+                ),
+                current_target=float(
+                    active["policy"].get("cash_reserve", {}).get("target", 0.15)
+                ),
+                last_change_at=active.get("created_at"),
+            )
+            if context.get("candidate_state") == "candidate":
+                candidate = insert_policy_candidate(
+                    {
+                        "account_alias": active["account_alias"],
+                        "base_policy_version_id": active["id"],
+                        "candidate_json": {"benchmark": "KR/KOSPI", "context": context},
+                    }
+                )
+        _emit_json(
+            {
+                "ok": True,
+                "command": "market sync",
+                "symbols": stock_symbols + ["KR/KOSPI"],
+                "candle_count": len(stored),
+                "context": context,
+                "candidate": candidate,
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("market sync", exc)
+    finally:
+        if transport is not None:
+            transport.close()
+
+
+@market_app.command("context")
+def market_context_command(
+    benchmark: Annotated[str, typer.Option("--benchmark")] = "KOSPI",
+) -> None:
+    """Evaluate stored Toss market context without activating a policy."""
+    try:
+        initialize_database()
+        active = get_active_policy()
+        if active is None:
+            raise CliError("persistence", "활성 정책을 찾을 수 없습니다.")
+        policy = active["policy"]
+        current_target = float(policy.get("cash_reserve", {}).get("target", 0.15))
+        candles = list_candles(
+            source_kind="market_indicator", market_country="KR", symbol=benchmark
+        )
+        context = evaluate_market_context(
+            candles,
+            current_target=current_target,
+            last_change_at=active.get("created_at"),
+        )
+        candidate = None
+        if context.get("candidate_state") == "candidate":
+            candidate = insert_policy_candidate(
+                {
+                    "account_alias": active["account_alias"],
+                    "base_policy_version_id": active["id"],
+                    "candidate_json": {
+                        "benchmark": f"KR/{benchmark.upper()}",
+                        "context": context,
+                    },
+                }
+            )
+        _emit_json(
+            {
+                "ok": True,
+                "command": "market context",
+                "benchmark": f"KR/{benchmark.upper()}",
+                "policy_version_id": active["id"],
+                "context": context,
+                "candidate": candidate,
+                "latest_candidate": latest_policy_candidate(
+                    active["account_alias"], active["id"]
+                ),
+                "activation": "human approval required; active policy unchanged",
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("market context", exc)
 
 
 @app.command("web")

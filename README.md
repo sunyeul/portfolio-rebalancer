@@ -90,4 +90,4 @@ uv run ruff check .
 uv run pytest -q
 ```
 
-현재 구현은 Phase 3A 정책·결정론적 검사와 Phase 3B 읽기 전용 Toss API/대시보드 기반까지 포함합니다. 브라우저에서 정책·프로필·판정·브로커 상태를 변경하는 기능과 시장 맥락·위험 보강은 별도 승인 범위입니다. 로드맵과 운영 설계는 [`docs/superpowers/specs/2026-07-23-operating-dashboard-inspection-loop-design.md`](docs/superpowers/specs/2026-07-23-operating-dashboard-inspection-loop-design.md)와 [`docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md`](docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md)에 있습니다.
+현재 구현은 Phase 3A 결정론적 검사, Phase 3B 읽기 전용 Toss 대시보드, Phase 4 Toss 시장 맥락 후보 검토까지 포함합니다. 브라우저에서 정책·프로필·판정·브로커 상태를 변경하는 기능과 손익·예외 검토 보강은 아직 남은 범위입니다. 현재 로드맵은 [`docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md`](docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md)에 있으며, 승인된 Pattern B 정책은 [`docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md`](docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md)에 기록되어 있습니다.

@@ -1,8 +1,8 @@
 # Toss-only Account Inspection Roadmap
 
-**Created:** 2026-07-22  
-**Revised:** 2026-07-23  
-**Status:** Approved roadmap; Phase 3A is the next implementation phase  
+**Created:** 2026-07-22
+**Revised:** 2026-07-23
+**Status:** Current roadmap; Phases 0–4 complete, Phases 5–6 remaining
 **Product:** IPS Pilot
 
 ## Product Direction
@@ -176,10 +176,11 @@ judgment behavior on top of it.
 - The latest complete snapshot produces a deterministic account projection.
 - No broker mutation or direct trade-language path is introduced.
 
-The detailed design is
-`docs/superpowers/specs/2026-07-23-toss-only-foundation-convergence-design.md`.
+The roadmap itself is the current source for phase status and durable product
+direction; completed implementation plans and phase-specific design records
+are intentionally not retained here.
 
-### Phase 3A — Target policy and deterministic inspection engine — Next
+### Phase 3A — Target policy and deterministic inspection engine — Complete
 
 **Purpose:** Turn Toss account evidence and versioned user targets into a
 deterministic monthly IPS inspection without creating a trading recommender.
@@ -211,11 +212,10 @@ deterministic monthly IPS inspection without creating a trading recommender.
   means inspect possible exceptional intervention.
 - No result sizes an order or directly recommends buying or selling.
 
-Phase 3A is the first operational Toss-only inspection engine. Its detailed
-design is
-`docs/superpowers/specs/2026-07-23-operating-dashboard-inspection-loop-design.md`.
+Phase 3A is the operational Toss-only inspection engine. It is the single
+backend source of status and explanation logic for the CLI, API, and dashboard.
 
-### Phase 3B — Read-only Toss operating dashboard
+### Phase 3B — Read-only Toss operating dashboard — Complete
 
 **Purpose:** Make current state, targets, gaps, performance, and Review Queue
 visible without duplicating judgment logic in the browser.
@@ -246,7 +246,7 @@ visible without duplicating judgment logic in the browser.
   endpoint reaches the browser.
 - Desktop and narrow viewport verification passes.
 
-### Phase 4 — Toss market-context policy review
+### Phase 4 — Toss market-context policy review — Complete
 
 **Purpose:** Inspect whether the normal 15% cash target should move within the
 approved 10%–20% envelope using only official Toss market data.
@@ -276,7 +276,9 @@ market-indicator candles through its Open API:
 - Approved target changes remain within the policy envelope and never mutate
   the brokerage account.
 
-Phase 4 requires a separate approved threshold and hysteresis design.
+The implemented market-context boundary keeps these thresholds as review
+parameters, produces only a candidate, and requires human approval before any
+policy change. No broker or active policy mutation is performed.
 
 ### Phase 5 — Profit/loss and exceptional-review signals
 
@@ -302,7 +304,7 @@ and thesis integrity without turning gains or losses into automatic trades.
 - Every item states the raw trigger, plain meaning, and human verification task.
 - Outputs contain no order quantity, proposed trade amount, or execution flag.
 
-Phase 5 requires a separate adversarially reviewed design.
+Phase 5 is the next design and implementation gate.
 
 ### Phase 6 — Write-enabled Toss operational workbench
 
@@ -368,14 +370,11 @@ fixtures and never require real credentials.
 
 ## Delivery and Approval Gates
 
-- Phases 0–2.5 are complete evidence and Toss-only foundation infrastructure.
-- Phase 3A delivers the target-policy CLI inspection engine.
-- Phase 3B immediately exposes the same engine through a read-only browser
-  dashboard.
-- Phases 4 and 5 add market and profit/loss judgment only through separate
-  approved designs.
-- Phase 6 adds IPS intent editing and human decisions to the Phase 3B browser
-  foundation.
+- Phases 0–4 are complete Toss-only evidence, inspection, dashboard, and
+  market-context infrastructure.
+- Phase 5 is the next gate for profit/loss and exceptional-review signals.
+- Phase 6 adds authenticated IPS intent editing and human decisions to the
+  read-only browser foundation.
 
 Before any phase advances:
 

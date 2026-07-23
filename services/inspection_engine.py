@@ -436,6 +436,7 @@ def evaluate_inspection(
                 extra={
                     "market_country": key[0],
                     "symbol": key[1],
+                    "layer": position.get("layer"),
                     "thesis_status": profile.get("thesis_status") if profile else None,
                     "unrealized_pnl_krw": position.get("profit_loss_krw"),
                 },

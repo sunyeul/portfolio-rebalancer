@@ -22,6 +22,9 @@ ALLOWED_GET_PATHS = frozenset(
         "/api/v1/buying-power",
         "/api/v1/exchange-rate",
         "/api/v1/orders",
+        "/api/v1/prices",
+        "/api/v1/candles",
+        "/api/v1/stocks",
     }
 )
 
@@ -43,7 +46,16 @@ def _normalized_path(path: str) -> str:
 def _assert_allowed(method: str, path: str) -> tuple[str, str]:
     normalized_method = method.upper()
     normalized_path = _normalized_path(path)
-    if normalized_method == "GET" and normalized_path in ALLOWED_GET_PATHS:
+    market_indicator_path = normalized_path.split("/")
+    is_market_indicator_candle = (
+        len(market_indicator_path) == 6
+        and market_indicator_path[:4] == ["", "api", "v1", "market-indicators"]
+        and bool(market_indicator_path[4])
+        and market_indicator_path[5] == "candles"
+    )
+    if normalized_method == "GET" and (
+        normalized_path in ALLOWED_GET_PATHS or is_market_indicator_candle
+    ):
         return normalized_method, normalized_path
     if normalized_method == "POST" and normalized_path == TOKEN_PATH:
         return normalized_method, normalized_path
