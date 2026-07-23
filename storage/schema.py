@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 
-LATEST_SCHEMA_VERSION = 7
+LATEST_SCHEMA_VERSION = 8
 
 
 class SchemaVersionError(RuntimeError):
@@ -479,6 +479,21 @@ CREATE INDEX IF NOT EXISTS idx_toss_market_candles_lookup
 """
 
 
+MIGRATION_8_SQL = """
+ALTER TABLE ips_instrument_profiles ADD COLUMN overlap_status TEXT NOT NULL DEFAULT 'unknown'
+    CHECK(overlap_status IN ('unknown', 'clear', 'review'));
+ALTER TABLE ips_instrument_profiles ADD COLUMN management_burden_status TEXT NOT NULL DEFAULT 'unknown'
+    CHECK(management_burden_status IN ('unknown', 'clear', 'review'));
+ALTER TABLE ips_instrument_profiles ADD COLUMN holdability_status TEXT NOT NULL DEFAULT 'unknown'
+    CHECK(holdability_status IN ('unknown', 'clear', 'review'));
+ALTER TABLE ips_instrument_profiles ADD COLUMN etf_substitution_status TEXT NOT NULL DEFAULT 'unknown'
+    CHECK(etf_substitution_status IN ('unknown', 'not_applicable', 'clear', 'review'));
+ALTER TABLE ips_instrument_profiles ADD COLUMN review_factors_note TEXT NOT NULL DEFAULT '';
+ALTER TABLE ips_evaluation_runs ADD COLUMN market_evidence_fingerprint TEXT;
+ALTER TABLE ips_evaluation_runs ADD COLUMN market_evidence_json TEXT NOT NULL DEFAULT '{}';
+"""
+
+
 MIGRATIONS = {
     1: MIGRATION_1_SQL,
     2: MIGRATION_2_SQL,
@@ -487,6 +502,7 @@ MIGRATIONS = {
     5: MIGRATION_5_SQL,
     6: MIGRATION_6_SQL,
     7: MIGRATION_7_SQL,
+    8: MIGRATION_8_SQL,
 }
 
 

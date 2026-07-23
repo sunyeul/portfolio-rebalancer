@@ -8,6 +8,10 @@ from typing import Any
 
 LAYERS = frozenset({"core", "satellite", "experiment"})
 THESIS_STATUSES = frozenset({"unknown", "valid", "watch", "broken"})
+REVIEW_FACTOR_STATUSES = frozenset({"unknown", "clear", "review"})
+ETF_SUBSTITUTION_STATUSES = frozenset(
+    {"unknown", "not_applicable", "clear", "review"}
+)
 
 
 class InstrumentProfileError(ValueError):
@@ -29,7 +33,12 @@ def _validate_profile(
     layer: str,
     thesis_status: str,
     thesis_note: str,
-) -> tuple[str, str, str, str, str]:
+    overlap_status: str,
+    management_burden_status: str,
+    holdability_status: str,
+    etf_substitution_status: str,
+    review_factors_note: str,
+) -> tuple[str, str, str, str, str, str, str, str, str, str]:
     normalized_symbol, normalized_country = instrument_key(symbol, market_country)
     normalized_layer = str(layer).strip().lower()
     if normalized_layer not in LAYERS:
@@ -37,12 +46,30 @@ def _validate_profile(
     normalized_status = str(thesis_status).strip().lower()
     if normalized_status not in THESIS_STATUSES:
         raise InstrumentProfileError(f"invalid thesis_status: {thesis_status}")
+    normalized_factors: list[str] = []
+    for field, value in (
+        ("overlap_status", overlap_status),
+        ("management_burden_status", management_burden_status),
+        ("holdability_status", holdability_status),
+    ):
+        normalized = str(value).strip().lower()
+        if normalized not in REVIEW_FACTOR_STATUSES:
+            raise InstrumentProfileError(f"invalid {field}: {value}")
+        normalized_factors.append(normalized)
+    normalized_etf = str(etf_substitution_status).strip().lower()
+    if normalized_etf not in ETF_SUBSTITUTION_STATUSES:
+        raise InstrumentProfileError(
+            f"invalid etf_substitution_status: {etf_substitution_status}"
+        )
     return (
         normalized_symbol,
         normalized_country,
         normalized_layer,
         normalized_status,
         str(thesis_note or "").strip(),
+        *normalized_factors,
+        normalized_etf,
+        str(review_factors_note or "").strip(),
     )
 
 
@@ -54,6 +81,11 @@ def _row_to_profile(row: sqlite3.Row) -> dict[str, Any]:
         "layer": row["layer"],
         "thesis_status": row["thesis_status"],
         "thesis_note": row["thesis_note"],
+        "overlap_status": row["overlap_status"],
+        "management_burden_status": row["management_burden_status"],
+        "holdability_status": row["holdability_status"],
+        "etf_substitution_status": row["etf_substitution_status"],
+        "review_factors_note": row["review_factors_note"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -66,6 +98,12 @@ def upsert_profile(
     thesis_status: str,
     thesis_note: str = "",
     account_alias: str = "toss-brokerage",
+    *,
+    overlap_status: str = "unknown",
+    management_burden_status: str = "unknown",
+    holdability_status: str = "unknown",
+    etf_substitution_status: str = "unknown",
+    review_factors_note: str = "",
 ) -> dict[str, Any]:
     """Create or update IPS metadata for a previously observed Toss holding."""
     (
@@ -74,7 +112,23 @@ def upsert_profile(
         normalized_layer,
         normalized_status,
         normalized_note,
-    ) = _validate_profile(symbol, market_country, layer, thesis_status, thesis_note)
+        normalized_overlap,
+        normalized_burden,
+        normalized_holdability,
+        normalized_etf,
+        normalized_factor_note,
+    ) = _validate_profile(
+        symbol,
+        market_country,
+        layer,
+        thesis_status,
+        thesis_note,
+        overlap_status,
+        management_burden_status,
+        holdability_status,
+        etf_substitution_status,
+        review_factors_note,
+    )
     from storage.database import connect
 
     with connect() as conn:
@@ -100,13 +154,19 @@ def upsert_profile(
             """
             INSERT INTO ips_instrument_profiles (
                 account_alias, market_country, symbol, layer, thesis_status,
-                thesis_note
+                thesis_note, overlap_status, management_burden_status,
+                holdability_status, etf_substitution_status, review_factors_note
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(account_alias, market_country, symbol) DO UPDATE SET
                 layer = excluded.layer,
                 thesis_status = excluded.thesis_status,
                 thesis_note = excluded.thesis_note,
+                overlap_status = excluded.overlap_status,
+                management_burden_status = excluded.management_burden_status,
+                holdability_status = excluded.holdability_status,
+                etf_substitution_status = excluded.etf_substitution_status,
+                review_factors_note = excluded.review_factors_note,
                 updated_at = CURRENT_TIMESTAMP
             """,
             (
@@ -116,12 +176,19 @@ def upsert_profile(
                 normalized_layer,
                 normalized_status,
                 normalized_note,
+                normalized_overlap,
+                normalized_burden,
+                normalized_holdability,
+                normalized_etf,
+                normalized_factor_note,
             ),
         )
         row = conn.execute(
             """
             SELECT account_alias, market_country, symbol, layer, thesis_status,
-                   thesis_note, created_at, updated_at
+                   thesis_note, overlap_status, management_burden_status,
+                   holdability_status, etf_substitution_status,
+                   review_factors_note, created_at, updated_at
             FROM ips_instrument_profiles
             WHERE account_alias = ? AND market_country = ? AND symbol = ?
             """,
@@ -145,7 +212,9 @@ def get_profile(
         row = conn.execute(
             """
             SELECT account_alias, market_country, symbol, layer, thesis_status,
-                   thesis_note, created_at, updated_at
+                   thesis_note, overlap_status, management_burden_status,
+                   holdability_status, etf_substitution_status,
+                   review_factors_note, created_at, updated_at
             FROM ips_instrument_profiles
             WHERE account_alias = ? AND market_country = ? AND symbol = ?
             """,
@@ -162,7 +231,9 @@ def list_profiles(account_alias: str = "toss-brokerage") -> list[dict[str, Any]]
         rows = conn.execute(
             """
             SELECT account_alias, market_country, symbol, layer, thesis_status,
-                   thesis_note, created_at, updated_at
+                   thesis_note, overlap_status, management_burden_status,
+                   holdability_status, etf_substitution_status,
+                   review_factors_note, created_at, updated_at
             FROM ips_instrument_profiles
             WHERE account_alias = ?
             ORDER BY market_country, symbol

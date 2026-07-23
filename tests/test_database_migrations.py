@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 import pytest
@@ -9,6 +10,10 @@ from storage.schema import (
     MIGRATION_1_SQL,
     MIGRATION_2_SQL,
     MIGRATION_3_SQL,
+    MIGRATION_4_SQL,
+    MIGRATION_5_SQL,
+    MIGRATION_6_SQL,
+    MIGRATION_7_SQL,
     SchemaVersionError,
 )
 
@@ -43,6 +48,71 @@ def _create_v3_fixture(path):
         for script in (MIGRATION_1_SQL, MIGRATION_2_SQL, MIGRATION_3_SQL):
             conn.executescript(script)
         conn.execute("PRAGMA user_version = 3")
+
+
+def _create_v7_fixture(path):
+    with sqlite3.connect(path) as conn:
+        for version, script in (
+            (1, MIGRATION_1_SQL),
+            (2, MIGRATION_2_SQL),
+            (3, MIGRATION_3_SQL),
+            (4, MIGRATION_4_SQL),
+            (5, MIGRATION_5_SQL),
+            (6, MIGRATION_6_SQL),
+            (7, MIGRATION_7_SQL),
+        ):
+            conn.executescript(script)
+            conn.execute(f"PRAGMA user_version = {version}")
+        snapshot_id = int(
+            conn.execute(
+                """
+                INSERT INTO broker_account_snapshots (
+                    account_alias, sync_started_at, synced_at, state,
+                    is_current_evaluable, source_fingerprint,
+                    source_timestamps_json, data_quality_json,
+                    reconciliation_json
+                ) VALUES (
+                    'toss-brokerage', '2026-07-23T00:00:00Z',
+                    '2026-07-23T00:01:00Z', 'failed', 0, 'migration-source',
+                    '{}', '{}', '{}'
+                )
+                """
+            ).lastrowid
+        )
+        policy_id = int(
+            conn.execute(
+                """
+                INSERT INTO ips_policy_versions (
+                    account_alias, version, policy_json, policy_hash
+                ) VALUES ('toss-brokerage', 1, '{}', 'migration-policy')
+                """
+            ).lastrowid
+        )
+        conn.execute(
+            """
+            INSERT INTO ips_instrument_profiles (
+                account_alias, market_country, symbol, layer, thesis_status,
+                thesis_note
+            ) VALUES ('toss-brokerage', 'US', 'AAA', 'satellite', 'unknown', '')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO ips_evaluation_runs (
+                account_alias, snapshot_id, performance_run_id,
+                policy_version_id, source_fingerprint, performance_fingerprint,
+                policy_hash, profile_snapshot_json, profile_hash, engine_version,
+                state, non_evaluable_reason, result_json, evaluation_fingerprint
+            ) VALUES (
+                'toss-brokerage', ?, NULL, ?, 'migration-source', NULL,
+                'migration-policy', '[]', 'migration-profile', 'phase3a-v2',
+                'not_evaluable', 'missing_source', '{"status":"Review"}',
+                'migration-evaluation'
+            )
+            """,
+            (snapshot_id, policy_id),
+        )
+        conn.execute("PRAGMA user_version = 7")
 
 
 def _insert_v3_generic_and_toss_rows(path):
@@ -129,7 +199,7 @@ def test_fresh_database_uses_latest_schema_without_generic_tables(
 
     initialize_database()
 
-    assert _schema_version(path) == LATEST_SCHEMA_VERSION == 7
+    assert _schema_version(path) == LATEST_SCHEMA_VERSION == 8
     names = _table_names(path)
     assert GENERIC_TABLES.isdisjoint(names)
     assert {
@@ -151,6 +221,25 @@ def test_fresh_database_uses_latest_schema_without_generic_tables(
         "ips_policy_candidates",
     }.issubset(names)
     with sqlite3.connect(path) as conn:
+        profile_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(ips_instrument_profiles)")
+        }
+        evaluation_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(ips_evaluation_runs)")
+        }
+    assert {
+        "overlap_status",
+        "management_burden_status",
+        "holdability_status",
+        "etf_substitution_status",
+        "review_factors_note",
+    }.issubset(profile_columns)
+    assert {"market_evidence_fingerprint", "market_evidence_json"}.issubset(
+        evaluation_columns
+    )
+    with sqlite3.connect(path) as conn:
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
 
@@ -165,7 +254,7 @@ def test_v3_to_v4_drops_generic_tables_and_preserves_toss_evidence(
 
     initialize_database()
 
-    assert _schema_version(path) == 7
+    assert _schema_version(path) == 8
     with sqlite3.connect(path) as conn:
         assert GENERIC_TABLES.isdisjoint(_table_names(path))
         assert (
@@ -190,6 +279,33 @@ def test_v3_to_v4_drops_generic_tables_and_preserves_toss_evidence(
             ).fetchone()[0]
             == expected["run_fingerprint"]
         )
+
+
+def test_v7_to_v8_preserves_profile_and_evaluation_rows(monkeypatch, tmp_path):
+    path = tmp_path / "v7.sqlite3"
+    _create_v7_fixture(path)
+    _set_database_path(monkeypatch, path)
+
+    initialize_database()
+
+    with sqlite3.connect(path) as conn:
+        conn.row_factory = sqlite3.Row
+        profile = conn.execute(
+            "SELECT * FROM ips_instrument_profiles WHERE symbol = 'AAA'"
+        ).fetchone()
+        evaluation = conn.execute(
+            "SELECT * FROM ips_evaluation_runs WHERE id = 1"
+        ).fetchone()
+    assert (
+        profile["overlap_status"],
+        profile["management_burden_status"],
+        profile["holdability_status"],
+        profile["etf_substitution_status"],
+        profile["review_factors_note"],
+    ) == ("unknown", "unknown", "unknown", "unknown", "")
+    assert json.loads(evaluation["result_json"]) == {"status": "Review"}
+    assert evaluation["market_evidence_fingerprint"] is None
+    assert json.loads(evaluation["market_evidence_json"]) == {}
 
 
 def test_failed_v4_migration_rolls_back_all_drops(monkeypatch, tmp_path):

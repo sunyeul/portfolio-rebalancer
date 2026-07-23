@@ -118,3 +118,41 @@ def test_profile_listing_is_deterministic(snapshot_fixture):
         ("US", "AAPL"),
     ]
     assert get_profile("aapl", "us")["symbol"] == "AAPL"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("overlap_status", "invalid"),
+        ("management_burden_status", "invalid"),
+        ("holdability_status", "invalid"),
+        ("etf_substitution_status", "invalid"),
+    ],
+)
+def test_profile_rejects_invalid_review_factor(snapshot_fixture, field, value):
+    kwargs = {field: value}
+    with pytest.raises(InstrumentProfileError, match=f"invalid {field}"):
+        upsert_profile("AAPL", "US", "core", "valid", **kwargs)
+
+
+def test_profile_review_factors_round_trip(snapshot_fixture):
+    profile = upsert_profile(
+        "AAPL",
+        "US",
+        "satellite",
+        "watch",
+        overlap_status="review",
+        management_burden_status="clear",
+        holdability_status="unknown",
+        etf_substitution_status="not_applicable",
+        review_factors_note="ETF alternative requires review",
+    )
+
+    assert profile["overlap_status"] == "review"
+    assert profile["management_burden_status"] == "clear"
+    assert profile["holdability_status"] == "unknown"
+    assert profile["etf_substitution_status"] == "not_applicable"
+    assert profile["review_factors_note"] == "ETF alternative requires review"
+    assert get_profile("aapl", "us")["review_factors_note"] == (
+        "ETF alternative requires review"
+    )
