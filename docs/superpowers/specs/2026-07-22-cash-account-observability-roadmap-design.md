@@ -2,7 +2,7 @@
 
 **Created:** 2026-07-22
 **Revised:** 2026-07-23
-**Status:** Current roadmap; Phases 0–4 complete, Phases 5–6 remaining
+**Status:** Current roadmap; Phases 0–5 complete, Phase 6 remaining
 **Product:** IPS Pilot
 
 ## Product Direction
@@ -304,7 +304,10 @@ and thesis integrity without turning gains or losses into automatic trades.
 - Every item states the raw trigger, plain meaning, and human verification task.
 - Outputs contain no order quantity, proposed trade amount, or execution flag.
 
-Phase 5 is the next design and implementation gate.
+Phase 5 is implemented as an offline, read-only review gate. Its persisted
+evaluation path remains deliberately separate from operational rollout: live
+Toss market sync, structured factor population, policy activation, and the
+first `phase5-v1` persisted run require explicit operator approval.
 
 ### Phase 6 — Write-enabled Toss operational workbench
 
@@ -370,9 +373,8 @@ fixtures and never require real credentials.
 
 ## Delivery and Approval Gates
 
-- Phases 0–4 are complete Toss-only evidence, inspection, dashboard, and
-  market-context infrastructure.
-- Phase 5 is the next gate for profit/loss and exceptional-review signals.
+- Phases 0–5 are complete Toss-only evidence, inspection, dashboard,
+  market-context, and offline profit/loss review infrastructure.
 - Phase 6 adds authenticated IPS intent editing and human decisions to the
   read-only browser foundation.
 

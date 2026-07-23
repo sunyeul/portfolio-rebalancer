@@ -68,7 +68,7 @@ uv run ips-pilot performance history --latest
 
 ## 정책과 운영 검사
 
-현금 리저브는 총계좌 평가금 기준 10% 최소·15% 목표·20% 최대 범위로 관찰합니다. 레이어와 종목은 투자금 평가금 기준으로 별도 목표 범위를 사용합니다. 연간 목표 수익률은 누적 수익률과 분리한 trailing 12-month TWR 10%이며 365일 이상의 지원 이력이 생기기 전에는 비교하지 않습니다.
+현금 리저브는 총계좌 평가금 기준 10% 최소·15% 목표·20% 최대 범위로 관찰합니다. 레이어와 종목은 투자금 평가금 기준으로 별도 목표 범위를 사용합니다. 연간 목표 수익률은 누적 수익률과 분리한 연초 기준 YTD TWR 10%이며, 최근 1년 TWR은 보조 뷰로 함께 표시합니다.
 
 ```bash
 uv run ips-pilot policy template > toss-policy-template.json
@@ -87,6 +87,15 @@ Bun으로 의존성을 고정 설치하고 `frontend/dist`를 다시 생성합�
 
 정책 파일은 앱이 관리하는 목표·범위·프로필 의도만 담습니다. Toss에서 관찰하지 않은 종목, 현재 보유 종목의 미분류 상태, 목표 합계 오류는 활성화할 수 없습니다. `inspection` 결과는 `OK`, `Watch`, `Review`, `Action`만 사용하며, `Action`도 예외 개입 가능성을 사람이 점검하라는 뜻입니다. 주문 수량이나 실행 플래그는 제공하지 않습니다.
 
+Phase 5 손익·예외 검토는 제안 정책을 먼저 읽기 전용으로 확인하는 preview를 지원합니다.
+
+```bash
+uv run ips-pilot inspection preview --policy-file docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.json
+uv run ips-pilot profiles set --symbol NBIS --market-country US --layer satellite --thesis-status watch --overlap-status review --management-burden-status clear --holdability-status clear --etf-substitution-status review --note "위성 투자 논지 재검토" --review-factors-note "중복과 ETF 대체 가능성 확인"
+```
+
+Preview는 정책을 활성화하거나 평가 행을 저장하지 않습니다. `Action`은 동일 종목의 손상된 논지와 하드 최대 비중 위반이 함께 확인될 때의 예외 검토 신호일 뿐입니다. 시장 동기화, 구조화된 프로필 갱신, 정책 활성화, 최초 `phase5-v1` 평가 저장은 운영자가 별도로 승인한 뒤 수행합니다.
+
 ## 저장소와 검증
 
 기본 SQLite 경로는 `data/portfolio_rebalancer.sqlite3`입니다. 스키마는 Toss 계좌 관찰, 성과 추적, 계층/논지 프로필, 정책 버전만 보존합니다. 마이그레이션은 무결성 검사와 secure delete를 수행합니다.
@@ -97,4 +106,4 @@ uv run ruff check .
 uv run pytest -q
 ```
 
-현재 구현은 Phase 3A 결정론적 검사, Phase 3B 읽기 전용 Toss 대시보드, Phase 4 Toss 시장 맥락 후보 검토까지 포함합니다. 브라우저에서 정책·프로필·판정·브로커 상태를 변경하는 기능과 손익·예외 검토 보강은 아직 남은 범위입니다. 현재 로드맵은 [`docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md`](docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md)에 있으며, 승인된 Pattern B 정책은 [`docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md`](docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md)에 기록되어 있습니다.
+현재 구현은 Phase 0–4의 Toss 전용 관찰·대시보드와 Phase 5의 손익·drawdown·예외 검토 신호까지 포함합니다. Phase 6(인증된 의도 편집과 사람의 결정 기록)은 다음 로드맵 단계입니다. 현재 로드맵은 [`docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md`](docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md)에 있으며, 승인된 Pattern B 정책은 [`docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md`](docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md)에 기록되어 있습니다.
