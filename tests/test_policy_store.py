@@ -1,4 +1,5 @@
 import sqlite3
+from copy import deepcopy
 
 import pytest
 
@@ -30,6 +31,164 @@ def _core_instrument():
         "target": 1,
         "maximum": 1,
     }
+
+
+def _allocation_review():
+    return {
+        "strategy": "us_kr_three_regime_v1",
+        "cooldown_days": 30,
+        "minimum_history_points": 200,
+        "max_data_age_days": 7,
+        "max_gap_days": 7,
+        "drawdown_review": -0.15,
+        "volatility_review": 0.30,
+        "risk_on_trend": 0.50,
+        "risk_off_trend": -0.50,
+        "risk_on_max_risk_weight": 0.30,
+        "risk_off_risk_weight": 0.50,
+        "benchmarks": [
+            {
+                "key": "US/SPY",
+                "source_kind": "stock",
+                "market_country": "US",
+                "symbol": "SPY",
+                "weight": 0.30,
+            },
+            {
+                "key": "US/QQQ",
+                "source_kind": "stock",
+                "market_country": "US",
+                "symbol": "QQQ",
+                "weight": 0.30,
+            },
+            {
+                "key": "KR/KOSPI",
+                "source_kind": "market_indicator",
+                "market_country": "KR",
+                "symbol": "KOSPI",
+                "weight": 0.25,
+            },
+            {
+                "key": "KR/KOSDAQ",
+                "source_kind": "market_indicator",
+                "market_country": "KR",
+                "symbol": "KOSDAQ",
+                "weight": 0.15,
+            },
+        ],
+        "regimes": {
+            "risk_on": {
+                "cash_target": 0.03,
+                "layers": {"core": 0.52, "satellite": 0.44, "experiment": 0.04},
+            },
+            "neutral": {
+                "cash_target": 0.05,
+                "layers": {"core": 0.60, "satellite": 0.38, "experiment": 0.02},
+            },
+            "risk_off": {
+                "cash_target": 0.10,
+                "layers": {"core": 0.70, "satellite": 0.29, "experiment": 0.01},
+            },
+        },
+    }
+
+
+def _dynamic_policy():
+    return {
+        "cash_reserve": {"minimum": 0.03, "target": 0.05, "maximum": 0.10},
+        "performance": {
+            "annual_return_target": 0.1,
+            "measurement": "ytd_twr",
+            "minimum_history_days": 365,
+        },
+        "risk_review": _risk_review(),
+        "cadence": {"observation": "weekly", "inspection": "monthly"},
+        "layers": {
+            "core": {"minimum": 0.50, "target": 0.60, "maximum": 0.70},
+            "satellite": {"minimum": 0.28, "target": 0.38, "maximum": 0.48},
+            "experiment": {"minimum": 0.00, "target": 0.02, "maximum": 0.04},
+        },
+        "instruments": [
+            {
+                "market_country": "US",
+                "symbol": "SPY",
+                "layer": "core",
+                "minimum": 0.50,
+                "target": 0.60,
+                "maximum": 0.70,
+            },
+            {
+                "market_country": "US",
+                "symbol": "QQQ",
+                "layer": "satellite",
+                "minimum": 0.28,
+                "target": 0.38,
+                "maximum": 0.48,
+            },
+            {
+                "market_country": "US",
+                "symbol": "GLD",
+                "layer": "experiment",
+                "minimum": 0.00,
+                "target": 0.02,
+                "maximum": 0.04,
+            },
+        ],
+        "allocation_review": _allocation_review(),
+    }
+
+
+def test_policy_validation_preserves_allocation_review():
+    from services.policy_validation import validate_policy
+
+    policy = _dynamic_policy()
+
+    normalized = validate_policy(
+        policy,
+        [("US", "SPY"), ("US", "QQQ"), ("US", "GLD")],
+    )
+
+    assert normalized["allocation_review"] == _allocation_review()
+
+
+@pytest.mark.parametrize(
+    ("mutator", "message"),
+    [
+        (
+            lambda value: value["benchmarks"].append(
+                deepcopy(value["benchmarks"][0])
+            ),
+            "duplicate",
+        ),
+        (
+            lambda value: value["benchmarks"][0].update(weight=0.10),
+            "weights must sum to 1",
+        ),
+        (
+            lambda value: value["regimes"].pop("risk_off"),
+            "exactly risk_on, neutral, risk_off",
+        ),
+        (
+            lambda value: value["regimes"]["neutral"]["layers"].update(core=0.61),
+            "layer targets must sum to 1",
+        ),
+        (
+            lambda value: value["regimes"]["risk_on"].update(cash_target=0.02),
+            "cash target must be within cash_reserve range",
+        ),
+    ],
+)
+def test_policy_validation_rejects_invalid_allocation_review(mutator, message):
+    from services.policy_validation import PolicyValidationError, validate_policy
+
+    policy = _dynamic_policy()
+    mutator(policy["allocation_review"])
+
+    with pytest.raises(PolicyValidationError, match=message):
+        validate_policy(
+            policy,
+            [("US", "SPY"), ("US", "QQQ"), ("US", "GLD")],
+        )
 
 
 def test_default_policy_is_seeded_once_and_is_replayable(monkeypatch, tmp_path):
