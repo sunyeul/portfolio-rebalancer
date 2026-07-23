@@ -1,0 +1,106 @@
+"""Application orchestration for persisted Toss inspection runs."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from services.account_projection import AccountProjectionError, build_account_projection
+from services.inspection_engine import (
+    ENGINE_VERSION,
+    evaluation_fingerprint,
+    evaluate_inspection,
+    profile_snapshot,
+)
+from storage.account_observation_store import get_snapshot, list_snapshots
+from storage.database import initialize_database
+from storage.evaluation_store import insert_evaluation_run
+from storage.instrument_profile_store import profile_map
+from storage.performance_store import latest_performance_run
+from storage.policy_store import get_active_policy
+
+
+def run_inspection(
+    snapshot_id: int | None = None,
+    account_alias: str = "toss-brokerage",
+) -> dict[str, Any]:
+    """Create or reuse one deterministic evaluation for the requested snapshot."""
+    initialize_database()
+    active = get_active_policy(account_alias)
+    if active is None:
+        raise RuntimeError("active IPS policy is not configured")
+    profiles = profile_map(account_alias)
+    profile_values, profile_hash = profile_snapshot(profiles)
+    performance: dict[str, Any] | None = None
+    projection: dict[str, Any] | None = None
+    source_error: str | None = None
+    source_snapshot = get_snapshot(snapshot_id) if snapshot_id is not None else None
+    if source_snapshot is None and snapshot_id is None:
+        recent = list_snapshots(limit=1)
+        source_snapshot = recent[0] if recent else None
+    try:
+        projection = build_account_projection(
+            snapshot_id=snapshot_id, account_alias=account_alias
+        )
+    except AccountProjectionError as exc:
+        source_error = str(exc)
+        if source_snapshot is None:
+            raise RuntimeError(f"snapshot_id={snapshot_id} not found")
+        if snapshot_id is None:
+            source_error = (
+                f"latest snapshot {source_snapshot['id']} is not evaluable: "
+                f"{source_snapshot['state']}"
+            )
+    if projection is not None:
+        performance = latest_performance_run(
+            through_snapshot_id=projection["snapshot_id"]
+        )
+    source_fingerprint = (
+        projection.get("source_fingerprint")
+        if projection
+        else source_snapshot.get("source_fingerprint")
+        if source_snapshot
+        else "missing"
+    )
+    result = evaluate_inspection(
+        projection,
+        performance,
+        active["policy"],
+        profiles,
+        source_error=source_error,
+    )
+    if projection is None and source_snapshot is not None:
+        result["source"]["snapshot_id"] = source_snapshot["id"]
+        result["source"]["source_fingerprint"] = source_snapshot["source_fingerprint"]
+    fingerprint = evaluation_fingerprint(
+        source_fingerprint=source_fingerprint,
+        performance_fingerprint=performance.get("input_fingerprint")
+        if performance
+        else None,
+        policy_hash=active["policy_hash"],
+        profile_hash=profile_hash,
+    )
+    persisted = insert_evaluation_run(
+        {
+            "account_alias": account_alias,
+            "snapshot_id": projection["snapshot_id"]
+            if projection
+            else source_snapshot["id"]
+            if source_snapshot
+            else 0,
+            "performance_run_id": performance["id"] if performance else None,
+            "policy_version_id": active["id"],
+            "source_fingerprint": source_fingerprint,
+            "performance_fingerprint": performance.get("input_fingerprint")
+            if performance
+            else None,
+            "policy_hash": active["policy_hash"],
+            "profile_snapshot": profile_values,
+            "profile_hash": profile_hash,
+            "engine_version": ENGINE_VERSION,
+            "state": result["state"],
+            "non_evaluable_reason": result["non_evaluable_reason"],
+            "result": result,
+            "evaluation_fingerprint": fingerprint,
+        }
+    )
+    return persisted

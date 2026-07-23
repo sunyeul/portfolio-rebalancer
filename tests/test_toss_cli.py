@@ -88,8 +88,10 @@ def test_toss_sync_emits_snapshot_and_uses_requested_order_window(monkeypatch):
 def test_toss_snapshots_latest_reads_local_store_only(monkeypatch):
     monkeypatch.setattr("cli.initialize_database", lambda: None)
     monkeypatch.setattr(
-        "cli.latest_account_snapshot",
-        lambda: {"id": 9, "state": "complete", "account_alias": "toss-brokerage"},
+        "cli.list_account_snapshots",
+        lambda limit=20: [
+            {"id": 9, "state": "partial", "account_alias": "toss-brokerage"}
+        ],
     )
 
     result = runner.invoke(app, ["toss-snapshots", "--latest"])
@@ -97,7 +99,7 @@ def test_toss_snapshots_latest_reads_local_store_only(monkeypatch):
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["snapshots"]["id"] == 9
-    assert payload["snapshots"]["state"] == "complete"
+    assert payload["snapshots"]["state"] == "partial"
 
 
 def test_toss_health_returns_machine_readable_config_error(monkeypatch):

@@ -10,6 +10,7 @@ from storage.account_observation_store import (
     get_snapshot,
     insert_snapshot,
     latest_complete,
+    latest_verified_complete,
     list_complete_snapshots,
     list_snapshots,
 )
@@ -98,7 +99,9 @@ def test_insert_snapshot_is_idempotent_and_returns_normalized_children(
     assert len(list_snapshots()) == 1
 
 
-def test_partial_snapshot_does_not_replace_latest_complete(monkeypatch, tmp_path):
+def test_partial_snapshot_demotes_current_but_preserves_last_verified(
+    monkeypatch, tmp_path
+):
     monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "observations.sqlite3"))
     initialize_database()
 
@@ -112,7 +115,8 @@ def test_partial_snapshot_does_not_replace_latest_complete(monkeypatch, tmp_path
     )
 
     assert partial["state"] == "partial"
-    assert latest_complete()["id"] == complete["id"]
+    assert latest_complete() is None
+    assert latest_verified_complete()["id"] == complete["id"]
     assert get_snapshot(partial["id"])["state"] == "partial"
 
 

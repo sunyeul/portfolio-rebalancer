@@ -40,6 +40,31 @@ tasks:
     cmds:
       - uv run ips-pilot profiles list
 
+  toss-policy-template:
+    desc: Build a Toss-observed IPS target policy template
+    cmds:
+      - uv run ips-pilot policy template
+
+  toss-policy-show:
+    desc: Show the active Toss IPS policy version
+    cmds:
+      - uv run ips-pilot policy show --active
+
+  toss-inspection-run:
+    desc: Run the deterministic Toss IPS inspection
+    cmds:
+      - uv run ips-pilot inspection run
+
+  toss-inspection-latest:
+    desc: Show the latest Toss IPS inspection result
+    cmds:
+      - uv run ips-pilot inspection show --latest
+
+  toss-dashboard-api:
+    desc: Serve the read-only Toss dashboard API on loopback
+    cmds:
+      - uv run ips-pilot web --host 127.0.0.1 --port 8000
+
   format:
     desc: Format Python code with ruff
     cmds:

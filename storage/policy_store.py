@@ -10,6 +10,12 @@ from typing import Any
 
 DEFAULT_POLICY: dict[str, Any] = {
     "cash_reserve": {"minimum": 0.10, "target": 0.15, "maximum": 0.20},
+    "performance": {
+        "annual_return_target": 0.10,
+        "measurement": "trailing_12_month_twr",
+        "minimum_history_days": 365,
+    },
+    "cadence": {"observation": "weekly", "inspection": "monthly"},
     "layers": {
         "core": {"minimum": 0.70, "target": 0.80, "maximum": 0.90},
         "satellite": {"minimum": 0.10, "target": 0.20, "maximum": 0.30},
@@ -52,6 +58,37 @@ def ensure_default_policy(
         """,
         (account_alias, encoded, fingerprint, account_alias),
     )
+    active = conn.execute(
+        """
+        SELECT id, version, policy_json, policy_hash
+        FROM ips_policy_versions
+        WHERE account_alias = ? AND superseded_at IS NULL
+        ORDER BY version DESC, id DESC LIMIT 1
+        """,
+        (account_alias,),
+    ).fetchone()
+    if active is None:
+        return
+    current = json.loads(active["policy_json"])
+    required_defaults = {key: DEFAULT_POLICY[key] for key in ("performance", "cadence")}
+    if all(key in current for key in required_defaults):
+        return
+    upgraded = dict(current)
+    for key, value in required_defaults.items():
+        upgraded.setdefault(key, value)
+    upgraded_encoded = canonical_policy_json(upgraded)
+    upgraded_hash = policy_hash(upgraded)
+    conn.execute(
+        "UPDATE ips_policy_versions SET superseded_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (active["id"],),
+    )
+    conn.execute(
+        """
+        INSERT INTO ips_policy_versions (account_alias, version, policy_json, policy_hash)
+        VALUES (?, ?, ?, ?)
+        """,
+        (account_alias, int(active["version"]) + 1, upgraded_encoded, upgraded_hash),
+    )
 
 
 def get_active_policy(
@@ -61,6 +98,7 @@ def get_active_policy(
     from storage.database import connect
 
     with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             """
             SELECT id, account_alias, version, policy_json, policy_hash,
@@ -82,4 +120,109 @@ def get_active_policy(
         "policy_hash": row["policy_hash"],
         "superseded_at": row["superseded_at"],
         "created_at": row["created_at"],
+    }
+
+
+def list_observed_identities(
+    account_alias: str = "toss-brokerage",
+) -> list[tuple[str, str]]:
+    """Return every Toss-observed instrument identity in stable order."""
+    from storage.database import connect
+
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT h.market_country, h.symbol
+            FROM broker_holdings AS h
+            JOIN broker_account_snapshots AS s ON s.id = h.snapshot_id
+            WHERE s.account_alias = ?
+            ORDER BY h.market_country, h.symbol
+            """,
+            (account_alias,),
+        ).fetchall()
+    return [(str(row["market_country"]), str(row["symbol"])) for row in rows]
+
+
+def activate_policy(
+    policy: dict[str, Any],
+    expected_current_version: int,
+    account_alias: str = "toss-brokerage",
+) -> dict[str, Any]:
+    """Atomically validate and activate one immutable policy version."""
+    from services.policy_validation import policy_metadata, validate_policy
+
+    normalized = validate_policy(policy, list_observed_identities(account_alias))
+    metadata = policy_metadata(normalized)
+    from storage.database import connect
+
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, version FROM ips_policy_versions
+            WHERE account_alias = ? AND superseded_at IS NULL
+            ORDER BY version DESC, id DESC LIMIT 1
+            """,
+            (account_alias,),
+        ).fetchone()
+        current_version = int(row["version"]) if row is not None else 0
+        if current_version != int(expected_current_version):
+            raise PolicyStoreError(
+                f"active policy version conflict: expected {expected_current_version}, current {current_version}"
+            )
+        if row is not None:
+            conn.execute(
+                "UPDATE ips_policy_versions SET superseded_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (row["id"],),
+            )
+        cursor = conn.execute(
+            """
+            INSERT INTO ips_policy_versions (account_alias, version, policy_json, policy_hash)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                account_alias,
+                current_version + 1,
+                metadata["policy_json"],
+                metadata["policy_hash"],
+            ),
+        )
+        new_id = int(cursor.lastrowid)
+    active = get_active_policy(account_alias)
+    if active is None or active["id"] != new_id:
+        raise PolicyStoreError("activated policy could not be read back")
+    return active
+
+
+class PolicyStoreError(RuntimeError):
+    """Raised when a policy persistence operation cannot be completed."""
+
+
+def policy_template(
+    snapshot_id: int | None = None,
+    account_alias: str = "toss-brokerage",
+) -> dict[str, Any]:
+    """Build an app-owned target template from Toss identities only."""
+    from services.account_projection import build_account_projection
+
+    projection = build_account_projection(
+        snapshot_id=snapshot_id, account_alias=account_alias
+    )
+    active = get_active_policy(account_alias)
+    policy = dict(active["policy"]) if active is not None else dict(DEFAULT_POLICY)
+    policy["instruments"] = [
+        {
+            "market_country": position["market_country"],
+            "symbol": position["symbol"],
+            "layer": None,
+            "minimum": None,
+            "target": None,
+            "maximum": None,
+        }
+        for position in projection["positions"]
+    ]
+    return {
+        "account_alias": account_alias,
+        "snapshot_id": projection["snapshot_id"],
+        "active_policy_version": active["version"] if active else None,
+        "policy": policy,
     }

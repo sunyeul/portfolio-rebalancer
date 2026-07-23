@@ -465,9 +465,19 @@ def get_performance_run(run_id: int) -> dict[str, Any] | None:
 
 def latest_performance_run(
     baseline_id: int | None = None,
+    through_snapshot_id: int | None = None,
 ) -> dict[str, Any] | None:
     with connect() as conn:
-        if baseline_id is None:
+        if through_snapshot_id is not None:
+            row = conn.execute(
+                """
+                SELECT id FROM account_performance_runs
+                WHERE through_snapshot_id = ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (through_snapshot_id,),
+            ).fetchone()
+        elif baseline_id is None:
             row = conn.execute(
                 "SELECT id FROM account_performance_runs ORDER BY id DESC LIMIT 1"
             ).fetchone()

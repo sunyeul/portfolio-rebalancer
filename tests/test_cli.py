@@ -32,6 +32,9 @@ def test_help_exposes_only_toss_product_commands():
         "performance",
         "profiles",
         "account-view",
+        "policy",
+        "inspection",
+        "web",
     ):
         assert command in result.stdout
     for removed in ("evaluate", "agent-brief", "review-queue", "risk", "portfolios"):
@@ -116,3 +119,52 @@ def test_profiles_set_only_emits_profile_metadata(monkeypatch):
     assert payload["profile"]["symbol"] == "AAPL"
     assert "quantity" not in payload["profile"]
     assert "market_value_krw" not in payload["profile"]
+
+
+def test_policy_show_requires_active_flag(monkeypatch):
+    monkeypatch.setattr("cli.initialize_database", lambda: None)
+    result = runner.invoke(app, ["policy", "show"])
+    assert result.exit_code == 1
+    assert _payload(result)["error"]["stage"] == "input"
+
+
+def test_web_rejects_non_loopback_binding():
+    result = runner.invoke(app, ["web", "--host", "0.0.0.0"])
+    assert result.exit_code == 1
+    assert _payload(result)["error"]["stage"] == "input"
+
+
+def test_policy_validate_emits_one_json_object(monkeypatch, tmp_path):
+    monkeypatch.setattr("cli.initialize_database", lambda: None)
+    monkeypatch.setattr("cli.list_observed_identities", lambda: [("US", "AAA")])
+    policy = {
+        "cash_reserve": {"minimum": 0.1, "target": 0.15, "maximum": 0.2},
+        "performance": {
+            "annual_return_target": 0.1,
+            "measurement": "trailing_12_month_twr",
+            "minimum_history_days": 365,
+        },
+        "cadence": {"observation": "weekly", "inspection": "monthly"},
+        "layers": {
+            "core": {"minimum": 0.8, "target": 1.0, "maximum": 1.0},
+            "satellite": {"minimum": 0.0, "target": 0.0, "maximum": 0.0},
+            "experiment": {"minimum": 0.0, "target": 0.0, "maximum": 0.0},
+        },
+        "instruments": [
+            {
+                "market_country": "US",
+                "symbol": "AAA",
+                "layer": "core",
+                "minimum": 0.8,
+                "target": 1.0,
+                "maximum": 1.0,
+            }
+        ],
+    }
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps(policy))
+    result = runner.invoke(app, ["policy", "validate", "--file", str(path)])
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["ok"] is True
+    assert payload["policy"]["performance"]["annual_return_target"] == 0.1

@@ -129,7 +129,7 @@ def test_fresh_database_uses_latest_schema_without_generic_tables(
 
     initialize_database()
 
-    assert _schema_version(path) == LATEST_SCHEMA_VERSION == 4
+    assert _schema_version(path) == LATEST_SCHEMA_VERSION == 5
     names = _table_names(path)
     assert GENERIC_TABLES.isdisjoint(names)
     assert {
@@ -146,6 +146,7 @@ def test_fresh_database_uses_latest_schema_without_generic_tables(
         "account_execution_ledger",
         "ips_instrument_profiles",
         "ips_policy_versions",
+        "ips_evaluation_runs",
     }.issubset(names)
     with sqlite3.connect(path) as conn:
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
@@ -162,7 +163,7 @@ def test_v3_to_v4_drops_generic_tables_and_preserves_toss_evidence(
 
     initialize_database()
 
-    assert _schema_version(path) == 4
+    assert _schema_version(path) == 5
     with sqlite3.connect(path) as conn:
         assert GENERIC_TABLES.isdisjoint(_table_names(path))
         assert (

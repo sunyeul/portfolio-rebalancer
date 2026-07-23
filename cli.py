@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import sys
+from pathlib import Path
 from typing import Annotated, Any
 
 import typer
@@ -14,13 +15,20 @@ from integrations.toss.config import TossApiConfig
 from integrations.toss.observation import TossObservationService
 from integrations.toss.transport import TossTransport
 from services.account_projection import build_account_projection
+from services.inspection_service import run_inspection
 from storage.account_observation_store import (
     get_snapshot as get_account_snapshot,
-    latest_complete as latest_account_snapshot,
     list_snapshots as list_account_snapshots,
 )
 from storage.database import initialize_database
+from storage.evaluation_store import get_evaluation_run, latest_evaluation_run
 from storage.instrument_profile_store import upsert_profile
+from storage.policy_store import (
+    activate_policy,
+    get_active_policy,
+    list_observed_identities,
+    policy_template,
+)
 from storage.performance_store import (
     append_cash_flow_decision,
     create_baseline,
@@ -37,8 +45,12 @@ app = typer.Typer(
 )
 performance_app = typer.Typer(help="Inspect Toss account performance history.")
 profiles_app = typer.Typer(help="Manage Toss instrument IPS profiles.")
+policy_app = typer.Typer(help="Inspect and activate versioned Toss IPS policies.")
+inspection_app = typer.Typer(help="Run and inspect deterministic Toss evaluations.")
 app.add_typer(performance_app, name="performance")
 app.add_typer(profiles_app, name="profiles")
+app.add_typer(policy_app, name="policy")
+app.add_typer(inspection_app, name="inspection")
 
 
 class CliError(Exception):
@@ -144,7 +156,8 @@ def toss_snapshots(
                 "--latest와 --snapshot-id는 함께 사용할 수 없습니다.",
             )
         if latest:
-            payload: Any = latest_account_snapshot()
+            snapshots = list_account_snapshots(limit=100)
+            payload: Any = snapshots[0] if snapshots else None
         elif snapshot_id is not None:
             payload = get_account_snapshot(snapshot_id)
             if payload is None:
@@ -242,6 +255,185 @@ def profiles_list(
         )
     except Exception as exc:
         _exit_with_command_error("profiles list", exc)
+
+
+@policy_app.command("show")
+def policy_show(
+    active: Annotated[bool, typer.Option("--active")] = False,
+) -> None:
+    """Show the active immutable Toss IPS policy."""
+    try:
+        initialize_database()
+        if not active:
+            raise CliError("input", "--active가 필요합니다.")
+        _emit_json(
+            {
+                "ok": True,
+                "command": "policy show",
+                "policy": get_active_policy(),
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("policy show", exc)
+
+
+@policy_app.command("template")
+def policy_template_command(
+    snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
+) -> None:
+    """Build an IPS target template from observed Toss identities."""
+    try:
+        initialize_database()
+        _emit_json(
+            {
+                "ok": True,
+                "command": "policy template",
+                "template": policy_template(snapshot_id),
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("policy template", exc)
+
+
+@policy_app.command("validate")
+def policy_validate_command(
+    file: Annotated[Path, typer.Option("--file")],
+) -> None:
+    """Validate an app-owned IPS policy file without changing state."""
+    try:
+        initialize_database()
+        from services.policy_validation import policy_metadata, validate_policy
+
+        if not file.is_file():
+            raise CliError("input", f"정책 파일을 찾을 수 없습니다: {file}")
+        payload = json.loads(file.read_text(encoding="utf-8"))
+        normalized = validate_policy(payload, list_observed_identities())
+        _emit_json(
+            {
+                "ok": True,
+                "command": "policy validate",
+                "policy": normalized,
+                "metadata": policy_metadata(normalized),
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("policy validate", exc)
+
+
+@policy_app.command("activate")
+def policy_activate_command(
+    file: Annotated[Path, typer.Option("--file")],
+    expected_current_version: Annotated[
+        int, typer.Option("--expected-current-version")
+    ],
+) -> None:
+    """Atomically activate one validated IPS policy version."""
+    try:
+        initialize_database()
+        if not file.is_file():
+            raise CliError("input", f"정책 파일을 찾을 수 없습니다: {file}")
+        payload = json.loads(file.read_text(encoding="utf-8"))
+        policy = (
+            payload.get("policy", payload) if isinstance(payload, dict) else payload
+        )
+        activated = activate_policy(policy, expected_current_version)
+        _emit_json(
+            {
+                "ok": True,
+                "command": "policy activate",
+                "policy": activated,
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("policy activate", exc)
+
+
+@inspection_app.command("run")
+def inspection_run_command(
+    snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
+) -> None:
+    """Run or reuse one deterministic Toss inspection evaluation."""
+    try:
+        evaluation = run_inspection(snapshot_id=snapshot_id)
+        _emit_json(
+            {
+                "ok": True,
+                "command": "inspection run",
+                "run_id": evaluation["id"],
+                "snapshot_id": evaluation["snapshot_id"],
+                "state": evaluation["state"],
+                "evaluation": evaluation,
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("inspection run", exc)
+
+
+@inspection_app.command("show")
+def inspection_show_command(
+    run_id: Annotated[int | None, typer.Option("--run-id")] = None,
+    latest: Annotated[bool, typer.Option("--latest")] = False,
+) -> None:
+    """Show a persisted Toss inspection evaluation."""
+    try:
+        initialize_database()
+        if (run_id is None) == (not latest):
+            raise CliError("input", "--run-id 또는 --latest 중 하나를 지정해야 합니다.")
+        evaluation = (
+            latest_evaluation_run() if latest else get_evaluation_run(int(run_id))
+        )
+        if evaluation is None:
+            raise CliError("persistence", "평가 실행을 찾을 수 없습니다.")
+        _emit_json(
+            {
+                "ok": True,
+                "command": "inspection show",
+                "run_id": evaluation["id"],
+                "snapshot_id": evaluation["snapshot_id"],
+                "performance_run_id": evaluation["performance_run_id"],
+                "policy_version_id": evaluation["policy_version_id"],
+                "evaluation": evaluation,
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("inspection show", exc)
+
+
+@app.command("web")
+def web_command(
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port")] = 8000,
+) -> None:
+    """Serve the read-only Toss dashboard API and built frontend on loopback."""
+    try:
+        if host not in {"127.0.0.1", "localhost"}:
+            raise CliError("input", "web은 loopback 주소만 허용합니다.")
+        import uvicorn
+
+        _emit_json(
+            {
+                "ok": True,
+                "command": "web",
+                "host": host,
+                "port": port,
+                "error": None,
+            }
+        )
+        uvicorn.run(
+            "api.app:app",
+            host=host,
+            port=port,
+            log_config=None,
+            access_log=False,
+        )
+    except Exception as exc:
+        _exit_with_command_error("web", exc)
 
 
 @performance_app.command("baseline-preview")

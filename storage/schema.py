@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 
-LATEST_SCHEMA_VERSION = 4
+LATEST_SCHEMA_VERSION = 5
 
 
 class SchemaVersionError(RuntimeError):
@@ -370,11 +370,39 @@ CREATE UNIQUE INDEX idx_ips_policy_one_active
 """
 
 
+MIGRATION_5_SQL = """
+CREATE TABLE IF NOT EXISTS ips_evaluation_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_alias TEXT NOT NULL,
+    snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id),
+    performance_run_id INTEGER REFERENCES account_performance_runs(id),
+    policy_version_id INTEGER NOT NULL REFERENCES ips_policy_versions(id),
+    source_fingerprint TEXT NOT NULL,
+    performance_fingerprint TEXT,
+    policy_hash TEXT NOT NULL,
+    profile_snapshot_json TEXT NOT NULL,
+    profile_hash TEXT NOT NULL,
+    engine_version TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('complete', 'not_evaluable', 'failed')),
+    non_evaluable_reason TEXT,
+    result_json TEXT NOT NULL,
+    evaluation_fingerprint TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_ips_evaluation_runs_account_created
+    ON ips_evaluation_runs(account_alias, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_ips_evaluation_runs_snapshot
+    ON ips_evaluation_runs(snapshot_id, id);
+"""
+
+
 MIGRATIONS = {
     1: MIGRATION_1_SQL,
     2: MIGRATION_2_SQL,
     3: MIGRATION_3_SQL,
     4: MIGRATION_4_SQL,
+    5: MIGRATION_5_SQL,
 }
 
 

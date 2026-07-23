@@ -27,17 +27,17 @@ def insert_snapshot(snapshot: NormalizedSnapshot) -> dict[str, Any]:
             (snapshot.account_alias, snapshot.fingerprint),
         ).fetchone()
         if existing is not None:
+            if snapshot.state != SyncState.COMPLETE:
+                conn.execute(
+                    "UPDATE broker_account_snapshots SET is_current_evaluable = 0 WHERE account_alias = ?",
+                    (snapshot.account_alias,),
+                )
             return get_snapshot(int(existing["id"]), conn=conn)
 
-        if snapshot.state == SyncState.COMPLETE:
-            conn.execute(
-                """
-                UPDATE broker_account_snapshots
-                SET is_current_evaluable = 0
-                WHERE account_alias = ?
-                """,
-                (snapshot.account_alias,),
-            )
+        conn.execute(
+            "UPDATE broker_account_snapshots SET is_current_evaluable = 0 WHERE account_alias = ?",
+            (snapshot.account_alias,),
+        )
 
         cursor = conn.execute(
             """
@@ -267,6 +267,24 @@ def latest_complete(account_alias: str = "toss-brokerage") -> dict[str, Any] | N
             SELECT * FROM broker_account_snapshots
             WHERE account_alias = ? AND state = 'complete'
               AND is_current_evaluable = 1
+            ORDER BY synced_at DESC, id DESC LIMIT 1
+            """,
+            (account_alias,),
+        ).fetchone()
+        return _row_to_snapshot(conn, row) if row is not None else None
+
+
+def latest_verified_complete(
+    account_alias: str = "toss-brokerage",
+) -> dict[str, Any] | None:
+    """Return the newest complete snapshot, even when a newer attempt failed."""
+    from storage.database import connect
+
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM broker_account_snapshots
+            WHERE account_alias = ? AND state = 'complete'
             ORDER BY synced_at DESC, id DESC LIMIT 1
             """,
             (account_alias,),

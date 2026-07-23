@@ -42,6 +42,15 @@ def _project_complete_snapshot(
         raise AccountProjectionError("invested and cash values must be nonnegative")
     if not math.isclose(total, invested + cash, abs_tol=TOLERANCE_KRW):
         raise AccountProjectionError("account totals do not reconcile")
+    reconciliation = snapshot.get("reconciliation") or {}
+    holdings_reconciliation = reconciliation.get("holdings") or {}
+    if holdings_reconciliation.get("all_within_tolerance") is not True:
+        raise AccountProjectionError("snapshot reconciliation failed")
+    if any(
+        isinstance(value, dict) and value.get("within_tolerance") is False
+        for value in holdings_reconciliation.values()
+    ):
+        raise AccountProjectionError("snapshot reconciliation failed")
 
     holdings = sorted(
         snapshot["holdings"],
@@ -110,6 +119,7 @@ def _project_complete_snapshot(
     return {
         "snapshot_id": int(snapshot["id"]),
         "account_alias": snapshot["account_alias"],
+        "source_fingerprint": snapshot["source_fingerprint"],
         "synced_at": snapshot["synced_at"],
         "source_timestamps": snapshot["source_timestamps"],
         "total_value_krw": total,
@@ -143,5 +153,9 @@ def build_account_projection(
     if snapshot["state"] != "complete":
         raise AccountProjectionError(
             f"snapshot {snapshot['id']} is not complete: {snapshot['state']}"
+        )
+    if not snapshot.get("is_current_evaluable", False):
+        raise AccountProjectionError(
+            f"snapshot {snapshot['id']} is not current evaluable"
         )
     return _project_complete_snapshot(snapshot, profile_map(account_alias))
