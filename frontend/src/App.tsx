@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, BarChart3, CircleAlert, CircleCheck, Layers3, PanelLeftClose, PanelLeftOpen, RefreshCw, ShieldCheck, WalletCards, type LucideIcon } from "lucide-react";
 import { Evaluation, getJson, type JsonObject, type PerformanceRun } from "./lib/api";
-import { evidenceValue, finiteNumber, formatKrw as money, formatPercent as percent, formatSignedKrw as signedMoney, supportedRate } from "./lib/presentation";
+import { evidenceValue, finiteNumber, formatAccountReturn, formatKrw as money, formatPercent as percent, formatSignedKrw as signedMoney, supportedRate } from "./lib/presentation";
 
 const statusLabel: Record<string, string> = { OK: "OK", Watch: "Watch", Review: "Review", Action: "Action" };
 const sidebarStorageKey = "ips-pilot.sidebar-collapsed";
@@ -189,7 +189,7 @@ function PerformancePanel({ summary, run, accountProfitLoss }: { summary?: JsonO
   const realizedSupported = accountProfitLoss?.realized_pnl_supported === true;
   return <>
     <section className="section"><div className="section-title"><div><p className="eyebrow">ACCOUNT PERFORMANCE</p><h2>성과 추이</h2></div><span className="denominator">Toss 스냅샷 기반</span></div><div className="performance-view-selector" role="tablist" aria-label="성과 보기"><span className="performance-view-label">보기</span>{(Object.keys(viewDetails) as PerformanceView[]).map(key => <button key={key} type="button" role="tab" aria-selected={view === key} className={`performance-view-button${view === key ? " active" : ""}`} onClick={() => setView(key)}>{viewDetails[key].label}</button>)}</div><div className="chart-grid"><article className="chart-card"><div className="card-heading"><span>계좌 평가금</span><span>{String(summary?.history_days ?? 0)}일</span></div><TrendChart points={evaluablePoints} valueKey="total_value_krw" label="평가금" /><small>평가 가능 포인트만 연결하며, 비평가 구간은 표에서 상태를 확인합니다.</small></article><article className="chart-card"><div className="card-heading"><span>{selectedView.label}</span><Status value={summary?.status} /></div><div className="chart-number">{selectedView.value === null ? "산출 전" : percent(selectedView.value)}</div><small>{selectedView.description}{view === "ytd" ? ` · 목표 ${percent(summary?.annual_target)}` : ""}</small></article></div></section>
-    <section className="section"><div className="section-title"><div><p className="eyebrow">PERFORMANCE POINTS</p><h2>관측 포인트</h2></div><span className="denominator">최근 8개 · 원금·평가금·TWR</span></div><div className="table-wrap"><table><thead><tr><th>시각</th><th>평가금</th><th>추적 원금</th><th>구간 TWR</th><th>상태</th></tr></thead><tbody>{visiblePoints.map((point, index) => <tr key={`${String(point.snapshot_id)}-${index}`}><td>{String(point.point_at ?? "—")}</td><td>{money(point.total_value_krw)}</td><td>{money(point.tracking_principal_krw)}</td><td>{percent(point.interval_twr)}</td><td>{String(point.evaluation_state ?? "—")}</td></tr>)}</tbody></table></div></section>
+    <section className="section"><div className="section-title"><div><p className="eyebrow">PERFORMANCE POINTS</p><h2>관측 포인트</h2></div><span className="denominator">최근 8개 · 원금·평가금·TWR</span></div><div className="table-wrap"><table><thead><tr><th>시각</th><th>평가금</th><th>투자 원금</th><th>구간 TWR</th><th>상태</th></tr></thead><tbody>{visiblePoints.map((point, index) => <tr key={`${String(point.snapshot_id)}-${index}`}><td>{String(point.point_at ?? "—")}</td><td>{money(point.total_value_krw)}</td><td>{money(point.investment_principal_krw)}</td><td>{percent(point.interval_twr)}</td><td>{String(point.evaluation_state ?? "—")}</td></tr>)}</tbody></table></div></section>
     <section className="section"><div className="section-title"><div><p className="eyebrow">RISK EVIDENCE</p><h2>손익·drawdown 근거</h2></div><span className="denominator">손익만으로 상태를 승격하지 않음</span></div><div className="risk-fact-grid"><article className="fact-card"><span>계좌 현재 drawdown</span><strong>{evidenceValue(drawdown.current, drawdown.state, percent)}</strong><small>최대 {evidenceValue(drawdown.maximum, drawdown.state, percent)} · {String(drawdown.state ?? "자료 없음")}</small></article><article className="fact-card"><span>실현손익</span><strong>{realizedSupported ? money(accountProfitLoss?.actual_realized_pnl_krw) : "자료 없음"}</strong><small>{realizedSupported ? "Toss 체결 근거 지원" : "체결 근거 없음 · 0으로 간주하지 않음"}</small></article><article className="fact-card"><span>계좌 보유 평가손익</span><strong>{money(accountProfitLoss?.unrealized_pnl_krw)}</strong><small>원가 기준 수익률 {percent(accountProfitLoss?.unrealized_return)}</small></article></div></section>
   </>;
 }
@@ -303,15 +303,10 @@ export default function App() {
     });
     return new Map(entries);
   }, [evaluation?.profile_snapshot]);
-  const trackingPrincipal = finiteNumber(account?.tracking_principal_krw);
+  const investmentPrincipal = finiteNumber(account?.investment_principal_krw);
   const accountValue = finiteNumber(account?.total_value_krw);
-  const principalDelta = trackingPrincipal !== null && accountValue !== null ? accountValue - trackingPrincipal : null;
-  const latestPerformancePoint = useMemo(() => {
-    const points = Array.isArray(performanceRun?.points) ? performanceRun.points : [];
-    return points.slice().reverse().find(point => point.evaluation_state === "evaluable") ?? null;
-  }, [performanceRun]);
-  const holdingUnrealizedPnl = finiteNumber(latestPerformancePoint?.unrealized_pnl_krw);
-  const holdingUnrealizedReturn = supportedRate(holdingUnrealizedPnl, latestPerformancePoint?.current_cost_basis_krw);
+  const accountProfit = finiteNumber(account?.account_profit_krw);
+  const accountReturn = finiteNumber(account?.account_return);
   const sourceState = typeof source?.state === "string" ? source.state : "unknown";
   const activePanel = panelCopy[activeTab];
 
@@ -332,9 +327,9 @@ export default function App() {
       {!loading && result && <>
         {activeTab === "overview" ? <>
           <section className="facts-grid overview-kpis">
-            <article className="fact-card"><span>투자 원금</span><strong>{money(trackingPrincipal)}</strong><small>성과 추적 기준선</small></article>
-            <article className="fact-card"><span>계좌 평가금</span><strong>{money(accountValue)}</strong><small>{principalDelta === null ? "투자 원금 대비 근거 —" : `투자 원금 대비 ${signedMoney(principalDelta)}`}</small></article>
-            <article className="fact-card"><span>보유 평가손익률</span><strong>{percent(holdingUnrealizedReturn)}</strong><small>보유 평가손익 {signedMoney(holdingUnrealizedPnl)} · 매입원가 기준</small></article>
+            <article className="fact-card"><span>투자 원금</span><strong>{money(investmentPrincipal)}</strong><small>외부 순입출금을 반영한 계좌 원금</small></article>
+            <article className="fact-card"><span>계좌 평가금</span><strong>{money(accountValue)}</strong><small>{accountProfit === null ? "투자 원금 대비 근거 —" : `투자 원금 대비 ${signedMoney(accountProfit)}`}</small></article>
+            <article className="fact-card"><span>원금 대비 계좌 수익률</span><strong>{formatAccountReturn(accountReturn)}</strong><small>{accountProfit === null ? "계좌 수익 근거 —" : `계좌 손익 ${signedMoney(accountProfit)} · 평가금 - 투자 원금`}</small></article>
             <article className="fact-card"><span>누적 계좌 TWR</span><strong>{percent(performance?.cumulative_twr)}</strong><small>추적 시작 이후 현금흐름을 분리한 계좌 수익률</small></article>
             <article className="fact-card"><span>예외 검토</span><strong>{actionItems.length.toLocaleString()}건</strong><small>최고 상태 <Status value={highestQueueStatus} /> · 백엔드 Review Queue 기준</small></article>
           </section>

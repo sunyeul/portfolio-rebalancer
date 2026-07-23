@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { evidenceValue, formatKrw, formatSignedKrw, supportedRate } from "../src/lib/presentation";
+import { evidenceValue, formatAccountReturn, formatKrw, formatSignedKrw, supportedRate } from "../src/lib/presentation";
 
 test("KRW formatting removes fractional won", () => {
   expect(formatKrw(120802745.17802304)).toBe("120,802,745 KRW");
@@ -21,4 +21,9 @@ test("evidenceValue distinguishes zero from unavailable evidence", () => {
     "insufficient_history",
   );
   expect(evidenceValue(null, null, formatKrw)).toBe("자료 없음");
+});
+
+test("account return formatting distinguishes zero from missing principal evidence", () => {
+  expect(formatAccountReturn(0)).toBe("0.0%");
+  expect(formatAccountReturn(null)).toBe("자료 없음");
 });

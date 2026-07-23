@@ -12,6 +12,10 @@ export function formatPercent(value: unknown) {
   return number === null ? "—" : `${(number * 100).toFixed(1)}%`;
 }
 
+export function formatAccountReturn(value: unknown) {
+  return finiteNumber(value) === null ? "자료 없음" : formatPercent(value);
+}
+
 export function formatKrw(value: unknown) {
   const number = finiteNumber(value);
   return number === null ? "—" : `${wholeWon.format(number)} KRW`;

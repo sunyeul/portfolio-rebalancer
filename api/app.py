@@ -64,6 +64,65 @@ def _projection_view(projection: dict[str, Any]) -> dict[str, Any]:
     return visible
 
 
+_ACCOUNT_SUMMARY_KEYS = (
+    "total_value_krw",
+    "invested_value_krw",
+    "cash_value_krw",
+    "cash_weight_gross",
+    "investment_principal_krw",
+    "account_profit_krw",
+    "account_return",
+)
+
+
+def _evaluation_view(evaluation: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Expose the current account contract for evaluations persisted by older code."""
+    if evaluation is None:
+        return None
+    visible = dict(evaluation)
+    result = dict(evaluation.get("result") or {})
+    account = dict(result.get("account") or {})
+    performance_run_id = evaluation.get("performance_run_id")
+    if performance_run_id is not None:
+        performance_run = get_performance_run(int(performance_run_id))
+        points = (
+            performance_run.get("points", [])
+            if isinstance(performance_run, dict)
+            else []
+        )
+        evaluable_points = [
+            point
+            for point in points
+            if isinstance(point, dict) and point.get("evaluation_state") == "evaluable"
+        ]
+        latest_point = max(
+            evaluable_points,
+            key=lambda point: (
+                str(point.get("point_at") or ""),
+                int(point.get("id") or 0),
+            ),
+            default=None,
+        )
+        if latest_point is not None:
+            account.update(
+                {
+                    "total_value_krw": latest_point.get("total_value_krw"),
+                    "invested_value_krw": latest_point.get("invested_value_krw"),
+                    "cash_value_krw": latest_point.get("cash_value_krw"),
+                    "investment_principal_krw": latest_point.get(
+                        "investment_principal_krw"
+                    ),
+                    "account_profit_krw": latest_point.get("account_gain_krw"),
+                    "account_return": latest_point.get("simple_return"),
+                }
+            )
+    result["account"] = {
+        key: account[key] for key in _ACCOUNT_SUMMARY_KEYS if key in account
+    }
+    visible["result"] = result
+    return visible
+
+
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -173,7 +232,7 @@ def create_app() -> FastAPI:
     async def inspection() -> dict[str, Any]:
         return {
             "ok": True,
-            "data": {"evaluation": latest_evaluation_run()},
+            "data": {"evaluation": _evaluation_view(latest_evaluation_run())},
             "error": None,
         }
 

@@ -97,7 +97,9 @@ def test_market_context_passes_policy_timestamp_to_cooling_gate(monkeypatch, tmp
     assert captured["last_change_at"] == active["created_at"]
 
 
-def test_api_returns_persisted_phase5_evidence_without_reclassification(monkeypatch, tmp_path):
+def test_api_returns_persisted_phase5_evidence_without_reclassification(
+    monkeypatch, tmp_path
+):
     monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "api.sqlite3"))
     evaluation = {
         "id": 11,
@@ -144,8 +146,69 @@ def test_api_returns_persisted_phase5_evidence_without_reclassification(monkeypa
     inspection = client.get("/api/inspection").json()
     profiles = client.get("/api/profiles").json()
 
-    assert inspection["data"]["evaluation"]["result"]["review_queue"][0]["status"] == "Action"
-    assert inspection["data"]["evaluation"]["result"]["account"]["investment_principal_krw"] == 1000000.0
-    assert inspection["data"]["evaluation"]["result"]["account"]["account_return"] == 0.12
-    assert inspection["data"]["evaluation"]["market_evidence"]["US/AAA"]["state"] == "complete"
+    assert (
+        inspection["data"]["evaluation"]["result"]["review_queue"][0]["status"]
+        == "Action"
+    )
+    assert (
+        inspection["data"]["evaluation"]["result"]["account"][
+            "investment_principal_krw"
+        ]
+        == 1000000.0
+    )
+    assert (
+        inspection["data"]["evaluation"]["result"]["account"]["account_return"] == 0.12
+    )
+    assert (
+        inspection["data"]["evaluation"]["market_evidence"]["US/AAA"]["state"]
+        == "complete"
+    )
     assert profiles["data"]["profiles"][0]["overlap_status"] == "review"
+
+
+def test_api_projects_latest_performance_point_into_account_contract(monkeypatch):
+    evaluation = {
+        "performance_run_id": 9,
+        "result": {
+            "account": {
+                "total_value_krw": 1000000.0,
+                "cash_weight_gross": 0.2,
+                "legacy_field": "not public",
+            }
+        },
+    }
+    monkeypatch.setattr("api.app.latest_evaluation_run", lambda: evaluation)
+    monkeypatch.setattr(
+        "api.app.get_performance_run",
+        lambda run_id: {
+            "id": run_id,
+            "points": [
+                {
+                    "id": 3,
+                    "point_at": "2026-07-23T00:00:00+00:00",
+                    "evaluation_state": "evaluable",
+                    "total_value_krw": 1100000.0,
+                    "invested_value_krw": 900000.0,
+                    "cash_value_krw": 200000.0,
+                    "investment_principal_krw": 1000000.0,
+                    "account_gain_krw": 100000.0,
+                    "simple_return": 0.1,
+                }
+            ],
+        },
+    )
+    client = TestClient(create_app())
+
+    account = client.get("/api/inspection").json()["data"]["evaluation"]["result"][
+        "account"
+    ]
+
+    assert account == {
+        "total_value_krw": 1100000.0,
+        "invested_value_krw": 900000.0,
+        "cash_value_krw": 200000.0,
+        "cash_weight_gross": 0.2,
+        "investment_principal_krw": 1000000.0,
+        "account_profit_krw": 100000.0,
+        "account_return": 0.1,
+    }
