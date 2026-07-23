@@ -78,6 +78,10 @@ class TossAuthorizedReader:
         self._transport = transport
         self._tokens = tokens
 
+    def __repr__(self) -> str:
+        """Never include credentials or account context in diagnostics."""
+        return "TossAuthorizedReader(<redacted>)"
+
     def get_json(
         self,
         path: str,

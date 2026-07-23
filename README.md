@@ -33,7 +33,9 @@ uv run ips-pilot account-view --snapshot-id 4
 uv run ips-pilot policy show --active
 uv run ips-pilot inspection run
 uv run ips-pilot inspection show --latest
-uv run ips-pilot web --host 127.0.0.1 --port 8000
+bun install --cwd frontend
+bun run --cwd frontend build
+task toss-dashboard-api
 ```
 
 모든 CLI 명령은 stdout에 JSON 객체 하나만 출력합니다. `toss-sync`는 Toss에서 보유 종목, KRW/USD 예수금, USD/KRW 환율, 종료 주문을 읽어 불변 관찰 스냅샷으로 저장합니다. 불완전·오래된·실패 스냅샷은 진단 증거로만 남고 최신 평가 가능한 스냅샷을 대체하지 않습니다.
@@ -73,10 +75,15 @@ uv run ips-pilot policy template > toss-policy-template.json
 uv run ips-pilot policy validate --file toss-policy-template.json
 uv run ips-pilot policy activate --file toss-policy.json --expected-current-version 1
 uv run ips-pilot inspection run
-uv run uvicorn api.app:app --host 127.0.0.1 --port 8000
-# 별도 터미널에서 화면 번들
-cd frontend && npm install && npm run build
+# 터미널 1: API와 빌드된 화면
+task toss-dashboard-api
+# 개발 중 자동 새로고침이 필요하면 터미널 2
+task toss-dashboard-dev
 ```
+
+개발 화면은 `http://127.0.0.1:5173`, 빌드된 운영 화면은
+`http://127.0.0.1:8000`에서 확인합니다. `task toss-dashboard-build`는
+Bun으로 의존성을 고정 설치하고 `frontend/dist`를 다시 생성합니다.
 
 정책 파일은 앱이 관리하는 목표·범위·프로필 의도만 담습니다. Toss에서 관찰하지 않은 종목, 현재 보유 종목의 미분류 상태, 목표 합계 오류는 활성화할 수 없습니다. `inspection` 결과는 `OK`, `Watch`, `Review`, `Action`만 사용하며, `Action`도 예외 개입 가능성을 사람이 점검하라는 뜻입니다. 주문 수량이나 실행 플래그는 제공하지 않습니다.
 

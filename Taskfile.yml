@@ -65,6 +65,19 @@ tasks:
     cmds:
       - uv run ips-pilot web --host 127.0.0.1 --port 8000
 
+  toss-dashboard-build:
+    desc: Install and build the Toss dashboard with Bun
+    dir: frontend
+    cmds:
+      - bun install --frozen-lockfile
+      - bun run build
+
+  toss-dashboard-dev:
+    desc: Run the Toss dashboard Vite server with Bun
+    dir: frontend
+    cmds:
+      - bun run dev -- --host 127.0.0.1 --port 5173
+
   format:
     desc: Format Python code with ruff
     cmds:
