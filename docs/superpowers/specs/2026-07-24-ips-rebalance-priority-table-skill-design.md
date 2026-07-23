@@ -28,18 +28,24 @@ percentages separate from layer and instrument percentages:
    inspection results.
 3. Select the latest complete snapshot by timestamp, resolving a tie by larger
    ID, and state the selected `snapshot_id` and saved-data time.
-4. Produce a layer summary and one table per `core`, `satellite`, and
+4. Extract the user's current review inputs before ranking. Inputs can include
+   an analysis-layer override, an intended role such as a hedge, a cash goal,
+   overlap concerns, a preference to preserve or simplify a holding, and tax or
+   liquidity constraints. Restate the inputs used in the result.
+5. Produce a layer summary and one table per `core`, `satellite`, and
    `experiment` layer. Every table has these columns: rank, instrument, current
    weight, target weight, gap, return, unrealized profit/loss, and review
    rationale.
-5. Rank the review order using role fit, concentration, overlap, target gap,
-   and return/profit-loss as descriptive evidence. Never make return or loss a
-   standalone trigger.
-6. Treat user-specified classification as an analysis override, not a policy
+6. Generate the review rationale and rank from the current user inputs first,
+   then use role fit, concentration, overlap, target gap, and
+   return/profit-loss as descriptive evidence. Never make return or loss a
+   standalone trigger. Do not reuse a prior request's rationale when the user
+   supplies new inputs.
+7. Treat user-specified classification as an analysis override, not a policy
    mutation. Show the active policy layer and the analysis layer separately.
    Keep the policy target and gap unless the user explicitly supplies an
    override target; otherwise mark an override target as unspecified.
-7. End with verification tasks and never provide order side, quantity, price,
+8. End with verification tasks and never provide order side, quantity, price,
    timing, execution instructions, or automatic trade recommendations.
 
 ## Guardrails
@@ -48,6 +54,8 @@ percentages separate from layer and instrument percentages:
 - Do not use retired manual instrument metadata such as `thesis_status`,
   profile notes, overlap status, or management-burden status. The current
   runtime does not store them.
+- Treat user review inputs as request-scoped context only. Never persist them
+  to profiles, policies, snapshots, or journals.
 - Do not change policies, snapshots, journal entries, or persistent state.
 - Treat stale, incomplete, or unreconciled data as a verification issue.
 - Explain that a rank is a human review order, not a transaction instruction.
