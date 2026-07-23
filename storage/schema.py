@@ -1,122 +1,18 @@
-"""Forward-only SQLite schema migrations."""
+"""Current Toss-only SQLite schema and fail-closed initialization."""
 
 from __future__ import annotations
 
 import sqlite3
 
 
-LATEST_SCHEMA_VERSION = 9
+LATEST_SCHEMA_VERSION = 10
 
 
 class SchemaVersionError(RuntimeError):
-    """Raised when the database schema cannot be migrated safely."""
+    """Raised when the database schema cannot be used safely."""
 
 
-MIGRATION_1_SQL = """
-CREATE TABLE IF NOT EXISTS portfolios (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    is_active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS assets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ticker TEXT NOT NULL UNIQUE,
-    display_name TEXT,
-    asset_type TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS thesis_statuses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    code TEXT NOT NULL UNIQUE,
-    label TEXT NOT NULL,
-    sort_order INTEGER NOT NULL DEFAULT 999,
-    is_active INTEGER NOT NULL DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS portfolio_snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),
-    name TEXT NOT NULL,
-    note TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS portfolio_current_states (
-    portfolio_id INTEGER PRIMARY KEY REFERENCES portfolios(id) ON DELETE CASCADE,
-    state_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS snapshot_positions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    snapshot_id INTEGER NOT NULL REFERENCES portfolio_snapshots(id) ON DELETE CASCADE,
-    asset_id INTEGER NOT NULL REFERENCES assets(id),
-    allocation REAL NOT NULL,
-    weight REAL NOT NULL,
-    return_total REAL,
-    layer TEXT NOT NULL DEFAULT 'core',
-    thesis_status_id INTEGER NOT NULL REFERENCES thesis_statuses(id),
-    position_order INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(snapshot_id, asset_id)
-);
-
-CREATE TABLE IF NOT EXISTS snapshot_evaluation_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    snapshot_id INTEGER NOT NULL REFERENCES portfolio_snapshots(id) ON DELETE CASCADE,
-    settings_json TEXT NOT NULL,
-    result_json TEXT NOT NULL,
-    schema_version INTEGER NOT NULL,
-    engine_version TEXT NOT NULL,
-    ips_config_hash TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('active', 'superseded')),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    superseded_by_run_id INTEGER REFERENCES snapshot_evaluation_runs(id) ON DELETE SET NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_snapshot_evaluation_runs_snapshot_status
-    ON snapshot_evaluation_runs(snapshot_id, status, id);
-
-CREATE TABLE IF NOT EXISTS ips_target_allocations (
-    layer TEXT PRIMARY KEY,
-    min REAL NOT NULL,
-    target REAL NOT NULL,
-    max REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS ips_action_priorities (
-    action_code TEXT PRIMARY KEY,
-    label TEXT NOT NULL,
-    priority INTEGER NOT NULL,
-    is_active INTEGER NOT NULL DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS ips_rules (
-    key TEXT PRIMARY KEY,
-    value_json TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS journal_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    snapshot_id INTEGER NOT NULL UNIQUE REFERENCES portfolio_snapshots(id) ON DELETE CASCADE,
-    date TEXT NOT NULL,
-    decision_context TEXT NOT NULL,
-    playbook_code TEXT,
-    review_items_json TEXT NOT NULL DEFAULT '[]',
-    decision_note TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-"""
-
-
-MIGRATION_2_SQL = """
+CURRENT_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS broker_account_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_alias TEXT NOT NULL,
@@ -199,16 +95,6 @@ CREATE TABLE IF NOT EXISTS broker_orders (
     UNIQUE(snapshot_id, order_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_broker_snapshots_latest
-    ON broker_account_snapshots(account_alias, synced_at, id);
-CREATE INDEX IF NOT EXISTS idx_broker_holdings_snapshot
-    ON broker_holdings(snapshot_id, symbol);
-CREATE INDEX IF NOT EXISTS idx_broker_orders_snapshot
-    ON broker_orders(snapshot_id, order_id);
-"""
-
-
-MIGRATION_3_SQL = """
 CREATE TABLE IF NOT EXISTS account_tracking_baselines (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_alias TEXT NOT NULL UNIQUE,
@@ -280,7 +166,7 @@ CREATE TABLE IF NOT EXISTS account_performance_points (
     cash_value_krw REAL,
     current_cost_basis_krw REAL,
     unrealized_pnl_krw REAL,
-    tracking_principal_krw REAL,
+    investment_principal_krw REAL,
     cumulative_external_flow_krw REAL,
     account_gain_krw REAL,
     simple_return REAL,
@@ -317,43 +203,7 @@ CREATE TABLE IF NOT EXISTS account_execution_ledger (
     UNIQUE(run_id, order_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_perf_points_run_snapshot
-    ON account_performance_points(run_id, snapshot_id);
-CREATE INDEX IF NOT EXISTS idx_perf_candidates_baseline
-    ON account_cash_flow_candidates(baseline_id, from_snapshot_id, to_snapshot_id);
-"""
-
-
-MIGRATION_4_SQL = """
-PRAGMA secure_delete = ON;
-
-DROP TABLE IF EXISTS journal_entries;
-DROP TABLE IF EXISTS snapshot_evaluation_runs;
-DROP TABLE IF EXISTS snapshot_positions;
-DROP TABLE IF EXISTS portfolio_current_states;
-DROP TABLE IF EXISTS portfolio_snapshots;
-DROP TABLE IF EXISTS assets;
-DROP TABLE IF EXISTS portfolios;
-DROP TABLE IF EXISTS ips_action_priorities;
-DROP TABLE IF EXISTS ips_rules;
-DROP TABLE IF EXISTS ips_target_allocations;
-DROP TABLE IF EXISTS thesis_statuses;
-DROP TABLE IF EXISTS analysis_runs;
-
-CREATE TABLE ips_instrument_profiles (
-    account_alias TEXT NOT NULL,
-    market_country TEXT NOT NULL,
-    symbol TEXT NOT NULL,
-    layer TEXT NOT NULL CHECK(layer IN ('core', 'satellite', 'experiment')),
-    thesis_status TEXT NOT NULL
-        CHECK(thesis_status IN ('unknown', 'valid', 'watch', 'broken')),
-    thesis_note TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY(account_alias, market_country, symbol)
-);
-
-CREATE TABLE ips_policy_versions (
+CREATE TABLE IF NOT EXISTS ips_policy_versions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_alias TEXT NOT NULL,
     version INTEGER NOT NULL,
@@ -363,62 +213,6 @@ CREATE TABLE ips_policy_versions (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(account_alias, version)
 );
-
-CREATE UNIQUE INDEX idx_ips_policy_one_active
-    ON ips_policy_versions(account_alias)
-    WHERE superseded_at IS NULL;
-"""
-
-
-MIGRATION_5_SQL = """
-CREATE TABLE IF NOT EXISTS ips_evaluation_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_alias TEXT NOT NULL,
-    snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id),
-    performance_run_id INTEGER REFERENCES account_performance_runs(id),
-    policy_version_id INTEGER NOT NULL REFERENCES ips_policy_versions(id),
-    source_fingerprint TEXT NOT NULL,
-    performance_fingerprint TEXT,
-    policy_hash TEXT NOT NULL,
-    profile_snapshot_json TEXT NOT NULL,
-    profile_hash TEXT NOT NULL,
-    engine_version TEXT NOT NULL,
-    state TEXT NOT NULL CHECK(state IN ('complete', 'not_evaluable', 'failed')),
-    non_evaluable_reason TEXT,
-    result_json TEXT NOT NULL,
-    evaluation_fingerprint TEXT NOT NULL UNIQUE,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_ips_evaluation_runs_account_created
-    ON ips_evaluation_runs(account_alias, created_at, id);
-CREATE INDEX IF NOT EXISTS idx_ips_evaluation_runs_snapshot
-    ON ips_evaluation_runs(snapshot_id, id);
-"""
-
-
-MIGRATION_6_SQL = """
-CREATE TABLE IF NOT EXISTS toss_market_candles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_kind TEXT NOT NULL CHECK(source_kind IN ('stock', 'market_indicator')),
-    market_country TEXT NOT NULL DEFAULT '',
-    symbol TEXT NOT NULL,
-    interval TEXT NOT NULL CHECK(interval = '1d'),
-    candle_at TEXT NOT NULL,
-    currency TEXT NOT NULL,
-    open_price REAL NOT NULL,
-    high_price REAL NOT NULL,
-    low_price REAL NOT NULL,
-    close_price REAL NOT NULL,
-    volume REAL NOT NULL,
-    adjusted INTEGER NOT NULL CHECK(adjusted IN (0, 1)),
-    source_fingerprint TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(source_kind, market_country, symbol, interval, candle_at, adjusted)
-);
-
-CREATE INDEX IF NOT EXISTS idx_toss_market_candles_lookup
-    ON toss_market_candles(source_kind, symbol, interval, candle_at);
 
 CREATE TABLE IF NOT EXISTS ips_policy_candidates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -430,13 +224,7 @@ CREATE TABLE IF NOT EXISTS ips_policy_candidates (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_ips_policy_candidates_account_created
-    ON ips_policy_candidates(account_alias, created_at, id);
-"""
-
-
-MIGRATION_7_SQL = """
-CREATE TABLE toss_market_candles_v7 (
+CREATE TABLE IF NOT EXISTS toss_market_candles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_kind TEXT NOT NULL CHECK(source_kind IN ('stock', 'market_indicator')),
     market_country TEXT NOT NULL DEFAULT '',
@@ -459,58 +247,47 @@ CREATE TABLE toss_market_candles_v7 (
     )
 );
 
-INSERT INTO toss_market_candles_v7 (
-    id, source_kind, market_country, symbol, interval, candle_at, currency,
-    open_price, high_price, low_price, close_price, volume, adjusted,
-    adjusted_supported, source_fingerprint, created_at
-)
-SELECT
-    id, source_kind, market_country, symbol, interval, candle_at, currency,
-    open_price, high_price, low_price, close_price, volume, adjusted,
-    CASE WHEN source_kind = 'stock' THEN 1 ELSE 0 END,
-    source_fingerprint, created_at
-FROM toss_market_candles;
+CREATE TABLE IF NOT EXISTS ips_evaluation_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_alias TEXT NOT NULL,
+    snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id),
+    performance_run_id INTEGER REFERENCES account_performance_runs(id),
+    policy_version_id INTEGER NOT NULL REFERENCES ips_policy_versions(id),
+    source_fingerprint TEXT NOT NULL,
+    performance_fingerprint TEXT,
+    policy_hash TEXT NOT NULL,
+    engine_version TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('complete', 'not_evaluable', 'failed')),
+    non_evaluable_reason TEXT,
+    result_json TEXT NOT NULL,
+    evaluation_fingerprint TEXT NOT NULL UNIQUE,
+    market_evidence_fingerprint TEXT,
+    market_evidence_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
-DROP TABLE toss_market_candles;
-ALTER TABLE toss_market_candles_v7 RENAME TO toss_market_candles;
-
+CREATE INDEX IF NOT EXISTS idx_broker_snapshots_latest
+    ON broker_account_snapshots(account_alias, synced_at, id);
+CREATE INDEX IF NOT EXISTS idx_broker_holdings_snapshot
+    ON broker_holdings(snapshot_id, symbol);
+CREATE INDEX IF NOT EXISTS idx_broker_orders_snapshot
+    ON broker_orders(snapshot_id, order_id);
+CREATE INDEX IF NOT EXISTS idx_perf_points_run_snapshot
+    ON account_performance_points(run_id, snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_perf_candidates_baseline
+    ON account_cash_flow_candidates(baseline_id, from_snapshot_id, to_snapshot_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ips_policy_one_active
+    ON ips_policy_versions(account_alias)
+    WHERE superseded_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_ips_policy_candidates_account_created
+    ON ips_policy_candidates(account_alias, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_toss_market_candles_lookup
     ON toss_market_candles(source_kind, symbol, interval, candle_at);
+CREATE INDEX IF NOT EXISTS idx_ips_evaluation_runs_account_created
+    ON ips_evaluation_runs(account_alias, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_ips_evaluation_runs_snapshot
+    ON ips_evaluation_runs(snapshot_id, id);
 """
-
-
-MIGRATION_8_SQL = """
-ALTER TABLE ips_instrument_profiles ADD COLUMN overlap_status TEXT NOT NULL DEFAULT 'unknown'
-    CHECK(overlap_status IN ('unknown', 'clear', 'review'));
-ALTER TABLE ips_instrument_profiles ADD COLUMN management_burden_status TEXT NOT NULL DEFAULT 'unknown'
-    CHECK(management_burden_status IN ('unknown', 'clear', 'review'));
-ALTER TABLE ips_instrument_profiles ADD COLUMN holdability_status TEXT NOT NULL DEFAULT 'unknown'
-    CHECK(holdability_status IN ('unknown', 'clear', 'review'));
-ALTER TABLE ips_instrument_profiles ADD COLUMN etf_substitution_status TEXT NOT NULL DEFAULT 'unknown'
-    CHECK(etf_substitution_status IN ('unknown', 'not_applicable', 'clear', 'review'));
-ALTER TABLE ips_instrument_profiles ADD COLUMN review_factors_note TEXT NOT NULL DEFAULT '';
-ALTER TABLE ips_evaluation_runs ADD COLUMN market_evidence_fingerprint TEXT;
-ALTER TABLE ips_evaluation_runs ADD COLUMN market_evidence_json TEXT NOT NULL DEFAULT '{}';
-"""
-
-
-MIGRATION_9_SQL = """
-ALTER TABLE account_performance_points
-    RENAME COLUMN tracking_principal_krw TO investment_principal_krw;
-"""
-
-
-MIGRATIONS = {
-    1: MIGRATION_1_SQL,
-    2: MIGRATION_2_SQL,
-    3: MIGRATION_3_SQL,
-    4: MIGRATION_4_SQL,
-    5: MIGRATION_5_SQL,
-    6: MIGRATION_6_SQL,
-    7: MIGRATION_7_SQL,
-    8: MIGRATION_8_SQL,
-    9: MIGRATION_9_SQL,
-}
 
 
 def schema_version(conn: sqlite3.Connection) -> int:
@@ -518,22 +295,44 @@ def schema_version(conn: sqlite3.Connection) -> int:
     return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
 
-def migrate(conn: sqlite3.Connection) -> int:
-    """Apply every pending migration in order without destructive cleanup."""
-    current = schema_version(conn)
-    if current > LATEST_SCHEMA_VERSION:
-        raise SchemaVersionError(
-            f"Database schema {current} is newer than supported {LATEST_SCHEMA_VERSION}."
-        )
+def _schema_object_count(conn: sqlite3.Connection) -> int:
+    """Count application schema objects without counting SQLite internals."""
+    return int(
+        conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type IN ('table', 'index', 'trigger', 'view')
+              AND name NOT LIKE 'sqlite_%'
+            """
+        ).fetchone()[0]
+    )
 
-    for target in range(current + 1, LATEST_SCHEMA_VERSION + 1):
-        script = MIGRATIONS[target]
+
+def migrate(conn: sqlite3.Connection) -> int:
+    """Initialize an empty database or validate the supported schema baseline."""
+    current = schema_version(conn)
+    if current == 0:
+        if _schema_object_count(conn):
+            raise SchemaVersionError(
+                "Unsupported unversioned database; only an empty database "
+                "can be initialized as schema 10."
+            )
         try:
             conn.executescript(
-                f"BEGIN IMMEDIATE;\n{script}\nPRAGMA user_version = {target};\nCOMMIT;"
+                f"BEGIN IMMEDIATE;\n{CURRENT_SCHEMA_SQL}\n"
+                f"PRAGMA user_version = {LATEST_SCHEMA_VERSION};\nCOMMIT;"
             )
         except Exception:
             if conn.in_transaction:
                 conn.rollback()
             raise
-    return schema_version(conn)
+        return schema_version(conn)
+
+    if current != LATEST_SCHEMA_VERSION:
+        raise SchemaVersionError(
+            f"Unsupported database schema {current}; only schema "
+            f"{LATEST_SCHEMA_VERSION} is supported."
+        )
+
+    return current

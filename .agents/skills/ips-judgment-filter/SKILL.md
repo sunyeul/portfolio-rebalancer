@@ -103,9 +103,10 @@ drawdown follow the same rule.
 Core assets are for long-term market participation. Do not penalize normal
 core drawdowns as standalone failure signals.
 
-Satellite and experiment exposure require stricter thesis, overlap,
-management-burden, holdability, and ETF-substitution checks. A fallen
-satellite is a thesis-review candidate before it is an accumulation candidate.
+Satellite and experiment exposure require stricter role, concentration, and
+allocation-policy checks. A fallen satellite is an observation or data-review
+candidate; the current runtime does not store manual instrument metadata that
+could turn it into an automatic intervention.
 
 ## Immediate Buying Is Exceptional
 
@@ -118,21 +119,22 @@ exceptional action.
 
 Never recommend selling only because returns are good, returns are poor, the
 asset fell, the asset rose, or unrealized gains are large. Frame any reduction
-as thesis damage, simplification, consolidation, or allocation/risk control.
+as simplification, consolidation, or allocation/risk control.
 
-`Action` has one narrow conjunction: the same instrument must have
-`thesis_status=broken` and exceed that instrument's own hard maximum weight. A
-layer maximum breach, account drawdown, cash shortfall, loss, overlap, or
-profile uncertainty alone is never `Action`. Even when `Action` is present,
-write only "inspect possible exceptional intervention" and provide no order
-side, quantity, or execution field.
+The current runtime has no persisted instrument-thesis or review-factor input,
+so it must not invent one or emit an automatic exceptional-intervention
+predicate. A layer maximum breach, account drawdown, cash shortfall, loss, or
+concentration signal is an inspection item only. If `Action` is present from a
+future explicitly supported evidence source, write only "inspect possible
+exceptional intervention" and provide no order side, quantity, or execution
+field.
 
 ## Allowed Outcome Language
 
 - Increase future regular purchases.
 - Reduce or pause future regular purchases.
 - Hold and observe.
-- Review investment thesis, overlap, burden, or ETF substitution.
+- Review layer role, concentration, or policy constraints.
 - Inspect possible exceptional action; if required conditions are not
   confirmed, hold.
 
@@ -144,7 +146,7 @@ side, quantity, or execution field.
 - Do not turn stale, missing, or ambiguous data into action.
 - Do not make a performance target, return, gain, loss, or drawdown a trade
   trigger.
-- Do not assign `Action` unless the same-instrument broken-thesis and own-max
-  conjunction is proven.
+- Do not assign `Action` from a performance, cash, or allocation gap alone.
+- Do not manufacture retired manual metadata to justify an intervention.
 - Do not convert a blocking `not_evaluable` result or an all-cash `partial`
   result into a guessed layer/instrument recommendation.

@@ -1,37 +1,28 @@
-import json
 import sqlite3
 
 import pytest
 
 import storage.schema as schema_module
 from storage.database import connect, initialize_database
-from storage.schema import (
-    LATEST_SCHEMA_VERSION,
-    MIGRATION_1_SQL,
-    MIGRATION_2_SQL,
-    MIGRATION_3_SQL,
-    MIGRATION_4_SQL,
-    MIGRATION_5_SQL,
-    MIGRATION_6_SQL,
-    MIGRATION_7_SQL,
-    MIGRATION_8_SQL,
-    SchemaVersionError,
-)
+from storage.schema import LATEST_SCHEMA_VERSION, SchemaVersionError
 
 
-GENERIC_TABLES = {
-    "portfolios",
-    "assets",
-    "thesis_statuses",
-    "portfolio_snapshots",
-    "portfolio_current_states",
-    "snapshot_positions",
-    "snapshot_evaluation_runs",
-    "ips_target_allocations",
-    "ips_action_priorities",
-    "ips_rules",
-    "journal_entries",
-    "analysis_runs",
+ACTIVE_TABLES = {
+    "broker_account_snapshots",
+    "broker_holdings",
+    "broker_cash_observations",
+    "broker_exchange_rates",
+    "broker_orders",
+    "account_tracking_baselines",
+    "account_cash_flow_candidates",
+    "account_cash_flow_decisions",
+    "account_performance_runs",
+    "account_performance_points",
+    "account_execution_ledger",
+    "ips_policy_versions",
+    "ips_policy_candidates",
+    "toss_market_candles",
+    "ips_evaluation_runs",
 }
 
 
@@ -44,84 +35,20 @@ def _schema_version(path):
         return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
 
-def _create_v3_fixture(path):
+def _table_names(path):
     with sqlite3.connect(path) as conn:
-        for script in (MIGRATION_1_SQL, MIGRATION_2_SQL, MIGRATION_3_SQL):
-            conn.executescript(script)
-        conn.execute("PRAGMA user_version = 3")
+        return {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+            if not row[0].startswith("sqlite_")
+        }
 
 
-def _create_v7_fixture(path):
+def _insert_snapshot(path):
     with sqlite3.connect(path) as conn:
-        for version, script in (
-            (1, MIGRATION_1_SQL),
-            (2, MIGRATION_2_SQL),
-            (3, MIGRATION_3_SQL),
-            (4, MIGRATION_4_SQL),
-            (5, MIGRATION_5_SQL),
-            (6, MIGRATION_6_SQL),
-            (7, MIGRATION_7_SQL),
-        ):
-            conn.executescript(script)
-            conn.execute(f"PRAGMA user_version = {version}")
-        snapshot_id = int(
-            conn.execute(
-                """
-                INSERT INTO broker_account_snapshots (
-                    account_alias, sync_started_at, synced_at, state,
-                    is_current_evaluable, source_fingerprint,
-                    source_timestamps_json, data_quality_json,
-                    reconciliation_json
-                ) VALUES (
-                    'toss-brokerage', '2026-07-23T00:00:00Z',
-                    '2026-07-23T00:01:00Z', 'failed', 0, 'migration-source',
-                    '{}', '{}', '{}'
-                )
-                """
-            ).lastrowid
-        )
-        policy_id = int(
-            conn.execute(
-                """
-                INSERT INTO ips_policy_versions (
-                    account_alias, version, policy_json, policy_hash
-                ) VALUES ('toss-brokerage', 1, '{}', 'migration-policy')
-                """
-            ).lastrowid
-        )
-        conn.execute(
-            """
-            INSERT INTO ips_instrument_profiles (
-                account_alias, market_country, symbol, layer, thesis_status,
-                thesis_note
-            ) VALUES ('toss-brokerage', 'US', 'AAA', 'satellite', 'unknown', '')
-            """
-        )
-        conn.execute(
-            """
-            INSERT INTO ips_evaluation_runs (
-                account_alias, snapshot_id, performance_run_id,
-                policy_version_id, source_fingerprint, performance_fingerprint,
-                policy_hash, profile_snapshot_json, profile_hash, engine_version,
-                state, non_evaluable_reason, result_json, evaluation_fingerprint
-            ) VALUES (
-                'toss-brokerage', ?, NULL, ?, 'migration-source', NULL,
-                'migration-policy', '[]', 'migration-profile', 'phase3a-v2',
-                'not_evaluable', 'missing_source', '{"status":"Review"}',
-                'migration-evaluation'
-            )
-            """,
-            (snapshot_id, policy_id),
-        )
-        conn.execute("PRAGMA user_version = 7")
-
-
-def _create_v8_performance_fixture(path):
-    _create_v7_fixture(path)
-    with sqlite3.connect(path) as conn:
-        conn.executescript(MIGRATION_8_SQL)
-        conn.execute("PRAGMA user_version = 8")
-        snapshot_id = int(
+        return int(
             conn.execute(
                 """
                 INSERT INTO broker_account_snapshots (
@@ -131,311 +58,107 @@ def _create_v8_performance_fixture(path):
                     reconciliation_json, total_value_krw,
                     invested_value_krw, cash_value_krw
                 ) VALUES (
-                    'toss-brokerage', '2026-07-22T00:00:00Z',
-                    '2026-07-22T00:01:00Z', 'complete', 1,
-                    'phase9-source', '{}', '{}', '{}', 100.0, 90.0, 10.0
-                )
-                """
-            ).lastrowid
-        )
-        baseline_id = int(
-            conn.execute(
-                """
-                INSERT INTO account_tracking_baselines (
-                    account_alias, baseline_snapshot_id, tracking_started_at,
-                    initial_principal_krw, confirmed_at, confirmation_fingerprint
-                ) VALUES ('toss-brokerage', ?, '2026-07-22T00:02:00Z', 100.0, '2026-07-22T00:03:00Z', 'phase9-baseline')
-                """,
-                (snapshot_id,),
-            ).lastrowid
-        )
-        run_id = int(
-            conn.execute(
-                """
-                INSERT INTO account_performance_runs (
-                    baseline_id, through_snapshot_id, input_fingerprint,
-                    engine_version, state, data_quality_json
-                ) VALUES (?, ?, 'phase9-run', 'test', 'complete', '{}')
-                """,
-                (baseline_id, snapshot_id),
-            ).lastrowid
-        )
-        conn.execute(
-            """
-            INSERT INTO account_performance_points (
-                run_id, snapshot_id, point_at, evaluation_state,
-                tracking_principal_krw, account_gain_krw, simple_return
-            ) VALUES (?, ?, '2026-07-22T00:01:00Z', 'evaluable', 82.0, 18.0, 0.2195)
-            """,
-            (run_id, snapshot_id),
-        )
-
-
-def _insert_v3_generic_and_toss_rows(path):
-    with sqlite3.connect(path) as conn:
-        portfolio_id = int(
-            conn.execute("INSERT INTO portfolios (name) VALUES ('legacy')").lastrowid
-        )
-        conn.execute(
-            "INSERT INTO portfolio_snapshots (portfolio_id, name) VALUES (?, 'legacy')",
-            (portfolio_id,),
-        )
-        snapshot_id = int(
-            conn.execute(
-                """
-                INSERT INTO broker_account_snapshots (
-                    account_alias, sync_started_at, synced_at, state,
-                    is_current_evaluable, source_fingerprint,
-                    source_timestamps_json, data_quality_json,
-                    reconciliation_json, total_value_krw, invested_value_krw,
-                    cash_value_krw
-                )
-                VALUES (
-                    'toss-brokerage', '2026-07-22T00:00:00Z',
-                    '2026-07-22T00:01:00Z', 'complete', 1,
-                    'snapshot-fingerprint', '{}', '{}', '{}', 100.0, 90.0,
+                    'toss-brokerage', '2026-07-23T00:00:00Z',
+                    '2026-07-23T00:01:00Z', 'complete', 1,
+                    'preservation-source', '{}', '{}', '{}', 100.0, 90.0,
                     10.0
                 )
                 """
             ).lastrowid
         )
-        baseline_id = int(
-            conn.execute(
-                """
-                INSERT INTO account_tracking_baselines (
-                    account_alias, baseline_snapshot_id, tracking_started_at,
-                    initial_principal_krw, baseline_fx_rate, confirmed_at,
-                    confirmation_fingerprint
-                )
-                VALUES (
-                    'toss-brokerage', ?, '2026-07-22T00:02:00Z', 100.0,
-                    1480.0, '2026-07-22T00:03:00Z', 'baseline-fingerprint'
-                )
-                """,
-                (snapshot_id,),
-            ).lastrowid
-        )
-        run_id = int(
-            conn.execute(
-                """
-                INSERT INTO account_performance_runs (
-                    baseline_id, through_snapshot_id, input_fingerprint,
-                    engine_version, state, data_quality_json
-                )
-                VALUES (?, ?, 'run-fingerprint', 'test', 'complete', '{}')
-                """,
-                (baseline_id, snapshot_id),
-            ).lastrowid
-        )
-    return {
-        "snapshot_id": snapshot_id,
-        "baseline_id": baseline_id,
-        "run_id": run_id,
-        "snapshot_fingerprint": "snapshot-fingerprint",
-        "baseline_fingerprint": "baseline-fingerprint",
-        "run_fingerprint": "run-fingerprint",
-    }
 
 
-def _table_names(path):
-    with sqlite3.connect(path) as conn:
-        return {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ).fetchall()
-        }
-
-
-def test_fresh_database_uses_latest_schema_without_generic_tables(
-    monkeypatch, tmp_path
-):
+def test_fresh_database_uses_current_schema(monkeypatch, tmp_path):
     path = tmp_path / "fresh.sqlite3"
     _set_database_path(monkeypatch, path)
 
     initialize_database()
 
-    assert _schema_version(path) == LATEST_SCHEMA_VERSION == 9
-    names = _table_names(path)
-    assert GENERIC_TABLES.isdisjoint(names)
-    assert {
-        "broker_account_snapshots",
-        "broker_holdings",
-        "broker_cash_observations",
-        "broker_exchange_rates",
-        "broker_orders",
-        "account_tracking_baselines",
-        "account_cash_flow_candidates",
-        "account_cash_flow_decisions",
-        "account_performance_runs",
-        "account_performance_points",
-        "account_execution_ledger",
-        "ips_instrument_profiles",
-        "ips_policy_versions",
-        "ips_evaluation_runs",
-        "toss_market_candles",
-        "ips_policy_candidates",
-    }.issubset(names)
+    assert _schema_version(path) == LATEST_SCHEMA_VERSION == 10
+    assert _table_names(path) == ACTIVE_TABLES
     with sqlite3.connect(path) as conn:
-        profile_columns = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(ips_instrument_profiles)")
-        }
         evaluation_columns = {
             row[1]
             for row in conn.execute("PRAGMA table_info(ips_evaluation_runs)")
         }
-    assert {
-        "overlap_status",
-        "management_burden_status",
-        "holdability_status",
-        "etf_substitution_status",
-        "review_factors_note",
-    }.issubset(profile_columns)
-    assert {"market_evidence_fingerprint", "market_evidence_json"}.issubset(
-        evaluation_columns
-    )
-    with sqlite3.connect(path) as conn:
+        assert {"market_evidence_fingerprint", "market_evidence_json"}.issubset(
+            evaluation_columns
+        )
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
-def test_v3_to_v4_drops_generic_tables_and_preserves_toss_evidence(
+def test_existing_v10_database_preserves_user_data(monkeypatch, tmp_path):
+    path = tmp_path / "current.sqlite3"
+    _set_database_path(monkeypatch, path)
+    initialize_database()
+    snapshot_id = _insert_snapshot(path)
+
+    initialize_database()
+
+    assert _schema_version(path) == LATEST_SCHEMA_VERSION
+    with sqlite3.connect(path) as conn:
+        assert conn.execute(
+            "SELECT source_fingerprint FROM broker_account_snapshots WHERE id = ?",
+            (snapshot_id,),
+        ).fetchone()[0] == "preservation-source"
+
+
+def test_empty_unversioned_database_is_initialized(monkeypatch, tmp_path):
+    path = tmp_path / "empty.sqlite3"
+    _set_database_path(monkeypatch, path)
+
+    initialize_database()
+
+    assert _schema_version(path) == LATEST_SCHEMA_VERSION
+    assert _table_names(path) == ACTIVE_TABLES
+
+
+def test_nonempty_unversioned_database_is_rejected_without_mutation(
     monkeypatch, tmp_path
 ):
-    path = tmp_path / "v3.sqlite3"
-    _create_v3_fixture(path)
-    expected = _insert_v3_generic_and_toss_rows(path)
-    _set_database_path(monkeypatch, path)
-
-    initialize_database()
-
-    assert _schema_version(path) == 9
-    with sqlite3.connect(path) as conn:
-        assert GENERIC_TABLES.isdisjoint(_table_names(path))
-        assert (
-            conn.execute(
-                "SELECT source_fingerprint FROM broker_account_snapshots WHERE id = ?",
-                (expected["snapshot_id"],),
-            ).fetchone()[0]
-            == expected["snapshot_fingerprint"]
-        )
-        assert (
-            conn.execute(
-                "SELECT confirmation_fingerprint FROM account_tracking_baselines "
-                "WHERE id = ?",
-                (expected["baseline_id"],),
-            ).fetchone()[0]
-            == expected["baseline_fingerprint"]
-        )
-        assert (
-            conn.execute(
-                "SELECT input_fingerprint FROM account_performance_runs WHERE id = ?",
-                (expected["run_id"],),
-            ).fetchone()[0]
-            == expected["run_fingerprint"]
-        )
-
-
-def test_v7_to_v8_preserves_profile_and_evaluation_rows(monkeypatch, tmp_path):
-    path = tmp_path / "v7.sqlite3"
-    _create_v7_fixture(path)
-    _set_database_path(monkeypatch, path)
-
-    initialize_database()
-
-    with sqlite3.connect(path) as conn:
-        conn.row_factory = sqlite3.Row
-        profile = conn.execute(
-            "SELECT * FROM ips_instrument_profiles WHERE symbol = 'AAA'"
-        ).fetchone()
-        evaluation = conn.execute(
-            "SELECT * FROM ips_evaluation_runs WHERE id = 1"
-        ).fetchone()
-    assert (
-        profile["overlap_status"],
-        profile["management_burden_status"],
-        profile["holdability_status"],
-        profile["etf_substitution_status"],
-        profile["review_factors_note"],
-    ) == ("unknown", "unknown", "unknown", "unknown", "")
-    assert json.loads(evaluation["result_json"]) == {"status": "Review"}
-    assert evaluation["market_evidence_fingerprint"] is None
-    assert json.loads(evaluation["market_evidence_json"]) == {}
-
-
-def test_v8_to_v9_renames_principal_column_without_losing_values(monkeypatch, tmp_path):
-    path = tmp_path / "v8.sqlite3"
-    _create_v8_performance_fixture(path)
-    _set_database_path(monkeypatch, path)
-
-    initialize_database()
-
-    with sqlite3.connect(path) as conn:
-        columns = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(account_performance_points)")
-        }
-        value = conn.execute(
-            "SELECT investment_principal_krw FROM account_performance_points"
-        ).fetchone()[0]
-    assert _schema_version(path) == LATEST_SCHEMA_VERSION == 9
-    assert "investment_principal_krw" in columns
-    assert "tracking_principal_krw" not in columns
-    assert value == pytest.approx(82.0)
-
-
-def test_failed_v4_migration_rolls_back_all_drops(monkeypatch, tmp_path):
-    path = tmp_path / "rollback.sqlite3"
-    _create_v3_fixture(path)
-    _set_database_path(monkeypatch, path)
-    broken = schema_module.MIGRATION_4_SQL + "\nINSERT INTO missing_table VALUES (1);"
-    monkeypatch.setitem(schema_module.MIGRATIONS, 4, broken)
-
-    with pytest.raises(sqlite3.OperationalError), connect() as conn:
-        schema_module.migrate(conn)
-
-    assert _schema_version(path) == 3
-    with sqlite3.connect(path) as conn:
-        assert (
-            conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='portfolios'"
-            ).fetchone()
-            is not None
-        )
-        assert (
-            conn.execute(
-                "SELECT 1 FROM sqlite_master "
-                "WHERE type='table' AND name='ips_instrument_profiles'"
-            ).fetchone()
-            is None
-        )
-
-
-def test_v4_migration_creates_no_adjacent_backup(monkeypatch, tmp_path):
-    path = tmp_path / "portfolio.sqlite3"
-    _create_v3_fixture(path)
-    _set_database_path(monkeypatch, path)
-
-    initialize_database()
-
-    assert list(tmp_path.glob("*.bak")) == []
-
-
-def test_database_from_newer_schema_is_rejected_without_mutation(monkeypatch, tmp_path):
-    path = tmp_path / "future.sqlite3"
+    path = tmp_path / "unversioned.sqlite3"
     with sqlite3.connect(path) as conn:
         conn.execute("CREATE TABLE sentinel (value TEXT NOT NULL)")
         conn.execute("INSERT INTO sentinel (value) VALUES ('unchanged')")
-        conn.execute(f"PRAGMA user_version = {LATEST_SCHEMA_VERSION + 1}")
     _set_database_path(monkeypatch, path)
 
-    with pytest.raises(SchemaVersionError, match="newer than supported"):
+    with pytest.raises(SchemaVersionError, match="unversioned"):
         initialize_database()
 
+    assert _schema_version(path) == 0
     with sqlite3.connect(path) as conn:
         assert conn.execute("SELECT value FROM sentinel").fetchone()[0] == "unchanged"
-        assert (
-            int(conn.execute("PRAGMA user_version").fetchone()[0])
-            == LATEST_SCHEMA_VERSION + 1
-        )
+
+
+@pytest.mark.parametrize("version", [LATEST_SCHEMA_VERSION - 1, LATEST_SCHEMA_VERSION + 1])
+def test_unsupported_schema_is_rejected_without_mutation(
+    monkeypatch, tmp_path, version
+):
+    path = tmp_path / f"schema-{version}.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE sentinel (value TEXT NOT NULL)")
+        conn.execute("INSERT INTO sentinel (value) VALUES ('unchanged')")
+        conn.execute(f"PRAGMA user_version = {version}")
+    _set_database_path(monkeypatch, path)
+
+    with pytest.raises(SchemaVersionError, match="only schema 10 is supported"):
+        initialize_database()
+
+    assert _schema_version(path) == version
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT value FROM sentinel").fetchone()[0] == "unchanged"
+
+
+def test_failed_baseline_creation_rolls_back(monkeypatch, tmp_path):
+    path = tmp_path / "rollback.sqlite3"
+    _set_database_path(monkeypatch, path)
+    broken = schema_module.CURRENT_SCHEMA_SQL + "\nINSERT INTO missing_table VALUES (1);"
+    monkeypatch.setattr(schema_module, "CURRENT_SCHEMA_SQL", broken)
+
+    with pytest.raises(sqlite3.OperationalError):
+        with connect() as conn:
+            schema_module.migrate(conn)
+
+    assert _schema_version(path) == 0
+    assert _table_names(path) == set()
