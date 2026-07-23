@@ -11,7 +11,7 @@ from typing import Any, Mapping
 from services.policy_validation import LAYERS
 
 
-ENGINE_VERSION = "phase3a-v2"
+ENGINE_VERSION = "phase5-v1"
 SEVERITY = {"OK": 0, "Watch": 1, "Review": 2, "Action": 3}
 
 
@@ -204,11 +204,15 @@ def evaluate_inspection(
     performance_run: Mapping[str, Any] | None,
     policy: Mapping[str, Any],
     profiles: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
+    risk_evidence: Mapping[str, Any] | None = None,
+    evidence_refs: Mapping[str, Any] | None = None,
     *,
     source_error: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate one immutable input set without side effects or broker actions."""
     profiles = profiles or {}
+    risk_evidence = risk_evidence or {}
+    evidence_refs = evidence_refs or {}
     policy_dict = dict(policy)
     performance_ok = (
         performance_run is not None and performance_run.get("state") == "complete"
@@ -234,11 +238,13 @@ def evaluate_inspection(
             "synced_at": projection.get("synced_at") if projection else None,
         },
         "account": {},
+        "account_profit_loss": risk_evidence.get("account_profit_loss", {}),
         "performance": {},
         "cash": None,
         "layers": [],
         "instruments": [],
         "review_queue": [],
+        "evidence_refs": dict(evidence_refs),
     }
     if not source_ok:
         result["non_evaluable_reason"] = source_error or "source_not_evaluable"
@@ -498,6 +504,9 @@ def evaluate_inspection(
                     "layer": position.get("layer"),
                     "thesis_status": profile.get("thesis_status") if profile else None,
                     "unrealized_pnl_krw": position.get("profit_loss_krw"),
+                    "evidence": (risk_evidence.get("instruments") or {}).get(
+                        f"{key[0]}/{key[1]}", {}
+                    ),
                 },
             )
         )
@@ -551,6 +560,7 @@ def evaluation_fingerprint(
     performance_fingerprint: str | None,
     policy_hash: str,
     profile_hash: str,
+    market_evidence_fingerprint: str = "",
     engine_version: str = ENGINE_VERSION,
 ) -> str:
     payload = "|".join(
@@ -559,6 +569,7 @@ def evaluation_fingerprint(
             performance_fingerprint or "",
             policy_hash,
             profile_hash,
+            market_evidence_fingerprint,
             engine_version,
         )
     )

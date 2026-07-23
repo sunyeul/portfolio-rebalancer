@@ -1,7 +1,13 @@
-from services.inspection_service import _select_market_candles, run_inspection
+from services.inspection_service import (
+    _select_market_candles,
+    preview_inspection,
+    run_inspection,
+)
 from integrations.toss.observation import SyncState
 from storage.account_observation_store import insert_snapshot, latest_complete
 from storage.database import initialize_database
+from storage.database import connect
+from storage.policy_store import DEFAULT_POLICY
 from tests.test_account_observation_store import _snapshot
 
 
@@ -62,3 +68,19 @@ def test_market_candle_selection_uses_only_held_identities(monkeypatch):
             "limit": 252,
         },
     ]
+
+
+def test_preview_does_not_persist_evaluation(monkeypatch, tmp_path):
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "preview.sqlite3"))
+    initialize_database()
+    with connect() as conn:
+        before = conn.execute("SELECT COUNT(*) FROM ips_evaluation_runs").fetchone()[0]
+
+    preview = preview_inspection(DEFAULT_POLICY)
+
+    with connect() as conn:
+        after = conn.execute("SELECT COUNT(*) FROM ips_evaluation_runs").fetchone()[0]
+    assert preview["persisted"] is False
+    assert preview["policy_version_id"] is None
+    assert preview["market_evidence_fingerprint"]
+    assert before == after == 0
