@@ -2,7 +2,7 @@
 
 **Created:** 2026-07-22  
 **Revised:** 2026-07-23  
-**Status:** Approved roadmap; Phase 2.5 is the next implementation phase  
+**Status:** Approved roadmap; Phase 3A is the next implementation phase  
 **Product:** IPS Pilot
 
 ## Product Direction
@@ -34,7 +34,10 @@ contributions. IPS Pilot therefore provides a reproducible Toss-only view of:
 - tracked realized profit/loss only where Toss evidence is sufficient;
 - user-confirmed tracking principal and external cash-flow adjustments;
 - account value, principal, cash, and supported return history;
+- a `10%` annual account-return objective measured by trailing-12-month TWR
+  only after 365 days of evidence;
 - a normal cash policy of `10% / 15% / 20%` minimum, target, and maximum;
+- current, target, permitted range, and gap for cash, layers, and instruments;
 - `core`, `satellite`, and `experiment` exposure;
 - market context derived only from official Toss market data;
 - explainable review items linked to exact snapshots and policy versions.
@@ -51,6 +54,12 @@ contributions. IPS Pilot therefore provides a reproducible Toss-only view of:
 - Layer model: `core`, `satellite`, and `experiment` remain first-class.
 - Default adjustment posture: review future regular-purchase policy before an
   immediate trade.
+- Operating constraint: no recurring external contribution is assumed.
+- Cadence: observe account state weekly and run the full IPS inspection monthly.
+- Return objective: trailing-12-month account TWR target is `10%`; cumulative
+  TWR remains factual history without a separate target.
+- Target hierarchy: cash uses gross account weight; layers and instruments use
+  invested weight, and instrument targets sum to their layer target.
 - No compatibility mode: missing Toss data fails closed rather than falling back
   to manual input, cached generic data, or yfinance.
 
@@ -139,12 +148,12 @@ cannot substantiate.
 - Immutable performance runs with source fingerprints.
 - Machine-readable performance CLI.
 
-### Phase 2.5 — Toss-only foundation convergence — Next
+### Phase 2.5 — Toss-only foundation convergence — Complete
 
 **Purpose:** Remove the generic product foundation before building policy and
 judgment behavior on top of it.
 
-**Goals**
+**Delivered**
 
 - Upgrade to schema v4 while preserving every Toss observation and performance
   row.
@@ -170,18 +179,23 @@ judgment behavior on top of it.
 The detailed design is
 `docs/superpowers/specs/2026-07-23-toss-only-foundation-convergence-design.md`.
 
-### Phase 3 — Fixed cash-policy MVP
+### Phase 3A — Target policy and deterministic inspection engine — Next
 
-**Purpose:** Prevent cash depletion with a deterministic reserve inspection
-policy before adding market timing context.
+**Purpose:** Turn Toss account evidence and versioned user targets into a
+deterministic monthly IPS inspection without creating a trading recommender.
 
 **Goals**
 
-- Consume only the Phase 2.5 Toss account projection and active policy version.
-- Evaluate gross cash weight against `10% / 15% / 20%`.
-- Preserve invested weights for `core`, `satellite`, and `experiment` checks.
-- Use `OK`, `Watch`, and `Review` for cash reserve inspection; cash deviation
-  alone never produces `Action`.
+- Extend the immutable policy with a `10%` trailing-12-month TWR objective,
+  weekly observation/monthly review cadence, and per-instrument target ranges.
+- Validate that layer targets total 100% of invested value and instrument
+  targets sum to their assigned layer target.
+- Evaluate gross cash weight against `10% / 15% / 20%` and invested layer and
+  instrument weights against their active policy ranges.
+- Separate cumulative return, holding unrealized profit/loss, and
+  trailing-12-month TWR; do not annualize shorter histories.
+- Derive only regular-purchase-policy, observe, thesis-review, and exceptional
+  human-review language.
 - Emit the source snapshot ID, policy version ID, trigger, plain meaning, and
   verification task.
 - Persist immutable Toss evaluation runs and expose CLI inspection commands.
@@ -191,9 +205,46 @@ policy before adding market timing context.
 - Identical snapshot and policy inputs produce identical results.
 - Missing profiles, stale data, or denominator inconsistencies fail closed.
 - Cash and invested-layer denominators cannot be confused.
+- Annual-return underperformance, profit, loss, or cash deviation alone cannot
+  produce `Action`.
+- `Action` requires a broken thesis plus a hard overweight or risk breach and
+  means inspect possible exceptional intervention.
 - No result sizes an order or directly recommends buying or selling.
 
-Phase 3 is the first operational Toss-only inspection MVP.
+Phase 3A is the first operational Toss-only inspection engine. Its detailed
+design is
+`docs/superpowers/specs/2026-07-23-operating-dashboard-inspection-loop-design.md`.
+
+### Phase 3B — Read-only Toss operating dashboard
+
+**Purpose:** Make current state, targets, gaps, performance, and Review Queue
+visible without duplicating judgment logic in the browser.
+
+**Goals**
+
+- Add a loopback-only authenticated API over the Phase 3A projection,
+  performance, policy, profile, and evaluation contracts.
+- Rebuild a Toss-only browser foundation with account overview, performance,
+  allocation, instrument profile, policy, Review Queue, and source-health
+  surfaces.
+- Show account principal, valuation, cash, cumulative TWR, and supported
+  trailing-12-month TWR on one time axis.
+- Keep cash, layer, and instrument denominators explicit in every table and
+  chart.
+- Render backend statuses and explanations without client-side reclassification.
+- Keep the first dashboard read-only for broker facts and evaluation results;
+  profile and policy edits remain CLI-controlled until the write-enabled
+  workbench phase.
+
+**Exit criteria**
+
+- The dashboard reproduces the Phase 3A CLI result for the same snapshot and
+  policy version.
+- Partial, stale, failed, unclassified, insufficient-history, and invalid-policy
+  states have explicit non-evaluable UI states.
+- No credential, raw account identifier, order-sized field, or broker mutation
+  endpoint reaches the browser.
+- Desktop and narrow viewport verification passes.
 
 ### Phase 4 — Toss market-context policy review
 
@@ -253,17 +304,18 @@ and thesis integrity without turning gains or losses into automatic trades.
 
 Phase 5 requires a separate adversarially reviewed design.
 
-### Phase 6 — Toss-only operational workbench
+### Phase 6 — Write-enabled Toss operational workbench
 
-**Purpose:** Rebuild the API and browser workflow from the Toss-only contracts.
+**Purpose:** Extend the Phase 3B read-only dashboard with authenticated IPS
+intent editing and human-decision records.
 
 **Goals**
 
-- Add an authenticated local API for sync health, snapshots, performance,
-  profiles, policies, evaluations, Review Queue, and human decisions.
-- Show source freshness and reconciliation before any judgment.
-- Plot principal, account value, invested value, cash, and supported return.
-- Manage Toss-instrument IPS profiles without editing broker facts.
+- Add write contracts for Toss-instrument profiles, policy candidates,
+  activation approvals, evaluation reviews, and human decisions.
+- Preserve source freshness and reconciliation before any judgment.
+- Manage Toss-instrument IPS profiles and target ranges without editing broker
+  facts.
 - Link every evaluation and decision to source snapshot and policy IDs.
 - Keep one backend status engine; the API and frontend render rather than
   reclassify.
@@ -309,20 +361,21 @@ Required coverage includes:
 - official Toss market-data fixtures without live network requirements;
 - repository and lockfile scans proving removed data sources do not return;
 - guardrail fixtures proving no direct buy/sell or order sizing;
-- API, CLI, and frontend contract consistency after Phase 6.
+- API, CLI, and frontend contract consistency from Phase 3B onward.
 
 Live Toss verification is explicit and optional. Automated tests use local
 fixtures and never require real credentials.
 
 ## Delivery and Approval Gates
 
-- Phases 0–2 are complete evidence infrastructure.
-- Phase 2.5 is a mandatory clean-cut gate; Phase 3 cannot begin while generic
-  runtime or persistence remains.
-- Phase 3 delivers the fixed-policy CLI MVP.
+- Phases 0–2.5 are complete evidence and Toss-only foundation infrastructure.
+- Phase 3A delivers the target-policy CLI inspection engine.
+- Phase 3B immediately exposes the same engine through a read-only browser
+  dashboard.
 - Phases 4 and 5 add market and profit/loss judgment only through separate
   approved designs.
-- Phase 6 restores the browser workbench from Toss-only contracts.
+- Phase 6 adds IPS intent editing and human decisions to the Phase 3B browser
+  foundation.
 
 Before any phase advances:
 

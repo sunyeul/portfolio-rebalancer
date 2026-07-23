@@ -27,3 +27,4 @@ data/*.sqlite3.pre-v*-to-v*-*.bak
 # Local agent indexes and memories
 .serena/
 .tokensave/
+.superpowers/
