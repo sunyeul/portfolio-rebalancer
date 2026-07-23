@@ -19,25 +19,31 @@ buy/sell language.
 ## Shell and navigation
 
 - Keep the dark left sidebar and the existing functional tabs.
+- Allow the desktop sidebar to collapse into an icon rail. Persist this
+  presentation preference in browser storage, expose an accessible toggle, and
+  keep the narrow-screen horizontal navigation unchanged.
 - Add a dedicated `Review Queue` tab for the complete queue.
 - Remove the globally fixed right queue rail so the main content can use the
   width required by the mockup-style overview.
-- Preserve the refresh control and the source/snapshot identifiers.
+- Preserve the refresh control. Keep source, snapshot, evaluation, performance,
+  and policy identifiers in `Source health` instead of repeating them above
+  every workbench tab.
 
 ## Overview hierarchy
 
 The Overview becomes a monthly operating summary in this order:
 
 1. Header: `이번 달 계좌 운용 점검`, refresh, and a read-only inspection notice.
-2. Compact source strip: source state, snapshot, evaluation, performance,
-   policy version, synchronization time, and annual target.
-3. Four primary facts: tracking principal, account value, cumulative TWR, and
-   annual TWR/readiness. Principal-relative change is shown only when both
-   supported numbers exist.
+2. Four primary facts: tracking principal, account value, current-holdings
+   unrealized return, and cumulative account TWR. Principal-relative change and
+   unrealized return are shown only when their supporting values exist.
+3. Source metadata is absent during normal operation. A source warning appears
+   only when the latest evaluation reports an incomplete source state.
 4. Allocation comparison: cash plus core, satellite, and experiment current
    weights, target markers, status, and explicit denominator labels.
-5. Annual-return target card: target, supported history, and remaining days
-   before the 365-day comparison gate.
+5. Annual-return target card: actual annual TWR when supported, target,
+   cumulative TWR, supported history, and remaining days before the 365-day
+   comparison gate.
 6. Cash-reserve panel: current amount/weight plus approved minimum, target, and
    maximum.
 7. Layer review table: current, target, gap, aggregated supported unrealized
@@ -52,6 +58,15 @@ Overview concise without hiding detail.
 
 - Use existing API fields only. Missing values render as `—` or an explicit
   evidence-collection message.
+- Render all KRW amounts as rounded whole won with no visible fractional part.
+- Label current-holdings unrealized return separately from cumulative and annual
+  account TWR. Calculate it from the latest persisted performance point's
+  `unrealized_pnl_krw / current_cost_basis_krw`; never present it as account
+  return.
+- Toss `GET /api/v1/holdings` also supplies aggregate and per-instrument
+  `profitLoss.rate`, but this UI change does not add a snapshot schema migration
+  because the persisted normalized cost and profit/loss amounts already support
+  the required display.
 - Cash uses gross account value; layers and instruments use invested account
   value. These denominator meanings remain visible.
 - Allocation bars clamp visual width to 0–100%, but displayed values remain the
@@ -65,6 +80,8 @@ Overview concise without hiding detail.
 ## Responsive behavior
 
 - Desktop uses a two-column shell: sidebar and wide content.
+- Collapsed desktop mode uses a compact icon rail and leaves tooltips or
+  accessible labels for every destination.
 - The allocation/return hero and layer/review section collapse to one column
   below tablet width.
 - The sidebar becomes horizontal navigation on narrow screens.
