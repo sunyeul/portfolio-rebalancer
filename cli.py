@@ -16,7 +16,7 @@ from integrations.toss.observation import TossObservationService
 from integrations.toss.market import TossMarketDataService
 from integrations.toss.transport import TossTransport
 from services.account_projection import build_account_projection
-from services.inspection_service import run_inspection
+from services.inspection_service import preview_inspection, run_inspection
 from services.market_context import evaluate_market_context
 from storage.account_observation_store import (
     get_snapshot as get_account_snapshot,
@@ -225,6 +225,17 @@ def profiles_set(
     layer: Annotated[str, typer.Option("--layer")],
     thesis_status: Annotated[str, typer.Option("--thesis-status")],
     note: Annotated[str, typer.Option("--note")] = "",
+    overlap_status: Annotated[str, typer.Option("--overlap-status")] = "unknown",
+    management_burden_status: Annotated[
+        str, typer.Option("--management-burden-status")
+    ] = "unknown",
+    holdability_status: Annotated[str, typer.Option("--holdability-status")] = "unknown",
+    etf_substitution_status: Annotated[
+        str, typer.Option("--etf-substitution-status")
+    ] = "unknown",
+    review_factors_note: Annotated[
+        str, typer.Option("--review-factors-note")
+    ] = "",
 ) -> None:
     """Set IPS metadata for a previously observed Toss instrument."""
     try:
@@ -235,6 +246,11 @@ def profiles_set(
             layer=layer,
             thesis_status=thesis_status,
             thesis_note=note,
+            overlap_status=overlap_status,
+            management_burden_status=management_burden_status,
+            holdability_status=holdability_status,
+            etf_substitution_status=etf_substitution_status,
+            review_factors_note=review_factors_note,
         )
         _emit_json(
             {
@@ -368,6 +384,39 @@ def policy_activate_command(
         )
     except Exception as exc:
         _exit_with_command_error("policy activate", exc)
+
+
+@inspection_app.command("preview")
+def inspection_preview_command(
+    policy_file: Annotated[Path, typer.Option("--policy-file")],
+    snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
+) -> None:
+    """Evaluate a proposed Toss IPS policy without changing local state."""
+    try:
+        if not policy_file.is_file():
+            raise CliError("input", f"정책 파일을 찾을 수 없습니다: {policy_file}")
+        initialize_database()
+        from services.policy_validation import policy_metadata, validate_policy
+
+        payload = json.loads(policy_file.read_text(encoding="utf-8"))
+        policy = payload.get("policy", payload) if isinstance(payload, dict) else payload
+        normalized = validate_policy(policy, list_observed_identities())
+        preview = preview_inspection(normalized, snapshot_id=snapshot_id)
+        _emit_json(
+            {
+                "ok": True,
+                "command": "inspection preview",
+                "persisted": False,
+                "snapshot_id": preview["snapshot_id"],
+                "policy": normalized,
+                "metadata": policy_metadata(normalized),
+                "evaluation": preview["evaluation"],
+                "preview": preview,
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("inspection preview", exc)
 
 
 @inspection_app.command("run")

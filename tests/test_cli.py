@@ -122,6 +122,97 @@ def test_profiles_set_only_emits_profile_metadata(monkeypatch):
     assert "market_value_krw" not in payload["profile"]
 
 
+def test_profiles_set_forwards_structured_review_factors(monkeypatch):
+    captured = {}
+    monkeypatch.setattr("cli.initialize_database", lambda: None)
+
+    def persist(**kwargs):
+        captured.update(kwargs)
+        return {"symbol": kwargs["symbol"], **kwargs}
+
+    monkeypatch.setattr("cli.upsert_profile", persist)
+    result = runner.invoke(
+        app,
+        [
+            "profiles",
+            "set",
+            "--symbol",
+            "NBIS",
+            "--market-country",
+            "US",
+            "--layer",
+            "satellite",
+            "--thesis-status",
+            "watch",
+            "--overlap-status",
+            "review",
+            "--management-burden-status",
+            "clear",
+            "--holdability-status",
+            "unknown",
+            "--etf-substitution-status",
+            "not_applicable",
+            "--review-factors-note",
+            "ETF 대체 검토",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["overlap_status"] == "review"
+    assert captured["management_burden_status"] == "clear"
+    assert captured["holdability_status"] == "unknown"
+    assert captured["etf_substitution_status"] == "not_applicable"
+    assert captured["review_factors_note"] == "ETF 대체 검토"
+
+
+def test_inspection_preview_emits_one_non_persisting_json_object(monkeypatch, tmp_path):
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(json.dumps({"risk_review": {"lookback_sessions": 252}}))
+    monkeypatch.setattr("cli.initialize_database", lambda: None)
+    monkeypatch.setattr("cli.list_observed_identities", lambda: [])
+    monkeypatch.setattr(
+        "services.policy_validation.validate_policy",
+        lambda payload, identities: payload,
+    )
+    monkeypatch.setattr(
+        "cli.preview_inspection",
+        lambda policy, snapshot_id=None: {
+            "persisted": False,
+            "policy_version_id": None,
+            "snapshot_id": snapshot_id,
+            "evaluation": {"state": "not_evaluable"},
+        },
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "inspection",
+            "preview",
+            "--policy-file",
+            str(policy_path),
+            "--snapshot-id",
+            "7",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["command"] == "inspection preview"
+    assert payload["persisted"] is False
+    assert payload["snapshot_id"] == 7
+
+
+def test_inspection_preview_rejects_missing_policy_file():
+    result = runner.invoke(
+        app,
+        ["inspection", "preview", "--policy-file", "/tmp/missing-phase5-policy.json"],
+    )
+
+    assert result.exit_code == 1
+    assert _payload(result)["error"]["stage"] == "input"
+
+
 def test_policy_show_requires_active_flag(monkeypatch):
     monkeypatch.setattr("cli.initialize_database", lambda: None)
     result = runner.invoke(app, ["policy", "show"])
