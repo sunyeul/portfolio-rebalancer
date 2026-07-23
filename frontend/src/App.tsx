@@ -332,8 +332,8 @@ export default function App() {
       {!loading && result && <>
         {activeTab === "overview" ? <>
           <section className="facts-grid overview-kpis">
-            <article className="fact-card"><span>추적 원금</span><strong>{money(trackingPrincipal)}</strong><small>성과 추적 기준선</small></article>
-            <article className="fact-card"><span>계좌 평가금</span><strong>{money(accountValue)}</strong><small>{principalDelta === null ? "추적 원금 대비 근거 —" : `추적 원금 대비 ${signedMoney(principalDelta)}`}</small></article>
+            <article className="fact-card"><span>투자 원금</span><strong>{money(trackingPrincipal)}</strong><small>성과 추적 기준선</small></article>
+            <article className="fact-card"><span>계좌 평가금</span><strong>{money(accountValue)}</strong><small>{principalDelta === null ? "투자 원금 대비 근거 —" : `투자 원금 대비 ${signedMoney(principalDelta)}`}</small></article>
             <article className="fact-card"><span>보유 평가손익률</span><strong>{percent(holdingUnrealizedReturn)}</strong><small>보유 평가손익 {signedMoney(holdingUnrealizedPnl)} · 매입원가 기준</small></article>
             <article className="fact-card"><span>누적 계좌 TWR</span><strong>{percent(performance?.cumulative_twr)}</strong><small>추적 시작 이후 현금흐름을 분리한 계좌 수익률</small></article>
             <article className="fact-card"><span>예외 검토</span><strong>{actionItems.length.toLocaleString()}건</strong><small>최고 상태 <Status value={highestQueueStatus} /> · 백엔드 Review Queue 기준</small></article>
