@@ -224,6 +224,7 @@ The immutable policy gains a `risk_review` section:
     "lookback_sessions": 252,
     "minimum_history_points": 200,
     "max_data_age_days": 7,
+    "max_gap_days": 7,
     "account_drawdown_review": -0.15,
     "instrument_drawdown_review": {
       "core": -0.25,
@@ -247,7 +248,7 @@ These are inspection thresholds, not stop-loss levels:
 
 Validation requires negative finite drawdown values greater than `-1`, exact
 layer keys, `minimum_history_points <= lookback_sessions`, and positive integer
-history/freshness values.
+history, freshness, and maximum-gap values.
 
 ## Deterministic Status Matrix
 
@@ -330,6 +331,9 @@ quantity, target transaction value, or execution fields.
 - Extend `profiles set` with the four structured factor options and a shared
   factor note.
 - Preserve one JSON object on stdout and machine-readable validation errors.
+- Add `inspection preview --policy-file` to validate and evaluate a proposed
+  policy against current local evidence without activating the policy or
+  persisting an evaluation run.
 - `inspection run` automatically selects the relevant stored Toss candles and
   records their fingerprint.
 - `inspection show` returns persisted evidence exactly as stored.
