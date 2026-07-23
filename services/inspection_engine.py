@@ -282,7 +282,9 @@ def evaluate_inspection(
     if projection is not None:
         latest_point = (
             points[-1]
-            if points and points[-1].get("evaluation_state") == "evaluable"
+            if performance_ok
+            and points
+            and points[-1].get("evaluation_state") == "evaluable"
             else {}
         )
         result["account"] = {
@@ -389,7 +391,7 @@ def evaluate_inspection(
     else:
         total = _finite_number(projection.get("total_value_krw"))
         cash_weight = _finite_number(projection.get("cash_weight_gross"))
-        if (total is not None and total <= 0) or cash_weight is None:
+        if total is None or total <= 0 or cash_weight is None:
             allocation_reason = "gross_account_denominator_invalid"
         elif not projection.get(
             "invested_weights_evaluable",
@@ -429,6 +431,7 @@ def evaluate_inspection(
 
     # Cash is the only valid unit for an all-cash account.
     cash_ready = allocation_reason in {None, "invested_denominator_unavailable"}
+    cash_allocation_available = True
     cash_policy = policy_dict.get("cash_reserve") or {}
     if cash_ready:
         cash_current = _finite_number(projection.get("cash_weight_gross"))
@@ -455,6 +458,7 @@ def evaluate_inspection(
                     extra={"cash_value_krw": projection.get("cash_value_krw")},
                 ),
             )
+            cash_allocation_available = cash_current >= float(cash_policy["minimum"])
 
     invested_available = (
         source_ok
@@ -477,7 +481,13 @@ def evaluate_inspection(
             bounds_ready = _target_ready(bounds)
             status = "OK" if bounds_ready and _within(current, bounds) else "Review"
             triggers = [] if status == "OK" else ["layer_out_of_range"]
-            eligible = status == "Review" and current is not None and bounds_ready and current < float(bounds["minimum"])
+            eligible = (
+                cash_allocation_available
+                and status == "Review"
+                and current is not None
+                and bounds_ready
+                and current < float(bounds["minimum"])
+            )
             result["layers"].append(
                 attach_decision(
                     _unit(
@@ -559,7 +569,7 @@ def evaluate_inspection(
                 if thesis == "broken" and hard_maximum_breach:
                     status = _raise_status(status, "Action")
                     triggers.append("broken_thesis_and_hard_maximum_breach")
-            eligible = ready and current is not None and float(current) < float(target["minimum"]) and thesis == "valid" and (
+            eligible = cash_allocation_available and ready and current is not None and float(current) < float(target["minimum"]) and thesis == "valid" and (
                 layer == "core" or all(str(profile.get(field, "unknown")).lower() in {"clear", "not_applicable"} for field in ("overlap_status", "management_burden_status", "holdability_status", "etf_substitution_status"))
             )
             next_step = "예외 개입 가능성을 점검하고 조건이 확인되지 않으면 보류합니다." if status == "Action" else "프로필, 투자 논지, 겹침과 향후 정기매수 정책을 검토합니다."

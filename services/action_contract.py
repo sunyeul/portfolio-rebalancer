@@ -70,7 +70,7 @@ def unit_priority(
         and eligible_for_increase
     ):
         return "P3"
-    if thesis_status in {"watch", "broken"} or any(
+    if thesis_status in {"unknown", "watch", "broken"} or any(
         trigger.endswith("_review") or trigger.endswith("_unknown")
         for trigger in triggers
     ):
@@ -106,7 +106,7 @@ def unit_suggestion(
         and eligible_for_increase
     ):
         return "P3", suggestion("review_increase_regular_purchase_allocation")
-    if thesis_status in {"watch", "broken"} or any(
+    if thesis_status in {"unknown", "watch", "broken"} or any(
         trigger.endswith("_review") or trigger.endswith("_unknown")
         for trigger in triggers
     ):

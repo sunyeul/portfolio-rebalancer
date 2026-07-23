@@ -55,6 +55,8 @@ def _projection(cash=0.15, aaa=0.8, bbb=0.2):
         "snapshot_id": 7,
         "account_alias": "toss-brokerage",
         "source_fingerprint": "source-7",
+        "total_value_krw": 1000.0,
+        "invested_value_krw": 1000.0 * (1.0 - cash),
         "cash_weight_gross": cash,
         "cash_value_krw": cash * 1000,
         "layer_weights_invested": {
@@ -521,3 +523,39 @@ def test_overweight_precedes_secondary_thesis_review_for_non_action_unit():
     assert aaa["status"] == "Review"
     assert aaa["priority"] == "P2"
     assert aaa["suggestion"]["code"] == "review_overweight_normalization"
+
+
+def test_cash_shortfall_blocks_layer_and_instrument_p3_suggestions():
+    policy = _policy()
+    policy["instruments"][0]["minimum"] = 0.9
+    profiles = {
+        ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
+        ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
+    }
+    result = evaluate_inspection(
+        _projection(cash=0.05, aaa=0.75, bbb=0.25),
+        {"state": "complete", "points": []},
+        policy,
+        profiles,
+    )
+    assert result["cash"]["priority"] == "P1"
+    assert result["cash"]["suggestion"]["code"] == "review_reduce_or_pause_regular_purchase_pace"
+    assert all(item["priority"] != "P3" for item in result["adjustment_suggestions"])
+
+
+def test_unknown_thesis_underweight_requires_constraints_review():
+    policy = _policy()
+    policy["instruments"][0]["minimum"] = 0.9
+    profiles = {
+        ("US", "AAA"): {"layer": "core", "thesis_status": "unknown"},
+        ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
+    }
+    result = evaluate_inspection(
+        _projection(cash=0.15, aaa=0.75, bbb=0.25),
+        {"state": "complete", "points": []},
+        policy,
+        profiles,
+    )
+    aaa = next(item for item in result["instruments"] if item["identity"] == "US/AAA")
+    assert aaa["priority"] == "P2"
+    assert aaa["suggestion"]["code"] == "review_thesis_or_constraints"
