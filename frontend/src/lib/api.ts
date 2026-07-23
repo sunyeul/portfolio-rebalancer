@@ -7,6 +7,16 @@ export type PerformanceRun = JsonObject & {
   points?: Array<JsonObject>;
 };
 
+export type AccountSummary = JsonObject & {
+  total_value_krw?: number | null;
+  invested_value_krw?: number | null;
+  cash_value_krw?: number | null;
+  cash_weight_gross?: number | null;
+  investment_principal_krw?: number | null;
+  account_profit_krw?: number | null;
+  account_return?: number | null;
+};
+
 export type Evaluation = {
   id?: number;
   performance_run_id?: number | null;
@@ -15,10 +25,10 @@ export type Evaluation = {
   state?: "complete" | "not_evaluable" | "failed";
   non_evaluable_reason?: string | null;
   profile_snapshot?: Array<Record<string, unknown>>;
-  account?: JsonObject;
+  account?: AccountSummary;
   result?: {
     engine_version?: string;
-    account?: JsonObject;
+    account?: AccountSummary;
     account_profit_loss?: JsonObject;
     state?: string;
     source?: Record<string, unknown>;

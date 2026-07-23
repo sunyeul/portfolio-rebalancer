@@ -262,13 +262,21 @@ def evaluate_inspection(
         result["non_evaluable_reason"] = "performance_not_evaluable"
     if projection is not None:
         result["source"]["source_fingerprint"] = projection.get("source_fingerprint")
-        latest_point = points[-1] if points else {}
+        latest_point = (
+            points[-1]
+            if points and points[-1].get("evaluation_state") == "evaluable"
+            else {}
+        )
         result["account"] = {
             "total_value_krw": projection.get("total_value_krw"),
             "invested_value_krw": projection.get("invested_value_krw"),
             "cash_value_krw": projection.get("cash_value_krw"),
             "cash_weight_gross": projection.get("cash_weight_gross"),
-            "tracking_principal_krw": latest_point.get("tracking_principal_krw"),
+            "investment_principal_krw": latest_point.get(
+                "investment_principal_krw"
+            ),
+            "account_profit_krw": latest_point.get("account_gain_krw"),
+            "account_return": latest_point.get("simple_return"),
         }
 
     performance_policy = policy_dict.get("performance") or {

@@ -105,6 +105,11 @@ def test_api_returns_persisted_phase5_evidence_without_reclassification(monkeypa
         "policy_version_id": 3,
         "result": {
             "state": "complete",
+            "account": {
+                "investment_principal_krw": 1000000.0,
+                "account_profit_krw": 120000.0,
+                "account_return": 0.12,
+            },
             "account_profit_loss": {
                 "status": "Review",
                 "drawdown": {"state": "complete", "current": -0.16},
@@ -140,5 +145,7 @@ def test_api_returns_persisted_phase5_evidence_without_reclassification(monkeypa
     profiles = client.get("/api/profiles").json()
 
     assert inspection["data"]["evaluation"]["result"]["review_queue"][0]["status"] == "Action"
+    assert inspection["data"]["evaluation"]["result"]["account"]["investment_principal_krw"] == 1000000.0
+    assert inspection["data"]["evaluation"]["result"]["account"]["account_return"] == 0.12
     assert inspection["data"]["evaluation"]["market_evidence"]["US/AAA"]["state"] == "complete"
     assert profiles["data"]["profiles"][0]["overlap_status"] == "review"

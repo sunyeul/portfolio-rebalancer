@@ -158,6 +158,41 @@ def test_ytd_without_year_start_point_is_watch_and_cumulative_return_is_separate
     assert bbb["layer"] == "satellite"
 
 
+def test_account_result_exposes_investment_principal_profit_and_return():
+    projection = _projection()
+    projection.update(
+        total_value_krw=1120.0,
+        invested_value_krw=952.0,
+        cash_value_krw=168.0,
+    )
+    result = evaluate_inspection(
+        projection,
+        {
+            "state": "complete",
+            "input_fingerprint": "principal-return",
+            "points": [
+                {
+                    "point_at": "2026-07-23T00:00:00Z",
+                    "evaluation_state": "evaluable",
+                    "investment_principal_krw": 1000.0,
+                    "account_gain_krw": 120.0,
+                    "simple_return": 0.12,
+                }
+            ],
+        },
+        _policy(),
+        {
+            ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
+            ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
+        },
+    )
+
+    assert result["account"]["investment_principal_krw"] == 1000.0
+    assert result["account"]["account_profit_krw"] == 120.0
+    assert result["account"]["account_return"] == pytest.approx(0.12)
+    assert "tracking_principal_krw" not in result["account"]
+
+
 def test_broken_thesis_and_hard_maximum_is_action_without_order_semantics():
     projection = _projection(cash=0.15, aaa=0.95, bbb=0.05)
     result = evaluate_inspection(
