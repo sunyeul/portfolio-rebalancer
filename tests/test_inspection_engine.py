@@ -92,12 +92,13 @@ def _risk_evidence(
     aaa_pnl=100.0,
     bbb_pnl=-100.0,
 ):
-    drawdown = lambda current: {
-        "state": "complete",
-        "current": current,
-        "maximum": current,
-        "history_points": 252,
-    }
+    def drawdown(current):
+        return {
+            "state": "complete",
+            "current": current,
+            "maximum": current,
+            "history_points": 252,
+        }
     return {
         "account_profit_loss": {
             "state": "complete",
