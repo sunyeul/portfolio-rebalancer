@@ -41,43 +41,6 @@ def priority_label(priority: str | None) -> str | None:
     return PRIORITY_LABELS.get(priority) if priority else None
 
 
-def unit_priority(
-    *,
-    kind: str,
-    status: str,
-    current: float | None,
-    minimum: float | None,
-    maximum: float | None,
-    triggers: list[str],
-    thesis_status: str | None = None,
-    eligible_for_increase: bool = False,
-) -> str:
-    """Choose the nearest relative checkpoint for one evaluable unit."""
-    if status == "Action" or "broken_thesis_and_hard_maximum_breach" in triggers:
-        return "P1"
-    if kind == "cash":
-        if current is not None and minimum is not None and current < minimum:
-            return "P1"
-        if current is not None and maximum is not None and current > maximum:
-            return "P2"
-        return "P4"
-    if maximum is not None and current is not None and current > maximum:
-        return "P2"
-    if (
-        minimum is not None
-        and current is not None
-        and current < minimum
-        and eligible_for_increase
-    ):
-        return "P3"
-    if thesis_status in {"unknown", "watch", "broken"} or any(
-        trigger.endswith("_review") or trigger.endswith("_unknown")
-        for trigger in triggers
-    ):
-        return "P2"
-    return "P4"
-
-
 def unit_suggestion(
     *,
     kind: str,

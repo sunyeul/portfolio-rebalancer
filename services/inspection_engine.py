@@ -413,6 +413,14 @@ def evaluate_inspection(
         (str(position.get("market_country", "")).upper(), str(position.get("symbol", "")).upper()): position
         for position in positions
     }
+    invested_denominator_evaluable = bool(
+        projection
+        and projection.get(
+            "invested_weights_evaluable",
+            bool(projection.get("layer_weights_invested"))
+            or any(position.get("invested_weight") is not None for position in positions),
+        )
+    )
     holding_coverage_complete = bool(source_ok) and all(
         position.get("layer") is not None
         and (str(position.get("market_country", "")).upper(), str(position.get("symbol", "")).upper()) in configured
@@ -426,6 +434,16 @@ def evaluate_inspection(
         ) in profiles
         for position in positions
     )
+    configured_coverage_complete = all(
+        str(target.get("layer", "")).lower() in LAYERS
+        and _target_ready(target)
+        and key in profiles
+        for key, target in configured.items()
+    )
+    if invested_denominator_evaluable:
+        holding_coverage_complete = (
+            holding_coverage_complete and configured_coverage_complete
+        )
     if allocation_reason is None and not holding_coverage_complete:
         allocation_reason = "policy_coverage_incomplete"
 
@@ -463,13 +481,7 @@ def evaluate_inspection(
     invested_available = (
         source_ok
         and allocation_reason is None
-        and bool(
-            projection.get(
-                "invested_weights_evaluable",
-                bool(projection.get("layer_weights_invested"))
-                or any(position.get("invested_weight") is not None for position in positions),
-            )
-        )
+        and invested_denominator_evaluable
         and holding_coverage_complete
     )
     if invested_available:

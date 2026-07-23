@@ -559,3 +559,53 @@ def test_unknown_thesis_underweight_requires_constraints_review():
     aaa = next(item for item in result["instruments"] if item["identity"] == "US/AAA")
     assert aaa["priority"] == "P2"
     assert aaa["suggestion"]["code"] == "review_thesis_or_constraints"
+
+
+def test_missing_configured_profile_blocks_invested_universe_coverage():
+    policy = _policy()
+    policy["instruments"].append(
+        {
+            "market_country": "US",
+            "symbol": "CCC",
+            "layer": "core",
+            "minimum": 0.0,
+            "target": 0.05,
+            "maximum": 0.10,
+        }
+    )
+    profiles = {
+        ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
+        ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
+    }
+    result = evaluate_inspection(
+        _projection(), {"state": "complete", "points": []}, policy, profiles
+    )
+    assert result["allocation_state"] == "not_evaluable"
+    assert result["allocation_reason"] == "policy_coverage_incomplete"
+    assert result["adjustment_suggestions"] == []
+    assert result["review_queue"][0]["queue_class"] == "blocking"
+
+
+def test_invalid_configured_target_blocks_invested_universe_coverage():
+    policy = _policy()
+    policy["instruments"].append(
+        {
+            "market_country": "US",
+            "symbol": "CCC",
+            "layer": "core",
+            "minimum": 0.10,
+            "target": None,
+            "maximum": 0.20,
+        }
+    )
+    profiles = {
+        ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
+        ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
+        ("US", "CCC"): {"layer": "core", "thesis_status": "valid"},
+    }
+    result = evaluate_inspection(
+        _projection(), {"state": "complete", "points": []}, policy, profiles
+    )
+    assert result["allocation_state"] == "not_evaluable"
+    assert result["allocation_reason"] == "policy_coverage_incomplete"
+    assert result["adjustment_suggestions"] == []
