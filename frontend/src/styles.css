@@ -13,13 +13,17 @@
 .source-diagnostics{border:1px solid #dbe5e4;border-radius:10px;background:#fff}.source-diagnostics summary{padding:14px 16px;cursor:pointer;font-size:12px;font-weight:750;color:#40585d}.source-diagnostics dl{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;margin:0;padding:0 16px 16px}.source-diagnostics dl div{min-width:0;padding:10px;border-left:1px solid #e5ebea}.source-diagnostics dl div:first-child{border-left:0}.source-diagnostics dt{font-size:10px;color:#8a989d}.source-diagnostics dd{margin:5px 0 0;font-size:11px;font-weight:700;color:#40585d;overflow-wrap:anywhere}
 
 .risk-fact-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.evidence-detail{margin-top:10px;border-top:1px solid #e5ebec;padding-top:8px}.evidence-detail summary{font-size:10px;color:#7c8b91;cursor:pointer}.evidence-detail pre{white-space:pre-wrap;overflow:auto;font-size:10px;color:#5c6f75;margin:8px 0 0}.factor-summary{max-width:180px;white-space:normal;line-height:1.35}
+.adjustment-suggestions{margin-top:4px;padding:20px;border:1px solid #cfe4df;border-radius:12px;background:#f8fcfb;box-shadow:0 4px 16px rgba(25,44,52,.035)}.adjustment-suggestions .section-title{margin-bottom:15px}.suggestion-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}.suggestion-card{display:grid;gap:9px;min-width:0;padding:16px;border:1px solid #d8e7e3;border-radius:10px;background:#fff}.suggestion-meta,.suggestion-title-row,.suggestion-band{display:flex;align-items:center;justify-content:space-between;gap:8px}.suggestion-meta{align-items:flex-start}.priority-chip{font-size:10px;font-weight:800;color:#236b5d;background:#e4f5ef;border-radius:999px;padding:4px 7px;white-space:nowrap}.suggestion-title-row strong{font-size:14px;color:#223b40;overflow-wrap:anywhere}.suggestion-title-row small{color:#87969b;text-transform:uppercase;font-size:9px;letter-spacing:.08em}.suggestion-band{padding:8px 0;border-top:1px solid #edf1f1;border-bottom:1px solid #edf1f1;color:#61777a;font-size:10px;flex-wrap:wrap}.suggestion-label{margin:0;color:#1e7565;font-size:12px;font-weight:800;line-height:1.45}.suggestion-meaning{margin:0;color:#536b72;font-size:11px;line-height:1.45}.suggestion-card details{border-top:1px solid #edf1f1;padding-top:8px}.suggestion-card summary{cursor:pointer;color:#71868a;font-size:10px}.suggestion-card details p{margin:7px 0 4px;color:#74868a;font-size:10px;line-height:1.45}.suggestion-card details small{color:#8a999c;font-size:9px;line-height:1.4}.contract-notice,.allocation-blocked,.suggestion-empty{display:flex;align-items:flex-start;gap:10px;padding:14px 15px;border-radius:9px;font-size:12px}.contract-notice{border:1px solid #e5d8b6;background:#fffaf0;color:#7f651f}.allocation-blocked{border:1px solid #f0d7bd;background:#fff8ef;color:#8a541e}.suggestion-empty{border:1px solid #cfe4df;background:#f0faf5;color:#3a7868}.contract-notice svg,.allocation-blocked svg,.suggestion-empty svg{flex:0 0 auto;margin-top:1px}.contract-notice div,.allocation-blocked div{display:grid;gap:4px}.contract-notice span,.allocation-blocked span{font-size:11px;line-height:1.5}.overview-context{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:28px}.queue-axis{display:flex;align-items:center;gap:7px;min-width:0}.priority-label{font-size:10px;color:#5f777b;white-space:nowrap}.queue-suggestion{color:#217562!important;font-weight:750}.allocation-overview{margin-top:28px}
 @media(max-width:1200px){
   .main{padding:28px 26px 54px}
   .overview-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .suggestion-list{grid-template-columns:1fr 1fr}
+  .overview-context{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 
 @media(max-width:980px){
   .overview-hero,.overview-review-grid{grid-template-columns:1fr}
+  .suggestion-list{grid-template-columns:1fr}
   .annual-target-card{min-height:320px}
   .cash-reserve-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .cards-row{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -42,7 +46,7 @@
   .topbar h1{font-size:24px}
   .refresh{margin-top:14px}
   .read-only-notice div{display:grid;gap:3px}
-  .overview-kpis,.facts-grid,.cards-row,.cash-reserve-grid{grid-template-columns:1fr}
+  .overview-kpis,.overview-context,.facts-grid,.cards-row,.cash-reserve-grid{grid-template-columns:1fr}
   .overview-hero,.overview-review-grid{margin-top:20px}
   .allocation-overview,.annual-target-card,.cash-reserve-overview,.layer-review-section,.review-queue-section{padding:16px}
   .annual-target-card{min-height:0}

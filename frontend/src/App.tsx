@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, BarChart3, CircleAlert, CircleCheck, Layers3, PanelLeftClose, PanelLeftOpen, RefreshCw, ShieldCheck, WalletCards, type LucideIcon } from "lucide-react";
-import { Evaluation, getJson, type JsonObject, type PerformanceRun } from "./lib/api";
-import { evidenceValue, finiteNumber, formatAccountReturn, formatKrw as money, formatPercent as percent, formatSignedKrw as signedMoney, supportedRate } from "./lib/presentation";
+import { Evaluation, getJson, type InspectionData, type InspectionItem, type JsonObject, type PerformanceRun } from "./lib/api";
+import { evidenceValue, finiteNumber, formatAccountReturn, formatAllocationReason, formatKrw as money, formatPercent as percent, formatSignedKrw as signedMoney, supportedRate } from "./lib/presentation";
 
 const statusLabel: Record<string, string> = { OK: "OK", Watch: "Watch", Review: "Review", Action: "Action" };
 const sidebarStorageKey = "ips-pilot.sidebar-collapsed";
@@ -51,6 +51,26 @@ function Status({ value }: { value?: unknown }) {
     : <span className="status status-missing">—</span>;
 }
 
+function AdjustmentSuggestions({ items, contractSupported, allocationState, allocationReason }: { items: InspectionItem[]; contractSupported: boolean; allocationState?: unknown; allocationReason?: unknown }) {
+  return <section className="adjustment-suggestions" aria-labelledby="adjustment-suggestions-title">
+    <div className="section-title"><div><p className="eyebrow">NEXT ALLOCATION REVIEW</p><h2 id="adjustment-suggestions-title">다음 조정 검토</h2></div><span className="denominator">백엔드 우선순위 순</span></div>
+    {!contractSupported && <div className="contract-notice"><CircleAlert size={18} /><div><strong>새 조정 계약을 아직 적용하지 않았습니다.</strong><span>현재 저장된 평가는 이전 엔진 결과이므로 우선순위와 조정 제안을 추정하지 않습니다. 새 Toss 평가를 저장하면 이 영역이 활성화됩니다.</span></div></div>}
+    {contractSupported && allocationState === "not_evaluable" && <div className="allocation-blocked"><CircleAlert size={18} /><div><strong>비중 조정 판단 보류</strong><span>{formatAllocationReason(allocationReason)} Source health에서 원천·정책 근거를 확인하세요.</span></div></div>}
+    {contractSupported && allocationState !== "not_evaluable" && items.length === 0 && <div className="suggestion-empty"><CircleCheck size={18} /><span>현재 우선 검토할 비중 조정 항목이 없습니다. 허용 범위 안에서 관찰을 유지합니다.</span></div>}
+    {contractSupported && allocationState !== "not_evaluable" && items.length > 0 && <div className="suggestion-list">{items.slice(0, 3).map((item, index) => {
+      const suggestion = item.suggestion;
+      return <article className="suggestion-card" key={`${String(item.kind)}-${String(item.identity)}-${index}`}>
+        <div className="suggestion-meta"><span className="priority-chip">{String(item.priority ?? "—")} · {String(item.priority_label ?? "검토 시점 미상")}</span><Status value={item.status} /></div>
+        <div className="suggestion-title-row"><strong>{String(item.identity ?? "—")}</strong><small>{String(item.kind ?? "allocation")}</small></div>
+        <div className="suggestion-band"><span>현재 {percent(item.current)}</span><span>허용 {percent(item.minimum)}–{percent(item.maximum)}</span><span>목표 {percent(item.target)}</span></div>
+        <p className="suggestion-label">{String(suggestion?.label ?? "조정 메커니즘 확인 필요")}</p>
+        <p className="suggestion-meaning">{String(item.meaning ?? "점검 의미 근거가 필요합니다.")}</p>
+        <details><summary>근거와 확인 과제</summary><p>{String(item.verification_task ?? "확인 과제 근거가 필요합니다.")}</p>{Array.isArray(item.triggers) && item.triggers.length > 0 && <small>트리거: {item.triggers.map(String).join(" · ")}</small>}</details>
+      </article>;
+    })}</div>}
+  </section>;
+}
+
 function GapCard({ title, row }: { title: string; row?: Record<string, unknown> | null }) {
   return <article className="metric-card">
     <div className="card-heading"><span>{title}</span><Status value={row?.status} /></div>
@@ -60,15 +80,21 @@ function GapCard({ title, row }: { title: string; row?: Record<string, unknown> 
   </article>;
 }
 
-function AllocationOverview({ cash, layers }: { cash?: JsonObject | null; layers: JsonObject[] }) {
-  const rows = [{ label: "현금", row: cash }, ...layers.map(row => ({ label: String(row.identity ?? "레이어"), row }))];
+function AllocationOverview({ cash, layers }: { cash?: InspectionItem | null; layers: InspectionItem[] }) {
+  const layerByIdentity = new Map(layers.map(row => [String(row.identity ?? "").toLowerCase(), row]));
+  const rows = [
+    { label: "현금", row: cash },
+    { label: "core", row: layerByIdentity.get("core") },
+    { label: "satellite", row: layerByIdentity.get("satellite") },
+    { label: "experiment", row: layerByIdentity.get("experiment") },
+  ];
   return <section className="allocation-overview">
-    <div className="section-title"><div><p className="eyebrow">ALLOCATION OVERVIEW</p><h2>현재 비중과 목표</h2></div><span className="denominator">표시 값은 백엔드 원값</span></div>
+    <div className="section-title"><div><p className="eyebrow">ALLOCATION BANDS</p><h2>허용 범위와 현재 비중</h2></div><span className="denominator">현금은 총계좌 · 레이어는 투자금 평가금 기준</span></div>
     <div className="allocation-overview-list">{rows.map(({ label, row }) => {
       const target = finiteNumber(row?.target);
       return <article className="allocation-overview-row" key={label}>
         <div className="allocation-row-heading"><div><strong>{label}</strong><small>{denominatorLabel(row?.denominator)}</small></div><Status value={row?.status} /></div>
-        <div className="allocation-values"><strong>{percent(row?.current)}</strong><span>목표 {percent(row?.target)}</span></div>
+        <div className="allocation-values"><strong>{percent(row?.current)}</strong><span>허용 {percent(row?.minimum)}–{percent(row?.maximum)} · 목표 {percent(row?.target)}</span></div>
         <div className="allocation-track">
           <span className="allocation-fill" style={{ width: `${visualPercent(row?.current)}%` }} />
           {target !== null && <span className="allocation-target" style={{ left: `${visualPercent(target)}%` }} />}
@@ -134,12 +160,12 @@ function LayerReviewTable({ layers, instruments, layerByIdentity }: { layers: Js
 
 const queueKindLabel: Record<string, string> = { source: "원천", cash: "현금", layer: "레이어", instrument: "종목", performance: "성과", account_risk: "계좌 리스크" };
 
-function ReviewQueue({ items, compact = false }: { items: JsonObject[]; compact?: boolean }) {
+function ReviewQueue({ items, compact = false }: { items: InspectionItem[]; compact?: boolean }) {
   return <section className={`review-queue-section${compact ? " compact" : " full"}`}>
     <div className="queue-heading"><div><p className="eyebrow">REVIEW QUEUE</p><h2>{compact ? "우선 확인 항목" : "전체 확인 항목"}</h2></div><span className="queue-count">{items.length}</span></div>
     {compact && <p className="review-queue-order">백엔드 순서 · 최대 3개</p>}
     {items.length === 0 && <div className="queue-empty"><CircleCheck size={18} />현재 확인 항목 없음</div>}
-    <div className="review-queue-list">{items.map((item, index) => <article className="queue-item" key={`${String(item.kind)}-${String(item.identity)}-${index}`}><div className="queue-top"><Status value={item.status} /><small>{queueKindLabel[String(item.kind)] ?? String(item.kind ?? "근거")}</small></div><strong>{String(item.identity ?? "—")}</strong><p>{String(item.meaning ?? "점검 의미 근거가 필요합니다.")}</p><span>{String(item.verification_task ?? "확인 과제 근거가 필요합니다.")}</span>{item.evidence_refs !== undefined && <details className="evidence-detail"><summary>근거 연결</summary><pre>{String(JSON.stringify(item.evidence_refs as JsonObject, null, 2) ?? "")}</pre></details>}</article>)}</div>
+    <div className="review-queue-list">{items.map((item, index) => <article className="queue-item" key={`${String(item.kind)}-${String(item.identity)}-${index}`}><div className="queue-top"><div className="queue-axis"><Status value={item.status} />{item.priority && <span className="priority-label">{String(item.priority)} · {String(item.priority_label ?? "검토 시점 미상")}</span>}</div><small>{queueKindLabel[String(item.kind)] ?? String(item.kind ?? "근거")}</small></div><strong>{String(item.identity ?? "—")}</strong>{item.suggestion?.label && <p className="queue-suggestion">{String(item.suggestion.label)}</p>}<p>{String(item.meaning ?? "점검 의미 근거가 필요합니다.")}</p><span>{String(item.verification_task ?? "확인 과제 근거가 필요합니다.")}</span>{item.evidence_refs !== undefined && <details className="evidence-detail"><summary>근거 연결</summary><pre>{String(JSON.stringify(item.evidence_refs as JsonObject, null, 2) ?? "")}</pre></details>}</article>)}</div>
     <div className="queue-footer">이 목록은 읽기 전용 검사 신호이며, 상태와 순서는 백엔드 평가를 그대로 따릅니다.</div>
   </section>;
 }
@@ -228,6 +254,7 @@ function SourcePanel({ health, snapshots, marketContext, evaluation }: { health:
 
 export default function App() {
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
+  const [contractSupported, setContractSupported] = useState(false);
   const [performanceRun, setPerformanceRun] = useState<PerformanceRun | null>(null);
   const [policy, setPolicy] = useState<JsonObject | null>(null);
   const [profiles, setProfiles] = useState<JsonObject[]>([]);
@@ -243,9 +270,10 @@ export default function App() {
   async function reload() {
     setLoading(true); setError(null); setWarnings([]);
     try {
-      const inspectionData = await getJson<{ evaluation: Evaluation | null }>("/api/inspection");
+      const inspectionData = await getJson<InspectionData>("/api/inspection");
       const currentEvaluation = inspectionData.evaluation;
       setEvaluation(currentEvaluation);
+      setContractSupported(inspectionData.contract_supported === true);
       const warningMessages: string[] = [];
       async function optional<T>(path: string, label: string, fallback: T): Promise<T> {
         try { return await getJson<T>(path); }
@@ -286,8 +314,7 @@ export default function App() {
 
   const result = evaluation?.result;
   const queue = result?.review_queue ?? [];
-  const actionItems = queue.filter(item => item.status === "Action");
-  const highestQueueStatus = queue[0]?.status ?? "OK";
+  const adjustmentSuggestions = result?.adjustment_suggestions ?? [];
   const layers = result?.layers ?? [];
   const instruments = result?.instruments ?? [];
   const performance = result?.performance as Record<string, unknown> | undefined;
@@ -326,15 +353,14 @@ export default function App() {
       {!loading && !evaluation && <div className="empty"><CircleAlert size={18} />아직 저장된 Toss 평가가 없습니다. CLI에서 inspection run을 먼저 실행하세요.</div>}
       {!loading && result && <>
         {activeTab === "overview" ? <>
-          <section className="facts-grid overview-kpis">
+          <AdjustmentSuggestions items={adjustmentSuggestions} contractSupported={contractSupported} allocationState={result.allocation_state} allocationReason={result.allocation_reason} />
+          <AllocationOverview cash={result.cash} layers={layers} />
+          <section className="facts-grid overview-context">
             <article className="fact-card"><span>투자 원금</span><strong>{money(investmentPrincipal)}</strong><small>외부 순입출금을 반영한 계좌 원금</small></article>
-            <article className="fact-card"><span>계좌 평가금</span><strong>{money(accountValue)}</strong><small>{accountProfit === null ? "투자 원금 대비 근거 —" : `투자 원금 대비 ${signedMoney(accountProfit)}`}</small></article>
-            <article className="fact-card"><span>원금 대비 계좌 수익률</span><strong>{formatAccountReturn(accountReturn)}</strong><small>{accountProfit === null ? "계좌 수익 근거 —" : `계좌 손익 ${signedMoney(accountProfit)} · 평가금 - 투자 원금`}</small></article>
-            <article className="fact-card"><span>누적 계좌 TWR</span><strong>{percent(performance?.cumulative_twr)}</strong><small>추적 시작 이후 현금흐름을 분리한 계좌 수익률</small></article>
-            <article className="fact-card"><span>예외 검토</span><strong>{actionItems.length.toLocaleString()}건</strong><small>최고 상태 <Status value={highestQueueStatus} /> · 백엔드 Review Queue 기준</small></article>
+            <article className="fact-card"><span>현재 계좌 평가금</span><strong>{money(accountValue)}</strong><small>{accountProfit === null ? "원금 대비 손익 자료 없음" : `원금 대비 ${signedMoney(accountProfit)}`}</small></article>
+            <article className="fact-card"><span>원금 대비 계좌 수익률</span><strong>{formatAccountReturn(accountReturn)}</strong><small>평가금 - 투자 원금 기준</small></article>
+            <article className="fact-card"><span>YTD 계좌 수익률</span><strong>{percent(performance?.ytd_twr ?? (String(performance?.measurement ?? "") === "ytd_twr" ? performance?.annual_twr : null))}</strong><small>연간 목표 {percent(performance?.annual_target)} · 전략 평가용</small></article>
           </section>
-          <div className="overview-hero"><AllocationOverview cash={result.cash} layers={layers} /><AnnualTargetCard performance={performance} /></div>
-          <CashReserveOverview cash={result.cash} cashValue={account?.cash_value_krw} />
           <div className="overview-review-grid"><LayerReviewTable layers={layers} instruments={sortedInstruments} layerByIdentity={layerByIdentity} /><ReviewQueue items={queue.slice(0, 3)} compact /></div>
         </> : activeTab === "performance" ? <PerformancePanel summary={performance} run={performanceRun} accountProfitLoss={result.account_profit_loss} /> : activeTab === "allocation" ? <AllocationPanel cash={result.cash} layers={layers} instruments={sortedInstruments} layerByIdentity={layerByIdentity} /> : activeTab === "review" ? <ReviewQueue items={queue} /> : activeTab === "profiles" ? <ProfilesPanel profiles={profiles} policy={policy} /> : <SourcePanel health={health} snapshots={snapshots} marketContext={marketContext} evaluation={evaluation} />}
       </>}

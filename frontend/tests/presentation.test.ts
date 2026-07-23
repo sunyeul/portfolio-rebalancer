@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { evidenceValue, formatAccountReturn, formatKrw, formatSignedKrw, supportedRate } from "../src/lib/presentation";
+import { evidenceValue, formatAccountReturn, formatAllocationReason, formatKrw, formatSignedKrw, supportedRate } from "../src/lib/presentation";
 
 test("KRW formatting removes fractional won", () => {
   expect(formatKrw(120802745.17802304)).toBe("120,802,745 KRW");
@@ -26,4 +26,12 @@ test("evidenceValue distinguishes zero from unavailable evidence", () => {
 test("account return formatting distinguishes zero from missing principal evidence", () => {
   expect(formatAccountReturn(0)).toBe("0.0%");
   expect(formatAccountReturn(null)).toBe("자료 없음");
+});
+
+test("allocation blocking reasons remain human-readable without inventing a decision", () => {
+  expect(formatAllocationReason("invested_denominator_unavailable")).toBe(
+    "투자금 평가금 분모를 확인할 수 없습니다.",
+  );
+  expect(formatAllocationReason("unknown_reason")).toBe("unknown_reason");
+  expect(formatAllocationReason(null)).toContain("비중 조정 판단");
 });

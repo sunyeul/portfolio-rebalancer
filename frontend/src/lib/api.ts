@@ -17,6 +17,48 @@ export type AccountSummary = JsonObject & {
   account_return?: number | null;
 };
 
+export type InspectionSuggestion = {
+  code?: string;
+  label?: string;
+};
+
+export type InspectionItem = JsonObject & {
+  priority?: "P1" | "P2" | "P3" | "P4" | null;
+  priority_label?: string | null;
+  queue_class?: "blocking" | "adjustment" | "observation";
+  suggestion?: InspectionSuggestion | null;
+  status?: "OK" | "Watch" | "Review" | "Action" | string;
+  kind?: string;
+  identity?: string;
+  current?: number | null;
+  minimum?: number | null;
+  target?: number | null;
+  maximum?: number | null;
+  gap?: number | null;
+  denominator?: string | null;
+};
+
+export type InspectionResult = {
+  engine_version?: string;
+  allocation_state?: "complete" | "partial" | "not_evaluable" | string;
+  allocation_reason?: string | null;
+  account?: AccountSummary;
+  account_profit_loss?: JsonObject;
+  source?: Record<string, unknown>;
+  performance?: JsonObject;
+  cash?: InspectionItem | null;
+  layers?: InspectionItem[];
+  instruments?: InspectionItem[];
+  adjustment_suggestions?: InspectionItem[];
+  review_queue?: InspectionItem[];
+  evidence_refs?: JsonObject;
+};
+
+export type InspectionData = {
+  evaluation: Evaluation | null;
+  contract_supported: boolean;
+};
+
 export type Evaluation = {
   id?: number;
   performance_run_id?: number | null;
@@ -26,19 +68,7 @@ export type Evaluation = {
   non_evaluable_reason?: string | null;
   profile_snapshot?: Array<Record<string, unknown>>;
   account?: AccountSummary;
-  result?: {
-    engine_version?: string;
-    account?: AccountSummary;
-    account_profit_loss?: JsonObject;
-    state?: string;
-    source?: Record<string, unknown>;
-    performance?: JsonObject;
-    cash?: JsonObject;
-    layers?: Array<JsonObject>;
-    instruments?: Array<JsonObject>;
-    review_queue?: Array<JsonObject>;
-    evidence_refs?: JsonObject;
-  };
+  result?: InspectionResult;
   market_evidence?: JsonObject;
   snapshot_id?: number;
 };
