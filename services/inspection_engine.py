@@ -8,10 +8,17 @@ import math
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 
+from services.action_contract import (
+    attach_decision,
+    priority_label,
+    priority_rank,
+    queue_class,
+    suggestion,
+)
 from services.policy_validation import LAYERS
 
 
-ENGINE_VERSION = "phase5-v1"
+ENGINE_VERSION = "phase5-v2"
 SEVERITY = {"OK": 0, "Watch": 1, "Review": 2, "Action": 3}
 
 
@@ -233,17 +240,31 @@ def evaluate_inspection(
         "all_within_tolerance"
     ) is True
     source_ok = projection is not None and source_error is None and reconciled
+
+    def _target_ready(target: Mapping[str, Any] | None) -> bool:
+        return bool(
+            target
+            and all(
+                isinstance(target.get(bound), (int, float))
+                and not isinstance(target.get(bound), bool)
+                and math.isfinite(float(target[bound]))
+                for bound in ("minimum", "target", "maximum")
+            )
+        )
+
     result: dict[str, Any] = {
         "engine_version": ENGINE_VERSION,
-        "state": "complete" if source_ok and performance_ok else "not_evaluable",
-        "non_evaluable_reason": None,
+        "allocation_state": "not_evaluable",
+        "allocation_reason": None,
         "source": {
             "snapshot_id": projection.get("snapshot_id") if projection else None,
             "account_alias": projection.get("account_alias")
             if projection
             else "toss-brokerage",
             "state": "complete" if source_ok else "failed",
-            "source_fingerprint": None,
+            "source_fingerprint": projection.get("source_fingerprint")
+            if projection
+            else None,
             "reconciled": reconciled,
             "synced_at": projection.get("synced_at") if projection else None,
         },
@@ -253,15 +274,12 @@ def evaluate_inspection(
         "cash": None,
         "layers": [],
         "instruments": [],
+        "adjustment_suggestions": [],
         "review_queue": [],
         "evidence_refs": dict(evidence_refs),
     }
-    if not source_ok:
-        result["non_evaluable_reason"] = source_error or "source_not_evaluable"
-    elif not performance_ok:
-        result["non_evaluable_reason"] = "performance_not_evaluable"
+
     if projection is not None:
-        result["source"]["source_fingerprint"] = projection.get("source_fingerprint")
         latest_point = (
             points[-1]
             if points and points[-1].get("evaluation_state") == "evaluable"
@@ -272,9 +290,7 @@ def evaluate_inspection(
             "invested_value_krw": projection.get("invested_value_krw"),
             "cash_value_krw": projection.get("cash_value_krw"),
             "cash_weight_gross": projection.get("cash_weight_gross"),
-            "investment_principal_krw": latest_point.get(
-                "investment_principal_krw"
-            ),
+            "investment_principal_krw": latest_point.get("investment_principal_krw"),
             "account_profit_krw": latest_point.get("account_gain_krw"),
             "account_return": latest_point.get("simple_return"),
         }
@@ -299,7 +315,7 @@ def evaluate_inspection(
     performance_status = "OK"
     performance_triggers: list[str] = []
     if not performance_ok:
-        performance_status = "Review"
+        performance_status = "Watch"
         performance_triggers.append("performance_not_evaluable")
     elif measurement == "ytd_twr" and ytd is None:
         performance_status = "Watch"
@@ -314,7 +330,7 @@ def evaluate_inspection(
             if measurement == "ytd_twr"
             else "annual_return_points_insufficient"
         )
-    elif annual is not None and annual < float(annual_target):
+    elif annual_target is not None and annual < float(annual_target):
         performance_status = "Watch"
         performance_triggers.append("annual_return_below_target")
     result["performance"] = {
@@ -360,40 +376,28 @@ def evaluate_inspection(
             "status": account_status,
             "triggers": account_triggers,
             "meaning": "계좌 TWR 곡선의 현재 drawdown과 손익 근거를 확인합니다.",
-            "next_step": "계좌 성과 이력과 현금흐름 분류를 검토합니다.",
             "verification_task": "계좌 성과 이력과 현금흐름 분류를 검토합니다.",
         }
 
-    if not source_ok or not performance_ok:
-        queue: list[dict[str, Any]] = []
-        if not source_ok:
-            queue.append(
-                {
-                    "priority": 0,
-                    "kind": "source",
-                    "identity": "account",
-                    "status": "Review",
-                    "triggers": [result["non_evaluable_reason"]],
-                    "meaning": "Toss 원천 자료가 완전하고 최신인지 확인해야 합니다.",
-                    "next_step": "최근 동기화 결과와 조정 상태를 확인합니다.",
-                    "verification_task": "최근 동기화 결과와 조정 상태를 확인합니다.",
-                }
-            )
-        if not performance_ok:
-            queue.append(
-                {
-                    "priority": 6,
-                    "kind": "performance",
-                    "identity": "account_return",
-                    "status": "Review",
-                    "triggers": ["performance_not_evaluable"],
-                    "meaning": "계좌 성과 이력이 평가 가능한지 확인해야 합니다.",
-                    "next_step": "성과 이력과 현금흐름 분류를 확인합니다.",
-                    "verification_task": "성과 이력과 현금흐름 분류를 확인합니다.",
-                }
-            )
-        result["review_queue"] = queue
-        return result
+    # Required allocation evidence is evaluated independently from optional performance.
+    positions = list(projection.get("positions", [])) if projection else []
+    allocation_reason: str | None = None
+    if source_error is not None or projection is None:
+        allocation_reason = "source_not_current_evaluable"
+    elif not reconciled:
+        allocation_reason = "holdings_reconciliation_failed"
+    else:
+        total = _finite_number(projection.get("total_value_krw"))
+        cash_weight = _finite_number(projection.get("cash_weight_gross"))
+        if (total is not None and total <= 0) or cash_weight is None:
+            allocation_reason = "gross_account_denominator_invalid"
+        elif not projection.get(
+            "invested_weights_evaluable",
+            bool(projection.get("layer_weights_invested"))
+            or any(position.get("invested_weight") is not None for position in positions),
+        ):
+            # A zero-investment account still has a valid gross cash denominator.
+            allocation_reason = "invested_denominator_unavailable"
 
     configured = {
         (
@@ -403,280 +407,313 @@ def evaluate_inspection(
         for item in policy_dict.get("instruments", [])
         if isinstance(item, Mapping)
     }
-    positions = list(projection.get("positions", []))
-
-    def _target_ready(target: Mapping[str, Any] | None) -> bool:
-        return bool(
-            target
-            and all(
-                isinstance(target.get(bound), (int, float))
-                and not isinstance(target.get(bound), bool)
-                and math.isfinite(float(target[bound]))
-                for bound in ("minimum", "target", "maximum")
-            )
-        )
-
-    coverage_complete = all(
+    position_map = {
+        (str(position.get("market_country", "")).upper(), str(position.get("symbol", "")).upper()): position
+        for position in positions
+    }
+    holding_coverage_complete = bool(source_ok) and all(
         position.get("layer") is not None
-        and (str(position["market_country"]).upper(), str(position["symbol"]).upper())
-        in configured
+        and (str(position.get("market_country", "")).upper(), str(position.get("symbol", "")).upper()) in configured
         and _target_ready(
             configured.get(
-                (
-                    str(position["market_country"]).upper(),
-                    str(position["symbol"]).upper(),
-                )
+                (str(position.get("market_country", "")).upper(), str(position.get("symbol", "")).upper())
             )
         )
         and (
-            str(position["market_country"]).upper(),
-            str(position["symbol"]).upper(),
-        )
-        in profiles
+            str(position.get("market_country", "")).upper(), str(position.get("symbol", "")).upper()
+        ) in profiles
         for position in positions
     )
-    if not coverage_complete:
-        result["state"] = "not_evaluable"
-        result["non_evaluable_reason"] = "policy_coverage_incomplete"
+    if allocation_reason is None and not holding_coverage_complete:
+        allocation_reason = "policy_coverage_incomplete"
 
-    cash_policy = policy_dict.get("cash_reserve", {})
-    cash_current = float(projection["cash_weight_gross"])
-    cash_status = "OK" if _within(cash_current, cash_policy) else "Review"
-    cash_triggers = [] if cash_status == "OK" else ["cash_reserve_out_of_range"]
-    result["cash"] = _unit(
-        kind="cash",
-        identity="cash_reserve",
-        current=cash_current,
-        target=float(cash_policy["target"]),
-        minimum=float(cash_policy["minimum"]),
-        maximum=float(cash_policy["maximum"]),
-        denominator="gross_account_value",
-        triggers=cash_triggers,
-        meaning="예수금 비중이 설정한 총계좌 기준 보유 범위 안에 있는지 확인합니다.",
-        next_step="현금 범위와 향후 정기매수 정책을 검토합니다.",
-        status=cash_status,
-        extra={"cash_value_krw": projection["cash_value_krw"]},
-    )
-
-    layer_policy = policy_dict.get("layers", {})
-    layer_weights = projection.get("layer_weights_invested", {})
-    for layer in LAYERS:
-        bounds = layer_policy.get(layer)
-        current = layer_weights.get(layer) if coverage_complete else None
-        status = "OK" if _within(current, bounds) else "Review"
-        triggers = [] if status == "OK" else ["layer_out_of_range"]
-        if not coverage_complete:
-            triggers = ["profile_or_target_missing"]
-        result["layers"].append(
-            _unit(
-                kind="layer",
-                identity=layer,
-                current=float(current) if current is not None else None,
-                target=float(bounds["target"])
-                if bounds and coverage_complete
-                else None,
-                minimum=float(bounds["minimum"])
-                if bounds and coverage_complete
-                else None,
-                maximum=float(bounds["maximum"])
-                if bounds and coverage_complete
-                else None,
-                denominator="invested_account_value",
-                triggers=triggers,
-                meaning="투자금 기준 레이어 비중이 승인된 범위에 맞는지 확인합니다.",
-                next_step="레이어 목표와 향후 정기매수 정책을 검토합니다.",
-                status=status,
-            )
-        )
-
-    for position in positions:
-        key = (str(position["market_country"]).upper(), str(position["symbol"]).upper())
-        target = configured.get(key)
-        profile = profiles.get(key)
-        evidence = (risk_evidence.get("instruments") or {}).get(
-            f"{key[0]}/{key[1]}", {}
-        )
-        triggers: list[str] = []
-        status = "OK"
-        ready = profile is not None and _target_ready(target)
-        current = position.get("invested_weight") if ready else None
-        thesis = str(profile.get("thesis_status", "unknown")) if profile else "unknown"
-        layer = str(position.get("layer") or "").lower()
-        if profile is None or target is None or position.get("layer") is None:
-            status = "Review"
-            triggers.append("profile_or_target_missing")
+    # Cash is the only valid unit for an all-cash account.
+    cash_ready = allocation_reason in {None, "invested_denominator_unavailable"}
+    cash_policy = policy_dict.get("cash_reserve") or {}
+    if cash_ready:
+        cash_current = _finite_number(projection.get("cash_weight_gross"))
+        cash_bounds_ready = _target_ready(cash_policy)
+        if cash_current is None or not cash_bounds_ready:
+            allocation_reason = "gross_account_denominator_invalid"
+            cash_ready = False
         else:
-            if position.get("layer") != target.get("layer"):
+            cash_status = "OK" if _within(cash_current, cash_policy) else "Review"
+            cash_triggers = [] if cash_status == "OK" else ["cash_reserve_out_of_range"]
+            result["cash"] = attach_decision(
+                _unit(
+                    kind="cash",
+                    identity="cash_reserve",
+                    current=cash_current,
+                    target=float(cash_policy["target"]),
+                    minimum=float(cash_policy["minimum"]),
+                    maximum=float(cash_policy["maximum"]),
+                    denominator="gross_account_value",
+                    triggers=cash_triggers,
+                    meaning="예수금 비중이 설정한 총계좌 기준 보유 범위 안에 있는지 확인합니다.",
+                    next_step="현금 범위와 향후 정기매수 정책을 검토합니다.",
+                    status=cash_status,
+                    extra={"cash_value_krw": projection.get("cash_value_krw")},
+                ),
+            )
+
+    invested_available = (
+        source_ok
+        and allocation_reason is None
+        and bool(
+            projection.get(
+                "invested_weights_evaluable",
+                bool(projection.get("layer_weights_invested"))
+                or any(position.get("invested_weight") is not None for position in positions),
+            )
+        )
+        and holding_coverage_complete
+    )
+    if invested_available:
+        layer_policy = policy_dict.get("layers") or {}
+        layer_weights = projection.get("layer_weights_invested") or {}
+        for layer in LAYERS:
+            bounds = layer_policy.get(layer)
+            current = _finite_number(layer_weights.get(layer))
+            bounds_ready = _target_ready(bounds)
+            status = "OK" if bounds_ready and _within(current, bounds) else "Review"
+            triggers = [] if status == "OK" else ["layer_out_of_range"]
+            eligible = status == "Review" and current is not None and bounds_ready and current < float(bounds["minimum"])
+            result["layers"].append(
+                attach_decision(
+                    _unit(
+                        kind="layer",
+                        identity=layer,
+                        current=current,
+                        target=float(bounds["target"]) if bounds_ready else None,
+                        minimum=float(bounds["minimum"]) if bounds_ready else None,
+                        maximum=float(bounds["maximum"]) if bounds_ready else None,
+                        denominator="invested_account_value",
+                        triggers=triggers,
+                        meaning="투자금 기준 레이어 비중이 승인된 범위에 맞는지 확인합니다.",
+                        next_step="레이어 목표와 향후 정기매수 정책을 검토합니다.",
+                        status=status,
+                    ),
+                    eligible_for_increase=eligible,
+                )
+            )
+
+        universe = sorted(set(position_map) | set(configured))
+        for key in universe:
+            position = position_map.get(key)
+            target = configured.get(key)
+            profile = profiles.get(key)
+            evidence = (risk_evidence.get("instruments") or {}).get(f"{key[0]}/{key[1]}", {})
+            target_ready = _target_ready(target)
+            is_absent = position is None
+            layer = str((target or {}).get("layer") or (position or {}).get("layer") or "").lower()
+            thesis = str(profile.get("thesis_status", "unknown")) if profile else "unknown"
+            triggers: list[str] = []
+            status = "OK"
+            current = 0.0 if is_absent and target_ready else (position.get("invested_weight") if position and target_ready else None)
+            ready = profile is not None and target_ready and layer in LAYERS
+            if not ready:
                 status = "Review"
-                triggers.append("layer_identity_mismatch")
-            if not _target_ready(target):
-                status = _raise_status(status, "Review")
                 triggers.append("profile_or_target_missing")
-            elif not _within(current, target):
-                status = _raise_status(status, "Review")
-                triggers.append("instrument_out_of_range")
-
-            drawdown = evidence.get("drawdown") or {}
-            if drawdown:
-                if drawdown.get("state") != "complete":
+            else:
+                if position is not None and position.get("layer") != target.get("layer"):
+                    status = "Review"
+                    triggers.append("layer_identity_mismatch")
+                if not _within(current, target):
+                    status = _raise_status(status, "Review")
+                    triggers.append("instrument_out_of_range")
+                drawdown = evidence.get("drawdown") or {}
+                if drawdown:
+                    if drawdown.get("state") != "complete":
+                        status = _raise_status(status, "Watch")
+                        triggers.append("instrument_drawdown_evidence_unavailable")
+                    else:
+                        threshold = (risk_policy.get("instrument_drawdown_review") or {}).get(layer)
+                        if threshold is not None and drawdown.get("current") is not None and float(drawdown["current"]) <= float(threshold):
+                            candidate = "Watch" if layer == "core" else "Review"
+                            status = _raise_status(status, candidate)
+                            triggers.append("core_drawdown_review_threshold" if layer == "core" else "strict_layer_drawdown_review_threshold")
+                pnl = _finite_number(evidence.get("unrealized_pnl_krw", position.get("profit_loss_krw") if position else None))
+                hard_maximum_breach = current is not None and float(current) > float(target["maximum"])
+                if pnl is not None and pnl > 0 and hard_maximum_breach:
+                    status = _raise_status(status, "Review")
+                    triggers.append("gain_with_instrument_overweight")
+                if pnl is not None and pnl < 0 and (thesis in {"watch", "broken"} or profile.get("holdability_status", "unknown") == "review"):
+                    status = _raise_status(status, "Review")
+                    triggers.append("loss_with_thesis_or_holdability_concern")
+                if thesis == "watch":
                     status = _raise_status(status, "Watch")
-                    triggers.append("instrument_drawdown_evidence_unavailable")
-                else:
-                    threshold = (risk_policy.get("instrument_drawdown_review") or {}).get(
-                        layer
-                    )
-                    if (
-                        threshold is not None
-                        and drawdown.get("current") is not None
-                        and float(drawdown["current"]) <= float(threshold)
-                    ):
-                        candidate = "Watch" if layer == "core" else "Review"
-                        status = _raise_status(status, candidate)
-                        triggers.append(
-                            "core_drawdown_review_threshold"
-                            if layer == "core"
-                            else "strict_layer_drawdown_review_threshold"
-                        )
-
-            pnl = _finite_number(
-                evidence.get("unrealized_pnl_krw", position.get("profit_loss_krw"))
-            )
-            hard_maximum_breach = (
-                current is not None and float(current) > float(target["maximum"])
-            )
-            if pnl is not None and pnl > 0 and hard_maximum_breach:
-                status = _raise_status(status, "Review")
-                triggers.append("gain_with_instrument_overweight")
-            if pnl is not None and pnl < 0 and (
-                thesis in {"watch", "broken"}
-                or profile.get("holdability_status", "unknown") == "review"
-            ):
-                status = _raise_status(status, "Review")
-                triggers.append("loss_with_thesis_or_holdability_concern")
-
-            if thesis == "watch":
-                status = _raise_status(status, "Watch")
-                triggers.append("thesis_watch")
-            elif thesis == "broken":
-                status = _raise_status(status, "Review")
-                triggers.append("thesis_broken")
-
-            factor_fields = (
-                ("overlap_status", "overlap"),
-                ("management_burden_status", "management_burden"),
-                ("holdability_status", "holdability"),
-                ("etf_substitution_status", "etf_substitution"),
-            )
-            strict_layer = layer in {"satellite", "experiment"}
-            for field, trigger_name in factor_fields:
-                factor_status = str(profile.get(field, "unknown")).lower()
-                if factor_status == "review":
+                    triggers.append("thesis_watch")
+                elif thesis == "broken":
                     status = _raise_status(status, "Review")
-                    triggers.append(f"{trigger_name}_review")
-                elif strict_layer and factor_status == "unknown":
-                    status = _raise_status(status, "Review")
-                    triggers.append(f"{trigger_name}_unknown")
-
-            if thesis == "broken" and hard_maximum_breach:
-                status = _raise_status(status, "Action")
-                triggers.append("broken_thesis_and_hard_maximum_breach")
-        next_step = (
-            "예외 개입 가능성을 점검하고 조건이 확인되지 않으면 보류합니다."
-            if status == "Action"
-            else "프로필, 투자 논지, 겹침과 향후 정기매수 정책을 검토합니다."
-        )
-        result["instruments"].append(
-            _unit(
-                kind="instrument",
-                identity=f"{key[0]}/{key[1]}",
-                current=float(current) if current is not None else None,
-                target=float(target["target"]) if ready else None,
-                minimum=float(target["minimum"]) if ready else None,
-                maximum=float(target["maximum"]) if ready else None,
-                denominator="invested_account_value",
-                triggers=triggers,
-                meaning="종목의 현재 비중과 IPS 프로필·목표 범위를 함께 확인합니다.",
-                next_step=next_step,
-                status=status,
-                extra={
-                    "market_country": key[0],
-                    "symbol": key[1],
-                    "layer": position.get("layer"),
-                    "thesis_status": profile.get("thesis_status") if profile else None,
-                    "overlap_status": profile.get("overlap_status", "unknown") if profile else "unknown",
-                    "management_burden_status": profile.get("management_burden_status", "unknown") if profile else "unknown",
-                    "holdability_status": profile.get("holdability_status", "unknown") if profile else "unknown",
-                    "etf_substitution_status": profile.get("etf_substitution_status", "unknown") if profile else "unknown",
-                    "review_factors_note": profile.get("review_factors_note", "") if profile else "",
-                    "unrealized_pnl_krw": position.get("profit_loss_krw"),
-                    "evidence": evidence,
-                },
+                    triggers.append("thesis_broken")
+                factor_fields = (("overlap_status", "overlap"), ("management_burden_status", "management_burden"), ("holdability_status", "holdability"), ("etf_substitution_status", "etf_substitution"))
+                strict_layer = layer in {"satellite", "experiment"}
+                for field, trigger_name in factor_fields:
+                    factor_status = str(profile.get(field, "unknown")).lower()
+                    if factor_status == "review":
+                        status = _raise_status(status, "Review")
+                        triggers.append(f"{trigger_name}_review")
+                    elif strict_layer and factor_status == "unknown":
+                        status = _raise_status(status, "Review")
+                        triggers.append(f"{trigger_name}_unknown")
+                if thesis == "broken" and hard_maximum_breach:
+                    status = _raise_status(status, "Action")
+                    triggers.append("broken_thesis_and_hard_maximum_breach")
+            eligible = ready and current is not None and float(current) < float(target["minimum"]) and thesis == "valid" and (
+                layer == "core" or all(str(profile.get(field, "unknown")).lower() in {"clear", "not_applicable"} for field in ("overlap_status", "management_burden_status", "holdability_status", "etf_substitution_status"))
             )
-        )
+            next_step = "예외 개입 가능성을 점검하고 조건이 확인되지 않으면 보류합니다." if status == "Action" else "프로필, 투자 논지, 겹침과 향후 정기매수 정책을 검토합니다."
+            result["instruments"].append(
+                attach_decision(
+                    _unit(
+                        kind="instrument",
+                        identity=f"{key[0]}/{key[1]}",
+                        current=float(current) if current is not None else None,
+                        target=float(target["target"]) if target_ready else None,
+                        minimum=float(target["minimum"]) if target_ready else None,
+                        maximum=float(target["maximum"]) if target_ready else None,
+                        denominator="invested_account_value",
+                        triggers=triggers,
+                        meaning="종목의 현재 비중과 IPS 프로필·목표 범위를 함께 확인합니다.",
+                        next_step=next_step,
+                        status=status,
+                        extra={
+                            "market_country": key[0], "symbol": key[1],
+                            "layer": target.get("layer") if target else (position.get("layer") if position else None),
+                            "thesis_status": profile.get("thesis_status") if profile else None,
+                            "overlap_status": profile.get("overlap_status", "unknown") if profile else "unknown",
+                            "management_burden_status": profile.get("management_burden_status", "unknown") if profile else "unknown",
+                            "holdability_status": profile.get("holdability_status", "unknown") if profile else "unknown",
+                            "etf_substitution_status": profile.get("etf_substitution_status", "unknown") if profile else "unknown",
+                            "review_factors_note": profile.get("review_factors_note", "") if profile else "",
+                            "unrealized_pnl_krw": position.get("profit_loss_krw") if position else None,
+                            "evidence": evidence,
+                        },
+                    ),
+                    eligible_for_increase=eligible,
+                    thesis_status=thesis,
+                )
+            )
+
+    if allocation_reason is None:
+        result["allocation_state"] = "complete"
+    elif allocation_reason == "invested_denominator_unavailable" and result["cash"] is not None:
+        result["allocation_state"] = "partial"
+    else:
+        result["allocation_state"] = "not_evaluable"
+    result["allocation_reason"] = allocation_reason
 
     queue: list[dict[str, Any]] = []
-    units: list[dict[str, Any]] = [result["cash"], *result["layers"], *result["instruments"]]
-    if result["account_profit_loss"].get("status"):
-        units.insert(0, result["account_profit_loss"])
-    for item in units:
-        if item["status"] != "OK":
-            priority = {
-                "account_risk": 5,
-                "cash": 2,
-                "layer": 4,
-                "instrument": 5,
-            }.get(item["kind"], 9)
-            if any("thesis" in trigger for trigger in item["triggers"]):
-                priority = 3
-            if any("drawdown_evidence_unavailable" in trigger for trigger in item["triggers"]):
-                priority = 9
-            queue.append(
-                {
-                    "priority": priority,
-                    "kind": item["kind"],
-                    "identity": item["identity"],
-                    "status": item["status"],
-                    "triggers": item["triggers"],
-                    "meaning": item["meaning"],
-                    "next_step": item["next_step"],
-                    "verification_task": item["verification_task"],
-                    "evidence_refs": {
-                        **dict(evidence_refs),
-                        **(
-                            {
-                                "market_source_fingerprint": item["evidence"]
-                                .get("drawdown", {})
-                                .get("source_fingerprint")
-                            }
-                            if item["kind"] == "instrument"
-                            else {}
-                        ),
-                    },
-                }
-            )
-    if performance_status != "OK":
+
+    def _queue_item(
+        item: Mapping[str, Any],
+        *,
+        blocking: bool = False,
+        suggestion_override: dict[str, str] | None = None,
+        priority_override: str | None = None,
+    ) -> None:
+        if item.get("status") == "OK" and not blocking:
+            return
+        priority = priority_override if priority_override is not None else item.get("priority")
         queue.append(
             {
-                "priority": 6,
+                "priority": None if blocking else priority,
+                "priority_label": "평가 차단" if blocking else priority_label(priority),
+                "queue_class": queue_class(priority, blocking=blocking),
+                "kind": item.get("kind"),
+                "identity": item.get("identity"),
+                "status": item.get("status", "Review"),
+                "triggers": list(item.get("triggers") or []),
+                "suggestion": None if blocking else suggestion_override or item.get("suggestion") or suggestion("hold_and_observe"),
+                "meaning": item.get("meaning"),
+                "verification_task": item.get("verification_task"),
+                "evidence_refs": {
+                    **dict(evidence_refs),
+                    **(
+                        {"market_source_fingerprint": (item.get("evidence") or {}).get("drawdown", {}).get("source_fingerprint")}
+                        if item.get("kind") == "instrument" else {}
+                    ),
+                },
+            }
+        )
+
+    if result["allocation_state"] == "not_evaluable":
+        reason = result["allocation_reason"] or "source_not_current_evaluable"
+        _queue_item(
+            {
+                "kind": "allocation",
+                "identity": "account",
+                "status": "Review",
+                "triggers": [reason],
+                "meaning": "현재 Toss 원천 자료로 비중 조정 판단을 평가할 수 없습니다.",
+                "verification_task": "최근 동기화·조정 상태와 정책·프로필 커버리지를 확인합니다.",
+            },
+            blocking=True,
+        )
+
+    units: list[dict[str, Any]] = []
+    if result["cash"] is not None:
+        units.append(result["cash"])
+    units.extend(result["layers"])
+    units.extend(result["instruments"])
+    if result["allocation_state"] != "not_evaluable":
+        for item in units:
+            _queue_item(item)
+
+    if result["account_profit_loss"].get("status"):
+        _queue_item(
+            attach_decision(
+                {
+                    **result["account_profit_loss"],
+                    "kind": "account_risk",
+                    "identity": "account_profit_loss",
+                    "current": None,
+                    "minimum": None,
+                    "maximum": None,
+                    "triggers": result["account_profit_loss"].get("triggers", []),
+                }
+            )
+        )
+    if performance_status != "OK":
+        _queue_item(
+            {
                 "kind": "performance",
                 "identity": "account_return",
                 "status": performance_status,
+                "priority": "P4",
+                "suggestion": suggestion("hold_and_observe"),
                 "triggers": performance_triggers,
                 "meaning": result["performance"]["meaning"],
-                "next_step": "성과 이력과 현금흐름 분류를 확인합니다.",
                 "verification_task": result["performance"]["verification_task"],
-                "evidence_refs": dict(evidence_refs),
-            }
+            },
+            priority_override="P4",
         )
+
     result["review_queue"] = sorted(
         queue,
         key=lambda item: (
-            -SEVERITY[item["status"]],
-            item["priority"],
-            item["kind"],
-            item["identity"],
+            0 if item["queue_class"] == "blocking" else 1,
+            priority_rank(item["priority"]),
+            -SEVERITY.get(item["status"], 0),
+            str(item.get("kind", "")),
+            str(item.get("identity", "")),
         ),
     )
+    result["adjustment_suggestions"] = [
+        {
+            key: item[key]
+            for key in (
+                "priority", "priority_label", "kind", "identity", "status",
+                "current", "minimum", "target", "maximum", "gap", "denominator",
+                "suggestion", "meaning", "verification_task", "triggers",
+            )
+            if key in item
+        }
+        for item in sorted(units, key=lambda value: (priority_rank(value.get("priority")), value.get("kind", ""), value.get("identity", "")))
+        if item.get("status") != "OK"
+        and item.get("priority") in {"P1", "P2", "P3"}
+        and result["allocation_state"] in {"complete", "partial"}
+    ]
     return result
 
 

@@ -39,7 +39,8 @@ def test_failed_latest_attempt_is_persisted_as_non_evaluable(monkeypatch, tmp_pa
     assert evaluation["snapshot_id"] == failed["id"]
     assert evaluation["state"] == "not_evaluable"
     assert evaluation["result"]["source"]["snapshot_id"] == failed["id"]
-    assert evaluation["result"]["review_queue"][0]["kind"] == "source"
+    assert evaluation["result"]["review_queue"][0]["kind"] == "allocation"
+    assert evaluation["result"]["review_queue"][0]["queue_class"] == "blocking"
     assert complete["id"] != failed["id"]
 
 

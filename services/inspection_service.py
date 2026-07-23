@@ -142,6 +142,10 @@ def _prepare_inputs(
             "market_evidence_fingerprint"
         ],
     )
+    allocation_state = result.get("allocation_state", "not_evaluable")
+    persisted_state = (
+        "complete" if allocation_state in {"complete", "partial"} else "not_evaluable"
+    )
     return {
         "snapshot_id": projection["snapshot_id"]
         if projection
@@ -157,8 +161,12 @@ def _prepare_inputs(
         "policy_hash": policy_hash_value,
         "profile_snapshot": profile_values,
         "profile_hash": profile_hash,
-        "state": result["state"],
-        "non_evaluable_reason": result["non_evaluable_reason"],
+        # The persistence wrapper retains its historical state column while
+        # the result itself uses the explicit allocation evaluability axis.
+        "state": persisted_state,
+        "non_evaluable_reason": result.get("allocation_reason")
+        if persisted_state == "not_evaluable"
+        else None,
         "result": result,
         "market_evidence_fingerprint": risk_evidence[
             "market_evidence_fingerprint"

@@ -212,10 +212,10 @@ def test_broken_thesis_and_hard_maximum_is_action_without_order_semantics():
 
 def test_missing_profile_is_review_and_cash_uses_gross_denominator():
     result = evaluate_inspection(_projection(cash=0.05), None, _policy(), {})
-    assert result["state"] == "not_evaluable"
+    assert result["allocation_state"] == "not_evaluable"
     assert result["cash"] is None
     assert result["instruments"] == []
-    assert result["review_queue"][0]["kind"] == "performance"
+    assert result["review_queue"][0]["queue_class"] == "blocking"
 
 
 def test_missing_profile_keeps_instrument_gaps_null():
@@ -225,7 +225,7 @@ def test_missing_profile_keeps_instrument_gaps_null():
         _policy(),
         {},
     )
-    assert result["state"] == "not_evaluable"
+    assert result["allocation_state"] == "not_evaluable"
     assert all(
         item["current"] is None and item["gap"] is None
         for item in result["instruments"]
@@ -410,3 +410,114 @@ def test_broken_thesis_requires_same_instrument_hard_maximum_for_action():
     assert "broken_thesis_and_hard_maximum_breach" in aaa_action["triggers"]
     encoded = str(action).lower()
     assert all(term not in encoded for term in ("buy", "sell", "execute"))
+
+
+def test_missing_performance_does_not_suppress_cash_or_allocation_suggestions():
+    policy = _policy()
+    profiles = {
+        ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
+        ("US", "BBB"): {
+            "layer": "satellite",
+            "thesis_status": "valid",
+            "overlap_status": "clear",
+            "management_burden_status": "clear",
+            "holdability_status": "clear",
+            "etf_substitution_status": "not_applicable",
+        },
+    }
+    result = evaluate_inspection(_projection(cash=0.05), None, policy, profiles)
+    assert result["allocation_state"] == "complete"
+    assert result["performance"]["status"] == "Watch"
+    assert result["account"]["investment_principal_krw"] is None
+    assert result["adjustment_suggestions"][0]["priority"] == "P1"
+    assert result["adjustment_suggestions"][0]["suggestion"]["code"] == (
+        "review_reduce_or_pause_regular_purchase_pace"
+    )
+
+
+def test_all_cash_is_partial_and_only_cash_is_evaluable():
+    projection = {
+        "snapshot_id": 8,
+        "source_fingerprint": "source-8",
+        "cash_weight_gross": 1.0,
+        "cash_value_krw": 1000.0,
+        "total_value_krw": 1000.0,
+        "invested_value_krw": 0.0,
+        "invested_weights_evaluable": False,
+        "layer_weights_invested": {},
+        "positions": [],
+        "reconciliation": {"holdings": {"all_within_tolerance": True}},
+    }
+    result = evaluate_inspection(projection, None, _policy(), {})
+    assert result["allocation_state"] == "partial"
+    assert result["allocation_reason"] == "invested_denominator_unavailable"
+    assert result["cash"] is not None
+    assert result["layers"] == []
+    assert result["instruments"] == []
+    assert result["adjustment_suggestions"]
+    assert all(item["kind"] == "cash" for item in result["adjustment_suggestions"])
+
+
+def test_stale_source_is_blocking_and_never_emits_adjustment_suggestion():
+    result = evaluate_inspection(
+        _projection(cash=0.01),
+        None,
+        _policy(),
+        {},
+        source_error="snapshot is stale",
+    )
+    assert result["allocation_state"] == "not_evaluable"
+    assert result["allocation_reason"] == "source_not_current_evaluable"
+    assert result["adjustment_suggestions"] == []
+    assert result["review_queue"][0]["queue_class"] == "blocking"
+    assert result["review_queue"][0]["priority"] is None
+    assert result["review_queue"][0]["suggestion"] is None
+
+
+def test_configured_absent_instrument_uses_zero_current_weight():
+    policy = _policy()
+    policy["instruments"].append(
+        {
+            "market_country": "US",
+            "symbol": "CCC",
+            "layer": "core",
+            "minimum": 0.05,
+            "target": 0.10,
+            "maximum": 0.20,
+        }
+    )
+    profiles = {
+        ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
+        ("US", "BBB"): {
+            "layer": "satellite",
+            "thesis_status": "valid",
+            "overlap_status": "clear",
+            "management_burden_status": "clear",
+            "holdability_status": "clear",
+            "etf_substitution_status": "not_applicable",
+        },
+        ("US", "CCC"): {"layer": "core", "thesis_status": "valid"},
+    }
+    result = evaluate_inspection(_projection(), {"state": "complete", "points": []}, policy, profiles)
+    ccc = next(item for item in result["instruments"] if item["identity"] == "US/CCC")
+    assert ccc["current"] == 0.0
+    assert ccc["priority"] == "P3"
+    assert ccc["suggestion"]["code"] == "review_increase_regular_purchase_allocation"
+
+
+def test_overweight_precedes_secondary_thesis_review_for_non_action_unit():
+    policy = _policy()
+    policy["instruments"][0]["maximum"] = 0.85
+    profiles = {
+        ("US", "AAA"): {
+            "layer": "core",
+            "thesis_status": "watch",
+            "overlap_status": "review",
+        },
+        ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
+    }
+    result = evaluate_inspection(_projection(aaa=0.95, bbb=0.05), {"state": "complete", "points": []}, policy, profiles)
+    aaa = next(item for item in result["instruments"] if item["identity"] == "US/AAA")
+    assert aaa["status"] == "Review"
+    assert aaa["priority"] == "P2"
+    assert aaa["suggestion"]["code"] == "review_overweight_normalization"
