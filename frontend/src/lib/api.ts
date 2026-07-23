@@ -19,6 +19,7 @@ export type Evaluation = {
   result?: {
     engine_version?: string;
     account?: JsonObject;
+    account_profit_loss?: JsonObject;
     state?: string;
     source?: Record<string, unknown>;
     performance?: JsonObject;
@@ -26,7 +27,9 @@ export type Evaluation = {
     layers?: Array<JsonObject>;
     instruments?: Array<JsonObject>;
     review_queue?: Array<JsonObject>;
+    evidence_refs?: JsonObject;
   };
+  market_evidence?: JsonObject;
   snapshot_id?: number;
 };
 

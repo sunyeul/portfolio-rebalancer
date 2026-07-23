@@ -95,3 +95,50 @@ def test_market_context_passes_policy_timestamp_to_cooling_gate(monkeypatch, tmp
 
     assert response.status_code == 200
     assert captured["last_change_at"] == active["created_at"]
+
+
+def test_api_returns_persisted_phase5_evidence_without_reclassification(monkeypatch, tmp_path):
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "api.sqlite3"))
+    evaluation = {
+        "id": 11,
+        "snapshot_id": 7,
+        "policy_version_id": 3,
+        "result": {
+            "state": "complete",
+            "account_profit_loss": {
+                "status": "Review",
+                "drawdown": {"state": "complete", "current": -0.16},
+            },
+            "review_queue": [
+                {
+                    "identity": "US/AAA",
+                    "status": "Action",
+                    "triggers": ["broken_thesis_and_hard_maximum_breach"],
+                }
+            ],
+        },
+        "market_evidence": {"US/AAA": {"state": "complete"}},
+    }
+    monkeypatch.setattr("api.app.latest_evaluation_run", lambda: evaluation)
+    monkeypatch.setattr(
+        "api.app.list_profiles",
+        lambda: [
+            {
+                "market_country": "US",
+                "symbol": "AAA",
+                "overlap_status": "review",
+                "management_burden_status": "clear",
+                "holdability_status": "unknown",
+                "etf_substitution_status": "not_applicable",
+                "review_factors_note": "review",
+            }
+        ],
+    )
+    client = TestClient(create_app())
+
+    inspection = client.get("/api/inspection").json()
+    profiles = client.get("/api/profiles").json()
+
+    assert inspection["data"]["evaluation"]["result"]["review_queue"][0]["status"] == "Action"
+    assert inspection["data"]["evaluation"]["market_evidence"]["US/AAA"]["state"] == "complete"
+    assert profiles["data"]["profiles"][0]["overlap_status"] == "review"

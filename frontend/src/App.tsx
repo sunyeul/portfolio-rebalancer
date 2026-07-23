@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, BarChart3, CircleAlert, CircleCheck, Layers3, PanelLeftClose, PanelLeftOpen, RefreshCw, ShieldCheck, WalletCards, type LucideIcon } from "lucide-react";
 import { Evaluation, getJson, type JsonObject, type PerformanceRun } from "./lib/api";
-import { finiteNumber, formatKrw as money, formatPercent as percent, formatSignedKrw as signedMoney, supportedRate } from "./lib/presentation";
+import { evidenceValue, finiteNumber, formatKrw as money, formatPercent as percent, formatSignedKrw as signedMoney, supportedRate } from "./lib/presentation";
 
 const statusLabel: Record<string, string> = { OK: "OK", Watch: "Watch", Review: "Review", Action: "Action" };
 const sidebarStorageKey = "ips-pilot.sidebar-collapsed";
@@ -132,14 +132,14 @@ function LayerReviewTable({ layers, instruments, layerByIdentity }: { layers: Js
   </section>;
 }
 
-const queueKindLabel: Record<string, string> = { source: "원천", cash: "현금", layer: "레이어", instrument: "종목", performance: "성과" };
+const queueKindLabel: Record<string, string> = { source: "원천", cash: "현금", layer: "레이어", instrument: "종목", performance: "성과", account_risk: "계좌 리스크" };
 
 function ReviewQueue({ items, compact = false }: { items: JsonObject[]; compact?: boolean }) {
   return <section className={`review-queue-section${compact ? " compact" : " full"}`}>
     <div className="queue-heading"><div><p className="eyebrow">REVIEW QUEUE</p><h2>{compact ? "우선 확인 항목" : "전체 확인 항목"}</h2></div><span className="queue-count">{items.length}</span></div>
     {compact && <p className="review-queue-order">백엔드 순서 · 최대 3개</p>}
     {items.length === 0 && <div className="queue-empty"><CircleCheck size={18} />현재 확인 항목 없음</div>}
-    <div className="review-queue-list">{items.map((item, index) => <article className="queue-item" key={`${String(item.kind)}-${String(item.identity)}-${index}`}><div className="queue-top"><Status value={item.status} /><small>{queueKindLabel[String(item.kind)] ?? String(item.kind ?? "근거")}</small></div><strong>{String(item.identity ?? "—")}</strong><p>{String(item.meaning ?? "점검 의미 근거가 필요합니다.")}</p><span>{String(item.verification_task ?? "확인 과제 근거가 필요합니다.")}</span></article>)}</div>
+    <div className="review-queue-list">{items.map((item, index) => <article className="queue-item" key={`${String(item.kind)}-${String(item.identity)}-${index}`}><div className="queue-top"><Status value={item.status} /><small>{queueKindLabel[String(item.kind)] ?? String(item.kind ?? "근거")}</small></div><strong>{String(item.identity ?? "—")}</strong><p>{String(item.meaning ?? "점검 의미 근거가 필요합니다.")}</p><span>{String(item.verification_task ?? "확인 과제 근거가 필요합니다.")}</span>{item.evidence_refs !== undefined && <details className="evidence-detail"><summary>근거 연결</summary><pre>{String(JSON.stringify(item.evidence_refs as JsonObject, null, 2) ?? "")}</pre></details>}</article>)}</div>
     <div className="queue-footer">이 목록은 읽기 전용 검사 신호이며, 상태와 순서는 백엔드 평가를 그대로 따릅니다.</div>
   </section>;
 }
@@ -168,7 +168,7 @@ function TrendChart({ points, valueKey, label }: { points: JsonObject[]; valueKe
   </div>;
 }
 
-function PerformancePanel({ summary, run }: { summary?: JsonObject; run: PerformanceRun | null }) {
+function PerformancePanel({ summary, run, accountProfitLoss }: { summary?: JsonObject; run: PerformanceRun | null; accountProfitLoss?: JsonObject }) {
   const [view, setView] = useState<PerformanceView>("ytd");
   const points = Array.isArray(run?.points) ? run.points : [];
   const evaluablePoints = points.filter(point => point.evaluation_state === "evaluable");
@@ -185,14 +185,17 @@ function PerformancePanel({ summary, run }: { summary?: JsonObject; run: Perform
     holding: { label: "보유 평가손익률", value: holdingReturn, description: "최근 평가 포인트의 매입원가 기준 보유 손익률" },
   };
   const selectedView = viewDetails[view];
+  const drawdown = (accountProfitLoss?.drawdown ?? {}) as JsonObject;
+  const realizedSupported = accountProfitLoss?.realized_pnl_supported === true;
   return <>
     <section className="section"><div className="section-title"><div><p className="eyebrow">ACCOUNT PERFORMANCE</p><h2>성과 추이</h2></div><span className="denominator">Toss 스냅샷 기반</span></div><div className="performance-view-selector" role="tablist" aria-label="성과 보기"><span className="performance-view-label">보기</span>{(Object.keys(viewDetails) as PerformanceView[]).map(key => <button key={key} type="button" role="tab" aria-selected={view === key} className={`performance-view-button${view === key ? " active" : ""}`} onClick={() => setView(key)}>{viewDetails[key].label}</button>)}</div><div className="chart-grid"><article className="chart-card"><div className="card-heading"><span>계좌 평가금</span><span>{String(summary?.history_days ?? 0)}일</span></div><TrendChart points={evaluablePoints} valueKey="total_value_krw" label="평가금" /><small>평가 가능 포인트만 연결하며, 비평가 구간은 표에서 상태를 확인합니다.</small></article><article className="chart-card"><div className="card-heading"><span>{selectedView.label}</span><Status value={summary?.status} /></div><div className="chart-number">{selectedView.value === null ? "산출 전" : percent(selectedView.value)}</div><small>{selectedView.description}{view === "ytd" ? ` · 목표 ${percent(summary?.annual_target)}` : ""}</small></article></div></section>
     <section className="section"><div className="section-title"><div><p className="eyebrow">PERFORMANCE POINTS</p><h2>관측 포인트</h2></div><span className="denominator">최근 8개 · 원금·평가금·TWR</span></div><div className="table-wrap"><table><thead><tr><th>시각</th><th>평가금</th><th>추적 원금</th><th>구간 TWR</th><th>상태</th></tr></thead><tbody>{visiblePoints.map((point, index) => <tr key={`${String(point.snapshot_id)}-${index}`}><td>{String(point.point_at ?? "—")}</td><td>{money(point.total_value_krw)}</td><td>{money(point.tracking_principal_krw)}</td><td>{percent(point.interval_twr)}</td><td>{String(point.evaluation_state ?? "—")}</td></tr>)}</tbody></table></div></section>
+    <section className="section"><div className="section-title"><div><p className="eyebrow">RISK EVIDENCE</p><h2>손익·drawdown 근거</h2></div><span className="denominator">손익만으로 상태를 승격하지 않음</span></div><div className="risk-fact-grid"><article className="fact-card"><span>계좌 현재 drawdown</span><strong>{evidenceValue(drawdown.current, drawdown.state, percent)}</strong><small>최대 {evidenceValue(drawdown.maximum, drawdown.state, percent)} · {String(drawdown.state ?? "자료 없음")}</small></article><article className="fact-card"><span>실현손익</span><strong>{realizedSupported ? money(accountProfitLoss?.actual_realized_pnl_krw) : "자료 없음"}</strong><small>{realizedSupported ? "Toss 체결 근거 지원" : "체결 근거 없음 · 0으로 간주하지 않음"}</small></article><article className="fact-card"><span>계좌 보유 평가손익</span><strong>{money(accountProfitLoss?.unrealized_pnl_krw)}</strong><small>원가 기준 수익률 {percent(accountProfitLoss?.unrealized_return)}</small></article></div></section>
   </>;
 }
 
 function InstrumentTable({ instruments, layerByIdentity }: { instruments: JsonObject[]; layerByIdentity?: Map<string, string> }) {
-  return <div className="table-wrap"><table><thead><tr><th>종목</th><th>레이어</th><th>현재</th><th>목표</th><th>갭</th><th>손익 근거</th><th>상태</th></tr></thead><tbody>{instruments.map(row => <tr key={String(row.identity)}><td><strong>{String(row.symbol ?? row.identity)}</strong><small>{String(row.market_country ?? "")}</small></td><td>{String(row.layer ?? layerByIdentity?.get(String(row.identity)) ?? "미분류")}</td><td>{percent(row.current)}</td><td>{percent(row.target)}</td><td>{percent(row.gap)}</td><td>{money(row.unrealized_pnl_krw)}</td><td><Status value={row.status} /></td></tr>)}</tbody></table></div>;
+  return <div className="table-wrap"><table><thead><tr><th>종목</th><th>레이어</th><th>현재</th><th>목표</th><th>갭</th><th>평가손익률</th><th>현재 DD</th><th>factor</th><th>상태</th></tr></thead><tbody>{instruments.map(row => { const evidence = (row.evidence ?? {}) as JsonObject; const drawdown = (evidence.drawdown ?? {}) as JsonObject; const factors = [row.overlap_status, row.management_burden_status, row.holdability_status, row.etf_substitution_status].filter(value => typeof value === "string" && value !== "unknown").join(" · "); return <tr key={String(row.identity)}><td><strong>{String(row.symbol ?? row.identity)}</strong><small>{String(row.market_country ?? "")}</small></td><td>{String(row.layer ?? layerByIdentity?.get(String(row.identity)) ?? "미분류")}</td><td>{percent(row.current)}</td><td>{percent(row.target)}</td><td>{percent(row.gap)}</td><td>{evidenceValue(evidence.unrealized_return, evidence.state, percent)}</td><td>{evidenceValue(drawdown.current, drawdown.state, percent)}</td><td><small className="factor-summary">{factors || "미검토"}</small></td><td><Status value={row.status} /></td></tr>; })}</tbody></table></div>;
 }
 
 function AllocationPanel({ cash, layers, instruments, layerByIdentity }: { cash?: JsonObject | null; layers: JsonObject[]; instruments: JsonObject[]; layerByIdentity?: Map<string, string> }) {
@@ -207,7 +210,7 @@ function ProfilesPanel({ profiles, policy }: { profiles: JsonObject[]; policy: J
   const policyBody = (policy?.policy ?? {}) as JsonObject;
   const policyInstruments = Array.isArray(policyBody.instruments) ? policyBody.instruments as JsonObject[] : [];
   const targets = new Map(policyInstruments.map(item => [`${String(item.market_country ?? "").toUpperCase()}/${String(item.symbol ?? "").toUpperCase()}`, item]));
-  return <section className="section"><div className="section-title"><div><p className="eyebrow">TOSS INSTRUMENT PROFILES</p><h2>프로필과 정책 범위</h2></div><span className="denominator">정책 버전 #{String(policy?.version ?? "—")} · 읽기 전용</span></div><div className="table-wrap"><table><thead><tr><th>종목</th><th>레이어</th><th>논지 상태</th><th>목표 범위</th><th>메모</th></tr></thead><tbody>{profiles.map(profile => { const identity = `${String(profile.market_country ?? "").toUpperCase()}/${String(profile.symbol ?? "").toUpperCase()}`; const target = targets.get(identity); return <tr key={identity}><td><strong>{String(profile.symbol ?? "—")}</strong><small>{String(profile.market_country ?? "")}</small></td><td>{String(profile.layer ?? "미분류")}</td><td>{String(profile.thesis_status ?? "unknown")}</td><td>{percent(target?.minimum)}–{percent(target?.maximum)} · 목표 {percent(target?.target)}</td><td>{String(profile.thesis_note ?? "—")}</td></tr>; })}</tbody></table></div></section>;
+  return <section className="section"><div className="section-title"><div><p className="eyebrow">TOSS INSTRUMENT PROFILES</p><h2>프로필과 정책 범위</h2></div><span className="denominator">정책 버전 #{String(policy?.version ?? "—")} · 읽기 전용</span></div><div className="table-wrap"><table><thead><tr><th>종목</th><th>레이어</th><th>논지 상태</th><th>중복</th><th>부담</th><th>보유 가능성</th><th>ETF 대체</th><th>목표 범위</th><th>메모</th></tr></thead><tbody>{profiles.map(profile => { const identity = `${String(profile.market_country ?? "").toUpperCase()}/${String(profile.symbol ?? "").toUpperCase()}`; const target = targets.get(identity); return <tr key={identity}><td><strong>{String(profile.symbol ?? "—")}</strong><small>{String(profile.market_country ?? "")}</small></td><td>{String(profile.layer ?? "미분류")}</td><td>{String(profile.thesis_status ?? "unknown")}</td><td>{String(profile.overlap_status ?? "unknown")}</td><td>{String(profile.management_burden_status ?? "unknown")}</td><td>{String(profile.holdability_status ?? "unknown")}</td><td>{String(profile.etf_substitution_status ?? "unknown")}</td><td>{percent(target?.minimum)}–{percent(target?.maximum)} · 목표 {percent(target?.target)}</td><td>{String(profile.review_factors_note || profile.thesis_note || "—")}</td></tr>; })}</tbody></table></div></section>;
 }
 
 function SourcePanel({ health, snapshots, marketContext, evaluation }: { health: JsonObject | null; snapshots: JsonObject[]; marketContext: JsonObject | null; evaluation: Evaluation | null }) {
@@ -283,6 +286,8 @@ export default function App() {
 
   const result = evaluation?.result;
   const queue = result?.review_queue ?? [];
+  const actionItems = queue.filter(item => item.status === "Action");
+  const highestQueueStatus = queue[0]?.status ?? "OK";
   const layers = result?.layers ?? [];
   const instruments = result?.instruments ?? [];
   const performance = result?.performance as Record<string, unknown> | undefined;
@@ -331,11 +336,12 @@ export default function App() {
             <article className="fact-card"><span>계좌 평가금</span><strong>{money(accountValue)}</strong><small>{principalDelta === null ? "추적 원금 대비 근거 —" : `추적 원금 대비 ${signedMoney(principalDelta)}`}</small></article>
             <article className="fact-card"><span>보유 평가손익률</span><strong>{percent(holdingUnrealizedReturn)}</strong><small>보유 평가손익 {signedMoney(holdingUnrealizedPnl)} · 매입원가 기준</small></article>
             <article className="fact-card"><span>누적 계좌 TWR</span><strong>{percent(performance?.cumulative_twr)}</strong><small>추적 시작 이후 현금흐름을 분리한 계좌 수익률</small></article>
+            <article className="fact-card"><span>예외 검토</span><strong>{actionItems.length.toLocaleString()}건</strong><small>최고 상태 <Status value={highestQueueStatus} /> · 백엔드 Review Queue 기준</small></article>
           </section>
           <div className="overview-hero"><AllocationOverview cash={result.cash} layers={layers} /><AnnualTargetCard performance={performance} /></div>
           <CashReserveOverview cash={result.cash} cashValue={account?.cash_value_krw} />
           <div className="overview-review-grid"><LayerReviewTable layers={layers} instruments={sortedInstruments} layerByIdentity={layerByIdentity} /><ReviewQueue items={queue.slice(0, 3)} compact /></div>
-        </> : activeTab === "performance" ? <PerformancePanel summary={performance} run={performanceRun} /> : activeTab === "allocation" ? <AllocationPanel cash={result.cash} layers={layers} instruments={sortedInstruments} layerByIdentity={layerByIdentity} /> : activeTab === "review" ? <ReviewQueue items={queue} /> : activeTab === "profiles" ? <ProfilesPanel profiles={profiles} policy={policy} /> : <SourcePanel health={health} snapshots={snapshots} marketContext={marketContext} evaluation={evaluation} />}
+        </> : activeTab === "performance" ? <PerformancePanel summary={performance} run={performanceRun} accountProfitLoss={result.account_profit_loss} /> : activeTab === "allocation" ? <AllocationPanel cash={result.cash} layers={layers} instruments={sortedInstruments} layerByIdentity={layerByIdentity} /> : activeTab === "review" ? <ReviewQueue items={queue} /> : activeTab === "profiles" ? <ProfilesPanel profiles={profiles} policy={policy} /> : <SourcePanel health={health} snapshots={snapshots} marketContext={marketContext} evaluation={evaluation} />}
       </>}
     </main>
   </div>;
