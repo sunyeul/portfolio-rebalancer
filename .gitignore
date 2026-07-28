@@ -15,15 +15,11 @@ wheels/
 !.env.example
 
 # Frontend dependencies and build output
-/node_modules/
 frontend/node_modules/
-frontend/dist/
 frontend/tsconfig.tsbuildinfo
 
-# Local scratch and research output
-/.codex_tmp/
-/mlruns/
-/private/
+# Local research output
+research/qlib_validation/artifacts/
 
 # Local SQLite data
 data/*.sqlite3
@@ -36,4 +32,3 @@ data/stream_store/
 .serena/
 .tokensave/
 .superpowers/
-research/qlib_validation/artifacts/
