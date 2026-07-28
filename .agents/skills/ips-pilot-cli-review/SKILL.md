@@ -1,75 +1,62 @@
 ---
 name: ips-pilot-cli-review
-description: Use when Codex needs to review an IPS Pilot portfolio snapshot through the v2 CLI, including latest snapshot checks, Review Queue summaries, risk checks, and safe agent-facing summaries.
+description: Use when reviewing a saved IPS Pilot Toss inspection through the CLI, including latest evaluations, Review Queue summaries, risk context, or a safe Korean agent brief.
 ---
 
 # IPS Pilot CLI Review
 
-## Purpose
+Use persisted inspection output as evidence, never as trading advice. Pair with
+`ips-judgment-filter` whenever discussing allocation, drawdown, regular
+purchases, or exceptional intervention.
 
-Use the IPS Pilot CLI as the source of truth for saved portfolio reviews. Summaries are inspection signals only, not trading advice.
+## Choose the surface
 
-Pair with `ips-judgment-filter` whenever the response includes buy, sell, DCA, drawdown, or allocation language.
+- Saved evaluation: `uv run ips-pilot inspection show --latest` or
+  `--run-id <id>`. `--latest` is the newest evaluation by `created_at`, then
+  `id`; report both `run_id` and `snapshot_id`.
+- Observed Toss snapshot: `uv run ips-pilot toss-snapshots --latest`. Do not
+  treat its result as the latest evaluation without comparing `snapshot_id`.
+- Proposed policy: `inspection preview --policy-file <path>` evaluates the
+  supplied policy and does not create an evaluation run.
+- New or refreshed evaluation: `inspection run` can persist or reuse an
+  evaluation. Run it only when the user explicitly asks to create or refresh
+  an evaluation.
 
-## Workflow
+`toss-snapshots`, `inspection preview`, and `inspection show` initialize the
+local database before reading. If schema migration, database creation, or
+default-policy seeding is not authorized, explain that no state-free CLI read
+surface exists and request permission instead.
 
-1. If the portfolio is unclear, run `uv run ips-pilot portfolios list`.
-2. If the snapshot is unclear, run `uv run ips-pilot snapshots list --portfolio-id <portfolio_id>`.
-3. For `latest`, choose the newest `created_at`; if missing or tied, choose the largest `id`. Always state the actual `snapshot_id`.
-4. Use `uv run ips-pilot agent-brief --snapshot-id <snapshot_id>` by default.
-5. Use `review-queue`, `risk`, or `evaluate` only when the user asks for that narrower or fuller surface.
+## Read the contract
 
-## Current Output Contract
+The CLI emits one JSON object. Check `ok`, `error`, and
+`contract_supported` before interpreting `evaluation`. A supported persisted
+evaluation contains `run_id`, `snapshot_id`, `state`, and `evaluation`; read
+the inspection result from `evaluation.result`.
 
-The CLI prints one JSON object to stdout. Failures must remain machine-readable.
+Use these result fields as separate axes:
 
-For `agent-brief`, read `input`, `evaluation_period`, `status_summary`, `review_queue`, `guardrails`, `warnings`, and `error`. `status_summary` is the combined layer plus asset count for `OK`, `Watch`, `Review`, and `Action`.
+- `allocation_state`: whether allocation is evaluable.
+- `status`: exactly `OK`, `Watch`, `Review`, or `Action`.
+- `priority`: when to revisit the item (`P1`–`P4`).
+- `queue_class`: `blocking`, `adjustment`, or `observation`.
+- `suggestion`: the single adjustment direction, never an order.
 
-For separate layer and asset records, run `evaluate` and read `layer_evaluations`, `asset_evaluations`, `review_queue`, `journal_draft`, `warnings`, and `guardrails`.
+Each `review_queue` item contains `priority`, `priority_label`, `queue_class`,
+`kind`, `identity`, `status`, `triggers`, `suggestion`, `meaning`,
+`verification_task`, and `evidence_refs`. Blocking items have null
+priority and suggestion. Do not infer allocation metrics or a trade from a
+queue item; inspect the linked cash, layer, or instrument record when needed.
 
-For `risk`, read `risk_review`, not `review_queue`.
+## Response shape
 
-Review Queue items use `level`, `name`, `parent_layer`, `status`, `triggered_by`, `metrics_snapshot`, and `suggested_next_step`.
+1. State `run_id`, `snapshot_id`, and whether the contract is supported.
+2. Summarize the four status counts and material allocation state.
+3. For non-`OK` findings, give the raw trigger, plain Korean meaning, the
+   adjustment direction, and the verification task.
+4. End with verification or future regular-purchase-policy review—not a buy,
+   sell, quantity, price, or execution instruction.
 
-## Interpretation
-
-Keep raw labels for traceability, but explain them in human-readable language. Do not show only `triggered_by` codes unless the user asks for raw output.
-
-| Status | Meaning |
-| --- | --- |
-| `OK` | Inside the IPS inspection frame |
-| `Watch` | Soft warning for next review |
-| `Review` | Human verification item |
-| `Action` | Inspect possible exceptional intervention; not permission to trade |
-
-Common trigger explanations:
-
-| Trigger | Human explanation |
-| --- | --- |
-| `target_gap_outside_tolerance` | Current weight is meaningfully away from the IPS target; review future regular-purchase policy. |
-| `max_weight_exceeded` | Exposure is above the layer or asset cap; inspect allocation and risk concentration. |
-| `risk_contribution_high` | This unit contributes a large share of portfolio risk; check whether the burden is intentional. |
-| `mdd_exceeded` | Drawdown exceeded the configured tolerance; verify thesis and risk limit fit. |
-| `volatility_exceeded` | Volatility exceeded the configured tolerance; review whether this still fits the layer role. |
-| `thesis_watch` | Thesis is marked watch; verify whether the reason to hold remains strong enough. |
-| `efficiency_below_threshold` | Risk-adjusted efficiency is weak for this frame; use as a review prompt, not a trade signal. |
-| `high_burden` | Position or layer has high management burden; inspect whether it is worth the complexity. |
-| `insufficient_performance_data` | Data is not enough for a strong judgment; verify data before interpreting the status. |
-
-When a trigger is unknown, preserve the raw label and explain only what can be inferred from the surrounding metrics.
-
-## Response Contract
-
-1. State the evaluated `snapshot_id`.
-2. State the evaluation period.
-3. Summarize `status_summary`, or layer/asset records when using `evaluate`.
-4. List Review Queue or risk items with status, raw trigger labels, human explanation, and suggested next step.
-5. End with verification work, not trading instructions.
-
-Use concise Korean by default when the user writes in Korean.
-
-## Safety Rules
-
-- Do not create buy, sell, execute, order-size, or execution flags.
-- Do not edit snapshots, config, journal entries, or persistent state unless explicitly asked.
-- Treat stale, missing, or ambiguous data as a reason to verify or observe.
+Missing, stale, unreconciled, or incomplete source data is a blocking
+verification item. `Action` means inspect a possible exceptional intervention;
+it does not authorize a trade.

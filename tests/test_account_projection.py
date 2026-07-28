@@ -9,7 +9,6 @@ from integrations.toss.observation import (
 from services.account_projection import AccountProjectionError, build_account_projection
 from storage.account_observation_store import insert_snapshot
 from storage.database import initialize_database
-from storage.instrument_profile_store import upsert_profile
 
 
 def _holding(
@@ -74,16 +73,13 @@ def complete_snapshot(monkeypatch, tmp_path):
     return insert_snapshot(_snapshot())
 
 
-@pytest.fixture
-def profiled_aapl(complete_snapshot):
-    upsert_profile("AAPL", "US", "core", "valid")
-    return complete_snapshot
-
-
 def test_projection_uses_explicit_gross_and_invested_denominators(
-    complete_snapshot, profiled_aapl
+    complete_snapshot,
 ):
-    result = build_account_projection(snapshot_id=complete_snapshot["id"])
+    result = build_account_projection(
+        snapshot_id=complete_snapshot["id"],
+        layer_map={("US", "AAPL"): "core"},
+    )
 
     assert result["snapshot_id"] == complete_snapshot["id"]
     assert result["cash_weight_gross"] == pytest.approx(0.1)
@@ -183,13 +179,13 @@ def test_zero_invested_value_with_positive_holding_is_rejected(monkeypatch, tmp_
         build_account_projection(snapshot_id=snapshot["id"])
 
 
-def test_profile_layer_weights_and_unclassified_list_are_deterministic(
+def test_policy_layer_weights_and_unclassified_list_are_deterministic(
     complete_snapshot,
 ):
-    upsert_profile("005930", "KR", "satellite", "watch")
-    upsert_profile("AAPL", "US", "core", "valid")
-
-    result = build_account_projection(snapshot_id=complete_snapshot["id"])
+    result = build_account_projection(
+        snapshot_id=complete_snapshot["id"],
+        layer_map={("KR", "005930"): "satellite", ("US", "AAPL"): "core"},
+    )
 
     assert result["unclassified"] == []
     assert result["classification_coverage_invested"] == pytest.approx(1.0)

@@ -84,6 +84,10 @@ def _projection(cash=0.15, aaa=0.8, bbb=0.2):
     }
 
 
+def _layer_map():
+    return {("US", "AAA"): "core", ("US", "BBB"): "satellite"}
+
+
 def _risk_evidence(
     *,
     aaa_drawdown=-0.05,
@@ -145,10 +149,7 @@ def test_ytd_without_year_start_point_is_watch_and_cumulative_return_is_separate
             ],
         },
         _policy(),
-        {
-            ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
-            ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
-        },
+        _layer_map(),
     )
     assert result["performance"]["cumulative_twr"] == pytest.approx(0.05)
     assert result["performance"]["annual_twr"] is None
@@ -184,10 +185,7 @@ def test_account_result_exposes_investment_principal_profit_and_return():
             ],
         },
         _policy(),
-        {
-            ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
-            ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
-        },
+        _layer_map(),
     )
 
     assert result["account"]["investment_principal_krw"] == 1000.0
@@ -196,34 +194,35 @@ def test_account_result_exposes_investment_principal_profit_and_return():
     assert "tracking_principal_krw" not in result["account"]
 
 
-def test_broken_thesis_and_hard_maximum_is_action_without_order_semantics():
+def test_metadata_does_not_create_action_without_allocation_or_risk_breach():
     projection = _projection(cash=0.15, aaa=0.95, bbb=0.05)
     result = evaluate_inspection(
         projection,
         {"state": "complete", "input_fingerprint": "perf", "points": []},
         _policy(),
-        {
-            ("US", "AAA"): {"layer": "core", "thesis_status": "broken"},
-            ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
-        },
+        _layer_map(),
     )
     aaa = next(item for item in result["instruments"] if item["symbol"] == "AAA")
-    assert aaa["status"] == "Action"
+    assert aaa["status"] == "Review"
     encoded = str(result).lower()
     assert "buy" not in encoded and "sell" not in encoded and "execute" not in encoded
 
 
-def test_missing_profile_is_review_and_cash_uses_gross_denominator():
-    result = evaluate_inspection(_projection(cash=0.05), None, _policy(), {})
+def test_missing_policy_layer_is_review_and_cash_uses_gross_denominator():
+    projection = _projection(cash=0.05)
+    projection["positions"][0]["layer"] = None
+    result = evaluate_inspection(projection, None, _policy(), {})
     assert result["allocation_state"] == "not_evaluable"
     assert result["cash"] is None
     assert result["instruments"] == []
     assert result["review_queue"][0]["queue_class"] == "blocking"
 
 
-def test_missing_profile_keeps_instrument_gaps_null():
+def test_missing_policy_layer_keeps_instrument_gaps_null():
+    projection = _projection()
+    projection["positions"][0]["layer"] = None
     result = evaluate_inspection(
-        _projection(),
+        projection,
         {"state": "complete", "points": []},
         _policy(),
         {},
@@ -239,10 +238,6 @@ def test_missing_profile_keeps_instrument_gaps_null():
 
 
 def test_trailing_return_does_not_compound_history_before_window():
-    profiles = {
-        ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
-        ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
-    }
     points = [
         {
             "point_at": "2024-12-31T00:00:00Z",
@@ -264,16 +259,12 @@ def test_trailing_return_does_not_compound_history_before_window():
         _projection(),
         {"state": "complete", "points": points},
         _policy("trailing_12_month_twr"),
-        profiles,
+        _layer_map(),
     )
     assert result["performance"]["annual_twr"] == pytest.approx(0.20)
 
 
 def test_ytd_return_compounds_from_the_calendar_year_anchor():
-    profiles = {
-        ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
-        ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
-    }
     points = [
         {
             "point_at": "2025-12-31T00:00:00Z",
@@ -292,7 +283,7 @@ def test_ytd_return_compounds_from_the_calendar_year_anchor():
         },
     ]
     result = evaluate_inspection(
-        _projection(), {"state": "complete", "points": points}, _policy(), profiles
+        _projection(), {"state": "complete", "points": points}, _policy(), _layer_map()
     )
     assert result["performance"]["ytd_twr"] == pytest.approx(0.10)
     assert result["performance"]["trailing_12m_twr"] is None
@@ -301,29 +292,11 @@ def test_ytd_return_compounds_from_the_calendar_year_anchor():
 
 
 def test_account_and_core_drawdown_are_reviewed_without_action():
-    profiles = {
-        ("US", "AAA"): {
-            "layer": "core",
-            "thesis_status": "valid",
-            "overlap_status": "unknown",
-            "management_burden_status": "unknown",
-            "holdability_status": "unknown",
-            "etf_substitution_status": "unknown",
-        },
-        ("US", "BBB"): {
-            "layer": "satellite",
-            "thesis_status": "valid",
-            "overlap_status": "clear",
-            "management_burden_status": "clear",
-            "holdability_status": "clear",
-            "etf_substitution_status": "not_applicable",
-        },
-    }
     result = evaluate_inspection(
         _projection(),
         {"state": "complete", "points": []},
         _policy(),
-        profiles,
+        _layer_map(),
         _risk_evidence(aaa_drawdown=-0.26, account_drawdown=-0.16),
     )
 
@@ -335,100 +308,54 @@ def test_account_and_core_drawdown_are_reviewed_without_action():
     assert all(item["status"] != "Action" for item in result["instruments"])
 
 
-def test_satellite_drawdown_and_unknown_factors_are_one_review_unit():
-    profiles = {
-        ("US", "AAA"): {
-            "layer": "core",
-            "thesis_status": "valid",
-        },
-        ("US", "BBB"): {
-            "layer": "satellite",
-            "thesis_status": "valid",
-            "overlap_status": "unknown",
-            "management_burden_status": "review",
-            "holdability_status": "unknown",
-            "etf_substitution_status": "unknown",
-        },
-    }
+def test_satellite_drawdown_is_review():
     result = evaluate_inspection(
         _projection(),
         {"state": "complete", "points": []},
         _policy(),
-        profiles,
+        _layer_map(),
         _risk_evidence(bbb_drawdown=-0.21),
     )
 
     bbb = next(item for item in result["instruments"] if item["symbol"] == "BBB")
     assert bbb["status"] == "Review"
-    assert bbb["triggers"].count("management_burden_review") == 1
-    assert "overlap_unknown" in bbb["triggers"]
-    assert "holdability_unknown" in bbb["triggers"]
-    assert "etf_substitution_unknown" in bbb["triggers"]
+    assert bbb["triggers"] == ["strict_layer_drawdown_review_threshold"]
+    encoded = str(bbb).lower()
+    assert all(term not in encoded for term in ("overlap", "burden", "holdability", "substitution", "thesis"))
     queue_items = [item for item in result["review_queue"] if item["identity"] == "US/BBB"]
     assert len(queue_items) == 1
 
 
-def test_broken_thesis_requires_same_instrument_hard_maximum_for_action():
-    profiles = {
-        ("US", "AAA"): {
-            "layer": "core",
-            "thesis_status": "broken",
-            "overlap_status": "clear",
-            "management_burden_status": "clear",
-            "holdability_status": "clear",
-            "etf_substitution_status": "not_applicable",
-        },
-        ("US", "BBB"): {
-            "layer": "satellite",
-            "thesis_status": "valid",
-            "overlap_status": "clear",
-            "management_burden_status": "clear",
-            "holdability_status": "clear",
-            "etf_substitution_status": "not_applicable",
-        },
-    }
+def test_overweight_never_creates_action_without_explicit_backend_status():
     within_instrument_max = _policy()
     within_instrument_max["instruments"][0]["maximum"] = 0.99
     within = evaluate_inspection(
         _projection(aaa=0.95, bbb=0.05),
         {"state": "complete", "points": []},
         within_instrument_max,
-        profiles,
+        _layer_map(),
         _risk_evidence(aaa_pnl=-100.0),
     )
     aaa_within = next(item for item in within["instruments"] if item["symbol"] == "AAA")
-    assert aaa_within["status"] == "Review"
-    assert "broken_thesis_and_hard_maximum_breach" not in aaa_within["triggers"]
+    assert aaa_within["status"] == "OK"
 
     hard_breach = _policy()
     action = evaluate_inspection(
         _projection(aaa=0.95, bbb=0.05),
         {"state": "complete", "points": []},
         hard_breach,
-        profiles,
+        _layer_map(),
         _risk_evidence(aaa_pnl=-100.0),
     )
     aaa_action = next(item for item in action["instruments"] if item["symbol"] == "AAA")
-    assert aaa_action["status"] == "Action"
-    assert "broken_thesis_and_hard_maximum_breach" in aaa_action["triggers"]
+    assert aaa_action["status"] == "Review"
     encoded = str(action).lower()
     assert all(term not in encoded for term in ("buy", "sell", "execute"))
 
 
 def test_missing_performance_does_not_suppress_cash_or_allocation_suggestions():
     policy = _policy()
-    profiles = {
-        ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
-        ("US", "BBB"): {
-            "layer": "satellite",
-            "thesis_status": "valid",
-            "overlap_status": "clear",
-            "management_burden_status": "clear",
-            "holdability_status": "clear",
-            "etf_substitution_status": "not_applicable",
-        },
-    }
-    result = evaluate_inspection(_projection(cash=0.05), None, policy, profiles)
+    result = evaluate_inspection(_projection(cash=0.05), None, policy, _layer_map())
     assert result["allocation_state"] == "complete"
     assert result["performance"]["status"] == "Watch"
     assert result["account"]["investment_principal_krw"] is None
@@ -489,37 +416,24 @@ def test_configured_absent_instrument_uses_zero_current_weight():
             "maximum": 0.20,
         }
     )
-    profiles = {
-        ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
-        ("US", "BBB"): {
-            "layer": "satellite",
-            "thesis_status": "valid",
-            "overlap_status": "clear",
-            "management_burden_status": "clear",
-            "holdability_status": "clear",
-            "etf_substitution_status": "not_applicable",
-        },
-        ("US", "CCC"): {"layer": "core", "thesis_status": "valid"},
-    }
-    result = evaluate_inspection(_projection(), {"state": "complete", "points": []}, policy, profiles)
+    result = evaluate_inspection(
+        _projection(), {"state": "complete", "points": []}, policy, _layer_map()
+    )
     ccc = next(item for item in result["instruments"] if item["identity"] == "US/CCC")
     assert ccc["current"] == 0.0
     assert ccc["priority"] == "P3"
     assert ccc["suggestion"]["code"] == "review_increase_regular_purchase_allocation"
 
 
-def test_overweight_precedes_secondary_thesis_review_for_non_action_unit():
+def test_overweight_precedes_secondary_review_for_non_action_unit():
     policy = _policy()
     policy["instruments"][0]["maximum"] = 0.85
-    profiles = {
-        ("US", "AAA"): {
-            "layer": "core",
-            "thesis_status": "watch",
-            "overlap_status": "review",
-        },
-        ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
-    }
-    result = evaluate_inspection(_projection(aaa=0.95, bbb=0.05), {"state": "complete", "points": []}, policy, profiles)
+    result = evaluate_inspection(
+        _projection(aaa=0.95, bbb=0.05),
+        {"state": "complete", "points": []},
+        policy,
+        _layer_map(),
+    )
     aaa = next(item for item in result["instruments"] if item["identity"] == "US/AAA")
     assert aaa["status"] == "Review"
     assert aaa["priority"] == "P2"
@@ -529,57 +443,43 @@ def test_overweight_precedes_secondary_thesis_review_for_non_action_unit():
 def test_cash_shortfall_blocks_layer_and_instrument_p3_suggestions():
     policy = _policy()
     policy["instruments"][0]["minimum"] = 0.9
-    profiles = {
-        ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
-        ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
-    }
     result = evaluate_inspection(
         _projection(cash=0.05, aaa=0.75, bbb=0.25),
         {"state": "complete", "points": []},
         policy,
-        profiles,
+        _layer_map(),
     )
     assert result["cash"]["priority"] == "P1"
     assert result["cash"]["suggestion"]["code"] == "review_reduce_or_pause_regular_purchase_pace"
     assert all(item["priority"] != "P3" for item in result["adjustment_suggestions"])
 
 
-def test_unknown_thesis_underweight_requires_constraints_review():
+def test_underweight_allocation_review_uses_policy_layer_only():
     policy = _policy()
     policy["instruments"][0]["minimum"] = 0.9
-    profiles = {
-        ("US", "AAA"): {"layer": "core", "thesis_status": "unknown"},
-        ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
-    }
     result = evaluate_inspection(
         _projection(cash=0.15, aaa=0.75, bbb=0.25),
         {"state": "complete", "points": []},
         policy,
-        profiles,
+        _layer_map(),
     )
     aaa = next(item for item in result["instruments"] if item["identity"] == "US/AAA")
-    assert aaa["priority"] == "P2"
-    assert aaa["suggestion"]["code"] == "review_thesis_or_constraints"
-
-
-def test_missing_configured_profile_blocks_invested_universe_coverage():
-    policy = _policy()
-    policy["instruments"].append(
-        {
-            "market_country": "US",
-            "symbol": "CCC",
-            "layer": "core",
-            "minimum": 0.0,
-            "target": 0.05,
-            "maximum": 0.10,
-        }
+    assert aaa["priority"] == "P3"
+    assert aaa["suggestion"]["code"] == "review_increase_regular_purchase_allocation"
+    queue_item = next(
+        item for item in result["review_queue"] if item["identity"] == "US/AAA"
     )
-    profiles = {
-        ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
-        ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
-    }
+    assert "decision_detail" not in aaa
+    assert "decision_detail" not in queue_item
+
+
+def test_missing_configured_policy_instrument_blocks_invested_universe_coverage():
+    policy = _policy()
+    policy["instruments"] = [
+        item for item in policy["instruments"] if item["symbol"] != "AAA"
+    ]
     result = evaluate_inspection(
-        _projection(), {"state": "complete", "points": []}, policy, profiles
+        _projection(), {"state": "complete", "points": []}, policy
     )
     assert result["allocation_state"] == "not_evaluable"
     assert result["allocation_reason"] == "policy_coverage_incomplete"
@@ -599,13 +499,8 @@ def test_invalid_configured_target_blocks_invested_universe_coverage():
             "maximum": 0.20,
         }
     )
-    profiles = {
-        ("US", "AAA"): {"layer": "core", "thesis_status": "valid"},
-        ("US", "BBB"): {"layer": "satellite", "thesis_status": "valid"},
-        ("US", "CCC"): {"layer": "core", "thesis_status": "valid"},
-    }
     result = evaluate_inspection(
-        _projection(), {"state": "complete", "points": []}, policy, profiles
+        _projection(), {"state": "complete", "points": []}, policy, _layer_map()
     )
     assert result["allocation_state"] == "not_evaluable"
     assert result["allocation_reason"] == "policy_coverage_incomplete"

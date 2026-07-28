@@ -75,7 +75,7 @@ def database(monkeypatch, tmp_path):
     initialize_database()
 
 
-def test_baseline_requires_exact_current_complete_snapshot(database):
+def test_baseline_requires_current_complete_snapshot(database):
     snapshot = insert_snapshot(_snapshot())
 
     baseline = create_baseline(snapshot["id"], 8200000.0)
@@ -88,11 +88,12 @@ def test_baseline_requires_exact_current_complete_snapshot(database):
         create_baseline(snapshot["id"], 8200000.0)
 
 
-def test_baseline_rejects_mismatched_principal(database):
+def test_baseline_accepts_principal_independent_from_snapshot_value(database):
     snapshot = insert_snapshot(_snapshot())
 
-    with pytest.raises(PerformanceStorageError, match="does not match"):
-        create_baseline(snapshot["id"], 8200001.0)
+    baseline = create_baseline(snapshot["id"], 7000000.0)
+
+    assert baseline["initial_principal_krw"] == pytest.approx(7000000.0)
 
 
 def test_candidate_and_decision_are_append_only(database):

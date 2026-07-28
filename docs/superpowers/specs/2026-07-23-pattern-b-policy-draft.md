@@ -36,10 +36,10 @@
 - Satellite: AMZN, GOOGL, MU, NVDA, TSLA, GLD, 삼성전자, SK하이닉스, NBIS
 - Experiment: SOXL, SPCX
 
-SPY와 VOO의 지수 중복, 개별 위성 종목의 논지·중복·부담, Experiment의 레버리지·특수목적 노출은 활성화 전 확인 대상으로 남긴다. NBIS는 사용자의 정정대로 Satellite으로 반영했다.
+SPY와 VOO의 집중도, 개별 위성 종목의 성과·drawdown, Experiment의 레버리지·특수목적 노출은 활성화 전 관찰 대상으로 남긴다. NBIS는 사용자의 정정대로 Satellite으로 반영했다.
 
 ## 다음 운영 단계
 
-1. 현재 모든 프로필의 투자 논지 상태는 `unknown`이므로 논지·중복·부담·ETF 대체 가능성을 검토
+1. 정책의 `instruments[].layer`와 목표 범위를 검증하고 Toss 보유 커버리지를 확인
 2. 주간 관찰과 월간 점검에서 새 Toss 스냅샷을 기준으로 갭을 재계산
 3. 365일 이력이 쌓일 때까지 연간 수익률은 `Watch`로 관찰

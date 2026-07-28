@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Mapping
 
 from storage.account_observation_store import get_snapshot, latest_complete
-from storage.instrument_profile_store import profile_map
 
 
 TOLERANCE_KRW = 1.0
@@ -29,9 +28,23 @@ def _finite(value: Any, field: str) -> float:
     return number
 
 
+def layer_map_from_policy(policy: Mapping[str, Any] | None) -> dict[tuple[str, str], str]:
+    """Return the normalized instrument-layer map owned by one IPS policy."""
+    result: dict[tuple[str, str], str] = {}
+    for item in (policy or {}).get("instruments", []):
+        if not isinstance(item, Mapping):
+            continue
+        market_country = str(item.get("market_country", "")).strip().upper()
+        symbol = str(item.get("symbol", "")).strip().upper()
+        layer = str(item.get("layer", "")).strip().lower()
+        if market_country and symbol and layer in LAYERS:
+            result[(market_country, symbol)] = layer
+    return result
+
+
 def _project_complete_snapshot(
     snapshot: dict[str, Any],
-    profiles: dict[tuple[str, str], dict[str, Any]],
+    layer_map: Mapping[tuple[str, str], str],
 ) -> dict[str, Any]:
     total = _finite(snapshot["total_value_krw"], "total_value_krw")
     invested = _finite(snapshot["invested_value_krw"], "invested_value_krw")
@@ -78,7 +91,7 @@ def _project_complete_snapshot(
                 f"{symbol} market_value_krw must be nonnegative"
             )
         holding_total += market_value
-        profile = profiles.get((market_country, symbol))
+        layer = layer_map.get((market_country, symbol))
         position: dict[str, Any] = {
             "symbol": symbol,
             "name": holding.get("name"),
@@ -90,16 +103,14 @@ def _project_complete_snapshot(
             "profit_loss_krw": holding.get("profit_loss_krw"),
             "gross_weight": market_value / total,
             "invested_weight": market_value / invested if invested > 0 else None,
-            "layer": profile["layer"] if profile else None,
-            "thesis_status": profile["thesis_status"] if profile else None,
-            "thesis_note": profile["thesis_note"] if profile else None,
+            "layer": layer,
         }
         positions.append(position)
-        if profile is None:
+        if layer is None:
             unclassified.append({"market_country": market_country, "symbol": symbol})
         else:
             classified_value += market_value
-            layer_values[profile["layer"]] += market_value
+            layer_values[layer] += market_value
 
     if not math.isclose(holding_total, invested, abs_tol=TOLERANCE_KRW):
         raise AccountProjectionError("holding totals do not reconcile")
@@ -139,6 +150,7 @@ def _project_complete_snapshot(
 def build_account_projection(
     snapshot_id: int | None = None,
     account_alias: str = "toss-brokerage",
+    layer_map: Mapping[tuple[str, str], str] | None = None,
 ) -> dict[str, Any]:
     """Project one explicit or latest complete Toss snapshot."""
     snapshot = (
@@ -158,4 +170,4 @@ def build_account_projection(
         raise AccountProjectionError(
             f"snapshot {snapshot['id']} is not current evaluable"
         )
-    return _project_complete_snapshot(snapshot, profile_map(account_alias))
+    return _project_complete_snapshot(snapshot, layer_map or {})

@@ -1,152 +1,79 @@
 ---
 name: ips-judgment-filter
-description: Use when designing, reviewing, or implementing this portfolio rebalancer app's IPS-based investment judgment behavior, especially decisions about regular buying, core/satellite allocation, drawdown responses, immediate buys, sells, or conservative hold decisions.
+description: Use when designing, reviewing, or explaining IPS Pilot judgment about regular purchases, allocation, drawdowns, core/satellite/experiment roles, or exceptional human intervention.
 ---
 
 # IPS Judgment Filter
 
-## Purpose
+IPS Pilot is an inspection workbench, not a trading recommender. It can make a
+specific, evidence-based case for what a person should verify or reconsider;
+it must not create an order, size, side, price, or execution instruction.
 
-Keep IPS Pilot from becoming an automatic trading recommender. The app may
-inspect future regular-purchase policy, observation, thesis review, or
-exceptional human review, but it never places, sizes, or prepares an order.
+## Preserve the v2 frame
 
-## V2 Frame
-
-IPS Pilot evaluates Toss-observed allocation units while keeping `core`,
-`satellite`, and `experiment` first-class. Status vocabulary is exactly:
+Keep `core`, `satellite`, and `experiment` first-class. The only top-level
+statuses are:
 
 - `OK`: inside the inspection frame.
-- `Watch`: soft warning.
-- `Review`: human verification item.
-- `Action`: inspect possible exceptional intervention, not permission to trade.
+- `Watch`: a soft observation for the next review.
+- `Review`: a human verification item.
+- `Action`: inspect a possible exceptional intervention; never permission to
+  trade.
 
-The result contract has four independent axes. Never use one axis as a
-substitute for another:
+Do not add a fifth status to express detail. Use the independent result axes
+instead:
 
-- `allocation_state`: `complete`, `partial`, or `not_evaluable` describes
-  whether allocation can be judged. A valid all-cash account is `partial`: cash
-  can be judged, while layers and instruments are withheld because the invested
-  denominator is zero.
-- `status`: the four severity values above describe the inspection finding.
-- `priority`: `P1` through `P4` describe when to revisit an evaluable item, not
-  how severe its status is. The fixed mapping is `P1` = `다음 정기매수 전`,
-  `P2` = `이번 월간 점검`, `P3` = `다음 정기매수 배분 반영`, and `P4` =
-  `관찰 유지`.
-- `suggestion`: use only the closed review vocabulary
-  `review_increase_regular_purchase_pace`,
-  `review_reduce_or_pause_regular_purchase_pace`,
-  `review_increase_regular_purchase_allocation`,
-  `review_overweight_normalization`, `review_thesis_or_constraints`,
-  `inspect_exceptional_intervention`, and `hold_and_observe`. These labels are
-  inspection language, never order instructions.
+- `allocation_state`: `complete`, `partial`, or `not_evaluable`.
+- `priority`: `P1` before the next regular purchase, `P2` in the monthly
+  review, `P3` in the next regular-purchase allocation, or `P4` observe.
+- `queue_class`: `blocking`, `adjustment`, or `observation`.
+- `suggestion`: the backend-owned, user-visible adjustment direction.
 
-`review_queue` contains all non-`OK` diagnostics and uses queue classes
-`blocking`, `adjustment`, and `observation`. Blocking data-quality items have
-no priority and no suggestion. `adjustment_suggestions` is the result-first
-subset for cash, layer, and instrument allocation-policy review; performance
-and account-risk diagnostics remain in the queue unless they independently
-qualify as an allocation review.
+Use `suggestion` as the one action-level answer: secure cash by reducing or
+pausing future regular purchases, increase their pace when cash is excessive,
+increase an underweight allocation, normalize an overweight allocation, hold
+and observe, or inspect a possible exceptional intervention. It adds no order
+side, quantity, price, or execution authority.
 
-## Decision Posture
+## Judgment posture
 
-The default adjustment mechanism is future regular-purchase policy, not
-immediate trading.
+Use the normalized Toss snapshot and persisted policy as the only factual
+source. Explain the raw trigger, its IPS meaning, the adjustment direction,
+and the next verification task in plain Korean.
 
-- Underweight exposure: inspect whether future regular purchases can increase.
-- Overweight or higher-risk exposure: inspect whether future buying can reduce
-  or pause before considering a sale.
-- Weak data, unclear classification, or low conviction: prefer observe, verify
-  data, or review thesis.
-- Immediate buying or selling is exceptional and requires explicit human
-  judgment.
+- Underweight exposure can justify reviewing future regular-purchase allocation
+  when the source and cash policy support it.
+- Overweight or higher-risk exposure should first prompt reduced/paused future
+  regular purchases or overweight normalization review, not a sell instruction.
+- Cash is a strategy asset: assess it against gross-account weight; assess
+  layers and instruments against invested-account weight.
+- Performance, gains, losses, and drawdown are evidence for observation or
+  risk review. They are not standalone trade triggers.
+- Missing, stale, unreconciled, or incomplete source data is blocking:
+  `allocation_state=not_evaluable`, null priority, and no suggestion.
 
-Cash is a strategy asset, not a fourth investment layer. Evaluate cash as a
-gross-account weight against its policy band; evaluate layers and instruments
-against the invested-account denominator. A cash breach is an allocation
-checkpoint and `Review`, not `Action`: below the minimum is `P1` and means
-reduce or pause future regular-purchase pace; above the maximum is `P2` and
-means increase future regular-purchase pace. It never creates `Action` or a
-sell instruction by itself. An overweight layer/instrument is an
-overweight-normalization review; an eligible underweight is a future
-regular-purchase allocation review.
+The annual-return target is the active policy's
+`performance.annual_return_target`; it is descriptive context, not a trigger.
 
-Allocation and performance evidence are deliberately decoupled. Missing or
-partial performance makes principal, return, YTD, or P&L facts unavailable or
-descriptive, but must not suppress a valid allocation result. Conversely, a
-stale, failed, unreconciled, or otherwise non-current-evaluable Toss source is
-`allocation_state=not_evaluable`: emit a blocking queue item with null priority
-and no suggestion, regardless of the apparent size of a gap.
+## Evidence-based flexibility
 
-## Explainability
+Do not reduce a judgment to “hold” when the supported evidence permits a more
+useful conditional analysis. An explanation may compare regular-purchase
+adjustment, observation, concentration review, and an exceptional-review path,
+then name the evidence still required. It may say that an exceptional
+intervention is worth inspecting only when explicitly supported evidence
+exists. It must not turn that analysis into a transaction recommendation.
 
-Use internal status and trigger labels for consistency, but translate them
-into plain review language. Explain what changed, why it matters under the
-IPS, and what should be verified next.
+Satellite and experiment exposure receive stricter review of the evidence the
+runtime actually supports, including role, allocation range, and drawdown
+thresholds. Do not invent retired manual thesis, overlap, burden, holdability,
+or ETF-substitution metadata to force a result.
 
-Good explanation shape: raw label, plain meaning, verification task. Example:
-`risk_contribution_high` means the unit carries a large share of portfolio
-risk, so verify whether that concentration is intentional and acceptable.
+## Hard stops
 
-Do not let explanation become an order. A readable explanation may say
-"review future regular-purchase policy" or "verify thesis and risk limit fit";
-it should not say "buy", "sell", or size a trade.
-
-The annual return objective is descriptive context, not a trigger. The
-configured annual target is the YTD account return (currently 10%); YTD below
-target is a performance `Watch`/observation item and cannot, by itself, create
-an allocation suggestion or `Action`. Cumulative return, gains, losses, and
-drawdown follow the same rule.
-
-## Layer Rules
-
-Core assets are for long-term market participation. Do not penalize normal
-core drawdowns as standalone failure signals.
-
-Satellite and experiment exposure require stricter role, concentration, and
-allocation-policy checks. A fallen satellite is an observation or data-review
-candidate; the current runtime does not store manual instrument metadata that
-could turn it into an automatic intervention.
-
-## Immediate Buying Is Exceptional
-
-Never treat a drop, cheap-looking price, premarket move, average-cost defense,
-or fear/FOMO as a standalone buy reason. For underweight assets, prefer future
-regular-purchase adjustment language unless the user explicitly asks to inspect
-exceptional action.
-
-## Selling Is More Exceptional
-
-Never recommend selling only because returns are good, returns are poor, the
-asset fell, the asset rose, or unrealized gains are large. Frame any reduction
-as simplification, consolidation, or allocation/risk control.
-
-The current runtime has no persisted instrument-thesis or review-factor input,
-so it must not invent one or emit an automatic exceptional-intervention
-predicate. A layer maximum breach, account drawdown, cash shortfall, loss, or
-concentration signal is an inspection item only. If `Action` is present from a
-future explicitly supported evidence source, write only "inspect possible
-exceptional intervention" and provide no order side, quantity, or execution
-field.
-
-## Allowed Outcome Language
-
-- Increase future regular purchases.
-- Reduce or pause future regular purchases.
-- Hold and observe.
-- Review layer role, concentration, or policy constraints.
-- Inspect possible exceptional action; if required conditions are not
-  confirmed, hold.
-
-## Hard Stops
-
-- Do not add order sizing, execution flags, or automatic buy/sell
-  recommendations.
-- Do not collapse layer logic into ticker-only logic.
-- Do not turn stale, missing, or ambiguous data into action.
-- Do not make a performance target, return, gain, loss, or drawdown a trade
-  trigger.
-- Do not assign `Action` from a performance, cash, or allocation gap alone.
-- Do not manufacture retired manual metadata to justify an intervention.
-- Do not convert a blocking `not_evaluable` result or an all-cash `partial`
-  result into a guessed layer/instrument recommendation.
+- Do not add buy, sell, execute, order-size, price, or execution fields.
+- Do not reimplement or override status classification outside the backend.
+- Do not convert an allocation gap, cash breach, performance result, or
+  drawdown alone into `Action`.
+- Do not infer layer or instrument advice from an all-cash `partial` result or
+  a blocking `not_evaluable` result.

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
@@ -220,14 +219,13 @@ def evaluate_inspection(
     projection: Mapping[str, Any] | None,
     performance_run: Mapping[str, Any] | None,
     policy: Mapping[str, Any],
-    profiles: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
+    layer_map: Mapping[tuple[str, str], str] | None = None,
     risk_evidence: Mapping[str, Any] | None = None,
     evidence_refs: Mapping[str, Any] | None = None,
     *,
     source_error: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate one immutable input set without side effects or broker actions."""
-    profiles = profiles or {}
     risk_evidence = risk_evidence or {}
     evidence_refs = evidence_refs or {}
     policy_dict = dict(policy)
@@ -429,15 +427,11 @@ def evaluate_inspection(
                 (str(position.get("market_country", "")).upper(), str(position.get("symbol", "")).upper())
             )
         )
-        and (
-            str(position.get("market_country", "")).upper(), str(position.get("symbol", "")).upper()
-        ) in profiles
-        for position in positions
+    for position in positions
     )
     configured_coverage_complete = all(
         str(target.get("layer", "")).lower() in LAYERS
         and _target_ready(target)
-        and key in profiles
         for key, target in configured.items()
     )
     if invested_denominator_evaluable:
@@ -523,19 +517,17 @@ def evaluate_inspection(
         for key in universe:
             position = position_map.get(key)
             target = configured.get(key)
-            profile = profiles.get(key)
             evidence = (risk_evidence.get("instruments") or {}).get(f"{key[0]}/{key[1]}", {})
             target_ready = _target_ready(target)
             is_absent = position is None
             layer = str((target or {}).get("layer") or (position or {}).get("layer") or "").lower()
-            thesis = str(profile.get("thesis_status", "unknown")) if profile else "unknown"
             triggers: list[str] = []
             status = "OK"
             current = 0.0 if is_absent and target_ready else (position.get("invested_weight") if position and target_ready else None)
-            ready = profile is not None and target_ready and layer in LAYERS
+            ready = target_ready and layer in LAYERS
             if not ready:
                 status = "Review"
-                triggers.append("profile_or_target_missing")
+                triggers.append("policy_target_or_layer_missing")
             else:
                 if position is not None and position.get("layer") != target.get("layer"):
                     status = "Review"
@@ -559,32 +551,8 @@ def evaluate_inspection(
                 if pnl is not None and pnl > 0 and hard_maximum_breach:
                     status = _raise_status(status, "Review")
                     triggers.append("gain_with_instrument_overweight")
-                if pnl is not None and pnl < 0 and (thesis in {"watch", "broken"} or profile.get("holdability_status", "unknown") == "review"):
-                    status = _raise_status(status, "Review")
-                    triggers.append("loss_with_thesis_or_holdability_concern")
-                if thesis == "watch":
-                    status = _raise_status(status, "Watch")
-                    triggers.append("thesis_watch")
-                elif thesis == "broken":
-                    status = _raise_status(status, "Review")
-                    triggers.append("thesis_broken")
-                factor_fields = (("overlap_status", "overlap"), ("management_burden_status", "management_burden"), ("holdability_status", "holdability"), ("etf_substitution_status", "etf_substitution"))
-                strict_layer = layer in {"satellite", "experiment"}
-                for field, trigger_name in factor_fields:
-                    factor_status = str(profile.get(field, "unknown")).lower()
-                    if factor_status == "review":
-                        status = _raise_status(status, "Review")
-                        triggers.append(f"{trigger_name}_review")
-                    elif strict_layer and factor_status == "unknown":
-                        status = _raise_status(status, "Review")
-                        triggers.append(f"{trigger_name}_unknown")
-                if thesis == "broken" and hard_maximum_breach:
-                    status = _raise_status(status, "Action")
-                    triggers.append("broken_thesis_and_hard_maximum_breach")
-            eligible = cash_allocation_available and ready and current is not None and float(current) < float(target["minimum"]) and thesis == "valid" and (
-                layer == "core" or all(str(profile.get(field, "unknown")).lower() in {"clear", "not_applicable"} for field in ("overlap_status", "management_burden_status", "holdability_status", "etf_substitution_status"))
-            )
-            next_step = "예외 개입 가능성을 점검하고 조건이 확인되지 않으면 보류합니다." if status == "Action" else "프로필, 투자 논지, 겹침과 향후 정기매수 정책을 검토합니다."
+            eligible = cash_allocation_available and ready and current is not None and float(current) < float(target["minimum"])
+            next_step = "레이어·종목 목표와 향후 정기매수 정책을 검토합니다."
             result["instruments"].append(
                 attach_decision(
                     _unit(
@@ -596,24 +564,17 @@ def evaluate_inspection(
                         maximum=float(target["maximum"]) if target_ready else None,
                         denominator="invested_account_value",
                         triggers=triggers,
-                        meaning="종목의 현재 비중과 IPS 프로필·목표 범위를 함께 확인합니다.",
+                        meaning="종목의 현재 비중과 IPS 레이어·목표 범위를 함께 확인합니다.",
                         next_step=next_step,
                         status=status,
                         extra={
                             "market_country": key[0], "symbol": key[1],
                             "layer": target.get("layer") if target else (position.get("layer") if position else None),
-                            "thesis_status": profile.get("thesis_status") if profile else None,
-                            "overlap_status": profile.get("overlap_status", "unknown") if profile else "unknown",
-                            "management_burden_status": profile.get("management_burden_status", "unknown") if profile else "unknown",
-                            "holdability_status": profile.get("holdability_status", "unknown") if profile else "unknown",
-                            "etf_substitution_status": profile.get("etf_substitution_status", "unknown") if profile else "unknown",
-                            "review_factors_note": profile.get("review_factors_note", "") if profile else "",
                             "unrealized_pnl_krw": position.get("profit_loss_krw") if position else None,
                             "evidence": evidence,
                         },
                     ),
                     eligible_for_increase=eligible,
-                    thesis_status=thesis,
                 )
             )
 
@@ -668,7 +629,7 @@ def evaluate_inspection(
                 "status": "Review",
                 "triggers": [reason],
                 "meaning": "현재 Toss 원천 자료로 비중 조정 판단을 평가할 수 없습니다.",
-                "verification_task": "최근 동기화·조정 상태와 정책·프로필 커버리지를 확인합니다.",
+                "verification_task": "최근 동기화·조정 상태와 정책 종목·레이어 커버리지를 확인합니다.",
             },
             blocking=True,
         )
@@ -744,7 +705,6 @@ def evaluation_fingerprint(
     source_fingerprint: str,
     performance_fingerprint: str | None,
     policy_hash: str,
-    profile_hash: str,
     market_evidence_fingerprint: str = "",
     engine_version: str = ENGINE_VERSION,
 ) -> str:
@@ -753,19 +713,8 @@ def evaluation_fingerprint(
             source_fingerprint,
             performance_fingerprint or "",
             policy_hash,
-            profile_hash,
             market_evidence_fingerprint,
             engine_version,
         )
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def profile_snapshot(
-    profiles: Mapping[tuple[str, str], Mapping[str, Any]],
-) -> tuple[list[dict[str, Any]], str]:
-    values = [dict(value) for _, value in sorted(profiles.items())]
-    encoded = json.dumps(
-        values, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
-    return values, hashlib.sha256(encoded.encode("utf-8")).hexdigest()

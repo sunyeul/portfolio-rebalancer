@@ -12,18 +12,24 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.schemas import ApiEnvelope
-from services.account_projection import AccountProjectionError, build_account_projection
+from services.account_projection import (
+    AccountProjectionError,
+    build_account_projection,
+    layer_map_from_policy,
+)
+from services.dynamic_allocation import (
+    allocation_benchmarks,
+    evaluate_dynamic_allocation,
+)
 from storage.account_observation_store import (
     latest_verified_complete,
     list_snapshots,
 )
 from storage.database import initialize_database
 from storage.evaluation_store import latest_evaluation_run
-from storage.instrument_profile_store import list_profiles
 from storage.market_store import latest_policy_candidate, list_candles
 from storage.performance_store import get_performance_run, latest_performance_run
 from storage.policy_store import get_active_policy, get_policy_version
-from services.market_context import evaluate_market_context
 
 
 SUPPORTED_INSPECTION_ENGINE_VERSION = "phase5-v2"
@@ -46,6 +52,19 @@ def _error(message: str, status_code: int = 200) -> JSONResponse:
         {"ok": False, "data": None, "error": {"message": message}},
         status_code=status_code,
     )
+
+
+def _stored_allocation_series(
+    policy: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    return {
+        item["key"]: list_candles(
+            source_kind=item["source_kind"],
+            market_country=item["market_country"],
+            symbol=item["symbol"],
+        )
+        for item in allocation_benchmarks(policy)
+    }
 
 
 def _snapshot_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -209,11 +228,17 @@ def create_app() -> FastAPI:
     @app.get("/api/account", response_model=ApiEnvelope)
     async def account(snapshot_id: int | None = None) -> Any:
         try:
+            active = get_active_policy()
             return {
                 "ok": True,
                 "data": {
                     "projection": _projection_view(
-                        build_account_projection(snapshot_id=snapshot_id)
+                        build_account_projection(
+                            snapshot_id=snapshot_id,
+                            layer_map=layer_map_from_policy(
+                                active["policy"] if active else None
+                            ),
+                        )
                     )
                 },
                 "error": None,
@@ -239,10 +264,6 @@ def create_app() -> FastAPI:
         )
         return {"ok": True, "data": {"policy": selected}, "error": None}
 
-    @app.get("/api/profiles", response_model=ApiEnvelope)
-    async def profiles() -> dict[str, Any]:
-        return {"ok": True, "data": {"profiles": list_profiles()}, "error": None}
-
     @app.get("/api/inspection", response_model=ApiEnvelope)
     async def inspection() -> dict[str, Any]:
         evaluation = _evaluation_view(latest_evaluation_run())
@@ -266,9 +287,7 @@ def create_app() -> FastAPI:
             "contract_supported": contract_supported,
         }
         if contract_supported:
-            data["adjustment_suggestions"] = result.get(
-                "adjustment_suggestions", []
-            )
+            data["adjustment_suggestions"] = result.get("adjustment_suggestions", [])
         return {
             "ok": True,
             "data": data,
@@ -281,19 +300,18 @@ def create_app() -> FastAPI:
             active = get_active_policy()
             if active is None:
                 return _error("활성 정책을 찾을 수 없습니다.")
-            cash_policy = active["policy"].get("cash_reserve", {})
-            candles = list_candles(
-                source_kind="market_indicator", market_country="KR", symbol="KOSPI"
-            )
-            context = evaluate_market_context(
-                candles,
-                current_target=float(cash_policy.get("target", 0.15)),
+            policy = active["policy"]
+            context = evaluate_dynamic_allocation(
+                _stored_allocation_series(policy),
+                active_policy=policy,
                 last_change_at=active.get("created_at"),
             )
             return {
                 "ok": True,
                 "data": {
-                    "benchmark": "KR/KOSPI",
+                    "benchmarks": [
+                        item["key"] for item in allocation_benchmarks(policy)
+                    ],
                     "policy_version_id": active["id"],
                     "context": context,
                     "latest_candidate": latest_policy_candidate(

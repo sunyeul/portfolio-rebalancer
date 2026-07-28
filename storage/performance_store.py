@@ -82,7 +82,13 @@ def create_baseline(
     *,
     confirmed_at: str | None = None,
 ) -> dict[str, Any]:
-    """Create one immutable tracking baseline after exact confirmation."""
+    """Create one immutable tracking baseline after principal confirmation.
+
+    The confirmed investment principal is an account fact supplied by the
+    user (initial principal plus any already-known external net flows).  It is
+    intentionally independent from the snapshot's current market value: the
+    latter is only the valuation anchor for the first performance point.
+    """
     expected = _decimal(expected_principal_krw, "expected_principal_krw")
     if expected < 0:
         raise PerformanceStorageError("expected_principal_krw must be nonnegative")
@@ -99,9 +105,7 @@ def create_baseline(
             )
         if row["total_value_krw"] is None:
             raise PerformanceStorageError("baseline snapshot has no total value")
-        actual = _decimal(row["total_value_krw"], "snapshot.total_value_krw")
-        if abs(actual - expected) > Decimal("0.01"):
-            raise PerformanceStorageError("expected principal does not match snapshot")
+        _decimal(row["total_value_krw"], "snapshot.total_value_krw")
         existing = conn.execute(
             "SELECT id FROM account_tracking_baselines WHERE account_alias = ?",
             (row["account_alias"],),
@@ -109,7 +113,7 @@ def create_baseline(
         if existing is not None:
             raise PerformanceStorageError("tracking baseline already exists")
         fingerprint = _confirmation_fingerprint(
-            str(row["account_alias"]), snapshot_id, actual
+            str(row["account_alias"]), snapshot_id, expected
         )
         fx_row = conn.execute(
             "SELECT rate FROM broker_exchange_rates WHERE snapshot_id = ? LIMIT 1",
@@ -128,7 +132,7 @@ def create_baseline(
                 row["account_alias"],
                 snapshot_id,
                 row["synced_at"],
-                float(actual),
+                float(expected),
                 fx_row["rate"] if fx_row is not None else None,
                 confirmed_at or _now_iso(),
                 fingerprint,

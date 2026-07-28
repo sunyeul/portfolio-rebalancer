@@ -40,24 +40,26 @@ task toss-dashboard-api
 
 모든 CLI 명령은 stdout에 JSON 객체 하나만 출력합니다. `toss-sync`는 Toss에서 보유 종목, KRW/USD 예수금, USD/KRW 환율, 종료 주문을 읽어 불변 관찰 스냅샷으로 저장합니다. 불완전·오래된·실패 스냅샷은 진단 증거로만 남고 최신 평가 가능한 스냅샷을 대체하지 않습니다.
 
-## 계좌 관찰과 프로필
+## 계좌 관찰과 정책 레이어
 
-`account-view`는 특정 완료 스냅샷을 현금 비중, 투자자산 비중, 계층별 비중, 분류 커버리지로 투영합니다. 분류되지 않은 종목에 임의의 계층이나 상태를 추론하지 않습니다.
+`account-view`는 특정 완료 스냅샷을 현금 비중, 투자자산 비중, 계층별 비중, 분류 커버리지로 투영합니다. 종목의 `core`·`satellite`·`experiment` 레이어는 활성 IPS 정책의 `instruments[].layer`에서만 읽으며, 정책에 없는 종목에 임의의 계층이나 상태를 추론하지 않습니다.
 
 ```bash
-uv run ips-pilot profiles list
-uv run ips-pilot profiles set --symbol AAPL --market-country US --layer satellite --thesis-status valid --note "전략적 위성"
+uv run ips-pilot policy template > toss-policy-template.json
+uv run ips-pilot policy activate --file toss-policy.json --expected-current-version 1
 ```
 
-프로필은 이미 Toss 스냅샷에서 관찰된 종목에만 설정할 수 있고, 원본 브로커 관찰 행을 변경하지 않습니다. 프로필이 없는 종목은 `classification_coverage`에서 제외되며 추가 검토 대상으로 표시됩니다.
+정책에 없는 보유 종목이나 목표가 완성되지 않은 정책 종목은 `classification_coverage`에서 제외되며 비중 판정은 `not_evaluable`로 닫힙니다.
 
 ## 성과 추적
 
-성과 추적은 Toss 스냅샷 사이의 투자 원금과 계좌 평가금을 별도로 관리합니다. 투자 원금은 확인된 초기 원금에 분류된 외부 순입출금만 반영하며, 현금과 종목 사이의 이동·매매·손익은 원금을 바꾸지 않습니다. 최초 완료 스냅샷을 기준선으로 한 번 확인한 뒤, 이후 동기화마다 새 성과 포인트를 갱신합니다.
+성과 추적은 Toss 스냅샷 사이의 보유 종목 매입원가와 투자자산 평가금을 별도로 관리합니다. 투자 원금은 각 스냅샷의 보유 종목 매입원가이며, 손익과 보유 수익률은 투자자산 평가금과 매입원가의 차이로 계산합니다. 외부 순입출금 분류와 기준선은 TWR 구간을 나누는 계좌 성과 근거로만 유지합니다.
 
 ```bash
 uv run ips-pilot performance baseline-preview --snapshot-id 4
-uv run ips-pilot performance baseline-confirm --snapshot-id 4 --expected-principal-krw 120802745.17802304
+# 기준선 원금은 TWR·외부 현금흐름 분류용으로만 확인
+CONFIRMED_PRINCIPAL_KRW=...
+uv run ips-pilot performance baseline-confirm --snapshot-id 4 --expected-principal-krw "$CONFIRMED_PRINCIPAL_KRW"
 uv run ips-pilot performance refresh
 uv run ips-pilot performance candidates
 uv run ips-pilot performance history --latest
@@ -65,11 +67,11 @@ uv run ips-pilot performance history --latest
 
 설명되지 않은 현금 이동은 후보로 남으며 자동으로 입금·출금으로 확정하지 않습니다. 불완전·오래된·실패 스냅샷은 성과 포인트가 되지 않습니다.
 실패·부분 동기화가 새로 들어오면 이전 완료 스냅샷은 `last_verified_complete`로만 남고 현재 평가 대상으로 승격되지 않습니다.
-Overview의 기본 흐름은 `투자 원금 → 계좌 평가금 → 원금 대비 계좌 수익률`입니다. 계좌 손익은 `계좌 평가금 - 투자 원금`, 원금 대비 계좌 수익률은 그 손익을 투자 원금으로 나눈 값이며, 원금 근거가 없으면 수익률을 산출하지 않습니다. 연간 목표 10%는 별도의 YTD 계좌 TWR 지표로 관리하고, 보유 종목의 매입원가 기준 평가손익률과 섞지 않습니다.
+Overview의 기본 흐름은 `매입원가 → 투자자산 평가금 → 보유 수익률`입니다. 보유 손익은 `투자자산 평가금 - 매입원가`, 보유 수익률은 그 손익을 매입원가로 나눈 값입니다. 연간 목표 10%는 별도의 YTD 계좌 TWR 지표로 관리하며, 현금 포함 계좌 성과와 매입원가 기준 보유 성과를 섞지 않습니다.
 
 ## 정책과 운영 검사
 
-현금 리저브는 총계좌 평가금 기준 10% 최소·15% 목표·20% 최대 범위로 관찰합니다. 레이어와 종목은 투자금 평가금 기준으로 별도 목표 범위를 사용합니다. 연간 목표 수익률은 누적 수익률과 분리한 연초 기준 YTD TWR 10%이며, 최근 1년 TWR은 보조 뷰로 함께 표시합니다.
+현금 리저브는 총계좌 평가금 기준 3% 최소·5% 중립 목표·10% 최대 범위로 관찰합니다. 중립 레이어 목표는 투자금 평가금 기준 Core 60%·Satellite 38%·Experiment 2%이며, 시장 국면에 따라 승인된 범위 안에서 함께 조정할 수 있습니다. 연간 목표 수익률은 누적 수익률과 분리한 연초 기준 YTD TWR 10%이며, 최근 1년 TWR은 보조 뷰로 함께 표시합니다.
 
 ```bash
 uv run ips-pilot policy template > toss-policy-template.json
@@ -86,7 +88,18 @@ task toss-dashboard-dev
 `http://127.0.0.1:8000`에서 확인합니다. `task toss-dashboard-build`는
 Bun으로 의존성을 고정 설치하고 `frontend/dist`를 다시 생성합니다.
 
-정책 파일은 앱이 관리하는 목표·범위·프로필 의도만 담습니다. Toss에서 관찰하지 않은 종목, 현재 보유 종목의 미분류 상태, 목표 합계 오류는 활성화할 수 없습니다. `inspection` 결과는 `OK`, `Watch`, `Review`, `Action`만 사용하며, `Action`도 예외 개입 가능성을 사람이 점검하라는 뜻입니다. 주문 수량이나 실행 플래그는 제공하지 않습니다.
+정책 파일은 앱이 관리하는 목표·범위·레이어만 담습니다. Toss에서 관찰하지 않은 종목, 현재 보유 종목의 미분류 상태, 목표 합계 오류는 활성화할 수 없습니다. `inspection` 결과는 `OK`, `Watch`, `Review`, `Action`만 사용하며, `Action`도 예외 개입 가능성을 사람이 점검하라는 뜻입니다. 주문 수량이나 실행 플래그는 제공하지 않습니다.
+
+### 시장 국면별 목표 비중 검토
+
+`market sync`는 Toss에서 `US/SPY`, `US/QQQ`, `KR/KOSPI`, `KR/KOSDAQ` 일봉을 수집합니다. `market context`는 60·200일 추세, 252일 고점 대비 낙폭, 20일 실현 변동성을 합성해 `risk_on`, `neutral`, `risk_off` 중 하나를 관찰합니다.
+
+```bash
+uv run ips-pilot market sync
+uv run ips-pilot market context
+```
+
+국면별 현금/Core/Satellite/Experiment 목표는 각각 `3/52/44/4`, `5/60/38/2`, `10/70/29/1`입니다. 현금은 총계좌 기준이고 세 레이어는 투자금 기준입니다. 데이터가 부족·오래됨·불완전하면 `Watch`로 닫고 후보를 만들지 않으며, 정책 변경 후 30일 동안은 새 국면을 보여주더라도 후보를 만들지 않습니다. 유효한 후보도 불변 검토 기록일 뿐 활성 정책을 바꾸지 않습니다. 활성화는 별도의 정책 검증·미리보기·사용자 승인 절차를 거쳐야 합니다.
 
 ### Phase 5-v2 결과 계약
 
@@ -112,19 +125,18 @@ Phase 5 손익·예외 검토는 제안 정책을 먼저 읽기 전용으로 확
 
 ```bash
 uv run ips-pilot inspection preview --policy-file docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.json
-uv run ips-pilot profiles set --symbol NBIS --market-country US --layer satellite --thesis-status watch --overlap-status review --management-burden-status clear --holdability-status clear --etf-substitution-status review --note "위성 투자 논지 재검토" --review-factors-note "중복과 ETF 대체 가능성 확인"
 ```
 
-Preview는 정책을 활성화하거나 평가 행을 저장하지 않습니다. `Action`은
-동일 종목의 손상된 논지와 그 종목 자신의 하드 최대 비중 위반이 함께
-확인될 때의 예외 검토 신호일 뿐입니다. 시장 동기화, 구조화된 프로필
+Preview는 정책을 활성화하거나 평가 행을 저장하지 않습니다. 현재 평가에
+필요한 종목 레이어는 정책의 `instruments[].layer`에서만 읽습니다. `Action`은 자동 주문이 아니라 사람이
+예외 개입 가능성을 확인하는 검사 상태입니다. 시장 동기화, 레이어 분류
 갱신, 정책 활성화, 최초 `phase5-v2` 평가 저장은 운영자가 별도로 승인한
 뒤 수행합니다. 이전 엔진 버전의 저장 결과는 새 계약으로 추정 변환하지
 않고 명시적인 계약 불일치로 표시합니다.
 
 ## 저장소와 검증
 
-기본 SQLite 경로는 `data/portfolio_rebalancer.sqlite3`입니다. 스키마는 Toss 계좌 관찰, 성과 추적, 계층/논지 프로필, 정책 버전만 보존합니다. 마이그레이션은 무결성 검사와 secure delete를 수행합니다.
+기본 SQLite 경로는 `data/portfolio_rebalancer.sqlite3`입니다. 스키마는 Toss 계좌 관찰, 성과 추적, 정책 버전, 시장 근거만 보존합니다. 마이그레이션은 무결성 검사와 secure delete를 수행합니다.
 
 ```bash
 uv run ruff format --check .

@@ -23,6 +23,25 @@ def candle_fingerprint(candle: Mapping[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _same_candle_values(existing: Mapping[str, Any], candle: Mapping[str, Any]) -> bool:
+    """Treat legacy fingerprint changes as idempotent when values are unchanged."""
+    return (
+        str(existing["currency"]) == str(candle["currency"])
+        and float(existing["open_price"]) == float(candle["open_price"])
+        and float(existing["high_price"]) == float(candle["high_price"])
+        and float(existing["low_price"]) == float(candle["low_price"])
+        and float(existing["close_price"]) == float(candle["close_price"])
+        and float(existing["volume"]) == float(candle["volume"])
+        and bool(existing["adjusted_supported"])
+        == bool(
+            candle.get(
+                "adjusted_supported",
+                candle["source_kind"] == "stock",
+            )
+        )
+    )
+
+
 def insert_candles(candles: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with connect() as conn:
@@ -60,17 +79,16 @@ def insert_candles(candles: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]
                 SELECT * FROM toss_market_candles
                 WHERE source_kind = ? AND market_country = ? AND symbol = ?
                   AND interval = ? AND candle_at = ? AND adjusted = ?
-                ORDER BY id LIMIT 1
+                ORDER BY id DESC LIMIT 1
                 """,
                 identity,
             ).fetchone()
             if existing is not None:
-                if existing["source_fingerprint"] != fingerprint:
-                    raise MarketStoreError(
-                        "conflicting candle observation for the same timestamp"
-                    )
-                rows.append(dict(existing))
-                continue
+                if existing["source_fingerprint"] == fingerprint or _same_candle_values(
+                    existing, candle
+                ):
+                    rows.append(dict(existing))
+                    continue
             conn.execute(
                 """
                 INSERT INTO toss_market_candles (
@@ -122,9 +140,20 @@ def list_candles(
     with connect() as conn:
         rows = conn.execute(
             """
-            SELECT * FROM toss_market_candles
-            WHERE source_kind = ? AND market_country = ? AND symbol = ? AND interval = ?
-            ORDER BY candle_at DESC LIMIT ?
+            SELECT * FROM toss_market_candles AS current
+            WHERE current.source_kind = ? AND current.market_country = ?
+              AND current.symbol = ? AND current.interval = ?
+              AND current.id = (
+                  SELECT MAX(revision.id)
+                  FROM toss_market_candles AS revision
+                  WHERE revision.source_kind = current.source_kind
+                    AND revision.market_country = current.market_country
+                    AND revision.symbol = current.symbol
+                    AND revision.interval = current.interval
+                    AND revision.candle_at = current.candle_at
+                    AND revision.adjusted = current.adjusted
+              )
+            ORDER BY datetime(current.candle_at) DESC, current.id DESC LIMIT ?
             """,
             (
                 source_kind,
@@ -149,15 +178,25 @@ def list_adjusted_stock_candles(
         rows = conn.execute(
             """
             SELECT * FROM (
-                SELECT * FROM toss_market_candles
-                WHERE source_kind = 'stock'
-                  AND market_country = ?
-                  AND symbol = ?
-                  AND interval = '1d'
-                  AND adjusted = 1
-                  AND adjusted_supported = 1
-                  AND datetime(candle_at) <= datetime(?)
-                ORDER BY datetime(candle_at) DESC, id DESC
+                SELECT * FROM toss_market_candles AS current
+                WHERE current.source_kind = 'stock'
+                  AND current.market_country = ?
+                  AND current.symbol = ?
+                  AND current.interval = '1d'
+                  AND current.adjusted = 1
+                  AND current.adjusted_supported = 1
+                  AND datetime(current.candle_at) <= datetime(?)
+                  AND current.id = (
+                      SELECT MAX(revision.id)
+                      FROM toss_market_candles AS revision
+                      WHERE revision.source_kind = current.source_kind
+                        AND revision.market_country = current.market_country
+                        AND revision.symbol = current.symbol
+                        AND revision.interval = current.interval
+                        AND revision.candle_at = current.candle_at
+                        AND revision.adjusted = current.adjusted
+                  )
+                ORDER BY datetime(current.candle_at) DESC, current.id DESC
                 LIMIT ?
             )
             ORDER BY datetime(candle_at), id

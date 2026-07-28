@@ -12,8 +12,6 @@ def _evaluation():
         "source_fingerprint": "source",
         "performance_fingerprint": None,
         "policy_hash": "policy",
-        "profile_snapshot": [{"symbol": "AAA"}],
-        "profile_hash": "profiles",
         "engine_version": "test",
         "state": "not_evaluable",
         "non_evaluable_reason": "missing_source",

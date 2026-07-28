@@ -1,29 +1,49 @@
 ---
 name: ips-pilot-frontend-workbench
-description: Use when changing IPS Pilot frontend workbench surfaces, especially evaluation tables, portfolio or snapshot controls, and client-side presentation behavior.
+description: Use when changing IPS Pilot React workbench views, evaluation tables, Review Queue presentation, client-side filters, sorting, loading states, or inspection-result wording.
 ---
 
 # IPS Pilot Frontend Workbench
 
-## Purpose
+The frontend is a read-only IPS inspection view. Improve visibility and
+ergonomics without changing the meaning, order, or persistence of backend
+evaluation data.
 
-Keep frontend changes aligned with IPS Pilot's inspection-only contract. UI changes may improve visibility, layout, sorting, and ergonomics; they must not create trading semantics.
+## Current boundaries
 
-## Required Rules
+- The stack is React, TypeScript, Vite, `lucide-react`, and plain global CSS in
+  `frontend/src/styles.css`; do not assume Tailwind or a component framework.
+- Use the existing shapes and fetch helper in `frontend/src/lib/api.ts`.
+- The current screen reads inspection and performance data. If a future surface
+  adds portfolio or snapshot editing, preserve its pending, error, disabled,
+  and confirmation states; do not assume those controls already exist.
+- Keep layer and instrument surfaces separate and preserve backend Review Queue
+  order whenever the user has not chosen a local table sort.
 
-- Keep layer and asset evaluation surfaces first-class and separate.
-- Preserve portfolio and snapshot semantics: select, create, save/load, copy/edit/delete, errors, pending states, and disabled states.
-- Use existing API helpers and response shapes from `frontend/src/lib/api.ts`; do not invent backend fields for UI-only changes.
-- Treat `OK`, `Watch`, `Review`, and `Action` as inspection labels only.
-- Make return, efficiency, risk, and IPS-fit signals explanatory, not buy/sell triggers.
-- Show internal status and trigger labels with human-readable meaning when space allows; do not make users infer meaning from raw codes alone.
-- Do not mutate snapshots, config, journal entries, evaluation records, Review Queue contents, or persistent app state for presentation-only work.
-- Use existing `lucide-react` icons and local Tailwind/component patterns.
+## Inspection semantics
 
-## Sorting
+`OK`, `Watch`, `Review`, and `Action` are inspection labels, not trading
+signals. Show status, raw triggers, and human-readable meaning when useful,
+but do not derive a new status, priority, suggestion, or action from them.
 
-Keep table sorting client-side and local to the table. Preserve API order when sorting is inactive, sort numeric columns by raw values, and place missing numeric values after present values.
+`suggestion` is the single action-level label. Render it prominently as the
+adjustment direction—for example, secure cash, increase future
+regular-purchase pace, increase allocation, normalize overweight, observe, or
+inspect an exceptional case. It never changes queue order, status, or priority,
+and it must not be translated into a buy, sell, quantity, price, or execution
+instruction.
 
-## Verification
+Do not mutate snapshots, policies, journals, evaluation records, Review Queue
+contents, or persistent app state for a presentation change. Return, risk,
+drawdown, and IPS-fit data are explanatory only; no UI text may imply a buy,
+sell, quantity, price, or execution action.
 
-Run the smallest frontend check that covers the change, usually `npm run typecheck` or `npm run build` from `frontend`. For layout work, also inspect desktop and narrow viewport behavior when feasible.
+## Tables and verification
+
+Keep filtering and sorting local to the table. Preserve source order when sort
+is inactive, compare numeric columns by raw values, and place missing numeric
+values after present values.
+
+Run `npm run typecheck` from `frontend` for a typed presentation change; use
+`npm run build` when the change affects the compiled application or layout.
+For layout changes, inspect desktop and narrow viewports when feasible.

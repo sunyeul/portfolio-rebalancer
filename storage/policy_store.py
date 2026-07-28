@@ -243,12 +243,15 @@ def policy_template(
     account_alias: str = "toss-brokerage",
 ) -> dict[str, Any]:
     """Build an app-owned target template from Toss identities only."""
-    from services.account_projection import build_account_projection
+    from services.account_projection import build_account_projection, layer_map_from_policy
 
-    projection = build_account_projection(
-        snapshot_id=snapshot_id, account_alias=account_alias
-    )
     active = get_active_policy(account_alias)
+    active_policy = active["policy"] if active is not None else None
+    projection = build_account_projection(
+        snapshot_id=snapshot_id,
+        account_alias=account_alias,
+        layer_map=layer_map_from_policy(active_policy),
+    )
     policy = dict(active["policy"]) if active is not None else dict(DEFAULT_POLICY)
     policy.setdefault("risk_review", DEFAULT_POLICY["risk_review"])
     policy["instruments"] = [

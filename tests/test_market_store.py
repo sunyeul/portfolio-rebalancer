@@ -1,4 +1,3 @@
-import pytest
 from storage.database import initialize_database
 from storage.market_store import (
     insert_candles,
@@ -6,7 +5,6 @@ from storage.market_store import (
     list_adjusted_stock_candles,
     list_candles,
     latest_policy_candidate,
-    MarketStoreError,
 )
 
 
@@ -92,7 +90,9 @@ def test_policy_candidate_identity_includes_account_and_base_policy(
     assert second["base_policy_version_id"] == 1
 
 
-def test_conflicting_candle_revision_is_rejected(monkeypatch, tmp_path):
+def test_candle_revision_is_preserved_and_latest_value_is_selected(
+    monkeypatch, tmp_path
+):
     monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "revision.sqlite3"))
     initialize_database()
     candle = {
@@ -110,11 +110,17 @@ def test_conflicting_candle_revision_is_rejected(monkeypatch, tmp_path):
         "adjusted": False,
         "adjusted_supported": False,
     }
-    insert_candles([candle])
+    first = insert_candles([candle])[0]
     revised = dict(candle, close_price=2511.0)
 
-    with pytest.raises(MarketStoreError, match="conflicting candle"):
-        insert_candles([revised])
+    latest = insert_candles([revised])[0]
+    repeated = insert_candles([revised])[0]
+
+    assert latest["id"] != first["id"]
+    assert repeated["id"] == latest["id"]
+    assert list_candles(
+        symbol="KOSPI", source_kind="market_indicator", market_country="KR"
+    ) == [latest]
 
 
 def test_adjusted_stock_selector_is_bounded_and_chronological(monkeypatch, tmp_path):

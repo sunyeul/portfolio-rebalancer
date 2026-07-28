@@ -15,7 +15,6 @@ from integrations.toss.observation import (
 )
 from storage.account_observation_store import insert_snapshot, latest_complete
 from storage.database import connect, initialize_database
-from storage.instrument_profile_store import upsert_profile
 from storage.market_store import insert_candles
 from storage.performance_store import create_baseline, refresh_performance
 from services.policy_validation import validate_policy
@@ -229,30 +228,6 @@ def test_phase5_offline_preview_is_deterministic_and_read_only(monkeypatch, tmp_
 
     insert_candles(_phase5_candles("005930", "KR", date(2026, 7, 22), base=100.0))
     insert_candles(_phase5_candles("NBIS", "US", date(2026, 7, 22), base=100.0))
-    upsert_profile(
-        "005930",
-        "KR",
-        "core",
-        "valid",
-        "core thesis",
-        overlap_status="clear",
-        management_burden_status="clear",
-        holdability_status="clear",
-        etf_substitution_status="not_applicable",
-        review_factors_note="core factor review complete",
-    )
-    upsert_profile(
-        "NBIS",
-        "US",
-        "satellite",
-        "broken",
-        "satellite thesis broken",
-        overlap_status="review",
-        management_burden_status="clear",
-        holdability_status="review",
-        etf_substitution_status="review",
-        review_factors_note="satellite factor review",
-    )
     policy = deepcopy(DEFAULT_POLICY)
     policy["layers"] = {
         "core": {"minimum": 0.7, "target": 0.8, "maximum": 0.9},
@@ -278,8 +253,5 @@ def test_phase5_offline_preview_is_deterministic_and_read_only(monkeypatch, tmp_
     assert first_preview["evaluation_fingerprint"]
     assert first_preview["market_evidence_fingerprint"]
     assert before == after == 0
-    assert sum(item["status"] == "Action" for item in first_preview["evaluation"]["review_queue"]) == 1
-    action = next(item for item in first_preview["evaluation"]["review_queue"] if item["status"] == "Action")
-    assert action["identity"] == "US/NBIS"
-    assert "broken_thesis_and_hard_maximum_breach" in action["triggers"]
+    assert all(item["status"] != "Action" for item in first_preview["evaluation"]["review_queue"])
     _assert_no_direct_action_semantics(first_preview)

@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping, MutableMapping, Sequence
 
 
-ENGINE_VERSION = "phase2-v1"
+ENGINE_VERSION = "phase2-v2"
 DECIMAL_TOLERANCE = Decimal("0.00000001")
 ONE_BASIS_POINT = Decimal("0.0001")
 MIN_MATERIALITY_KRW = Decimal("10000")
@@ -158,17 +158,17 @@ def validate_baseline_snapshot(
         raise PerformanceCalculationError(
             "baseline requires a current complete snapshot"
         )
-    total = _decimal(snapshot.get("total_value_krw"), "snapshot.total_value_krw")
+    _decimal(snapshot.get("total_value_krw"), "snapshot.total_value_krw")
     expected = _decimal(expected_principal_krw, "expected_principal_krw")
-    if abs(total - expected) > Decimal("0.01"):
-        raise PerformanceCalculationError("expected principal does not match snapshot")
+    if expected < 0:
+        raise PerformanceCalculationError("expected_principal_krw must be nonnegative")
     fx = snapshot.get("fx_rate") or {}
     return TrackingBaseline(
         id=0,
         account_alias=str(snapshot.get("account_alias") or ""),
         baseline_snapshot_id=int(snapshot["id"]),
         tracking_started_at=str(snapshot["synced_at"]),
-        initial_principal_krw=total,
+        initial_principal_krw=expected,
         baseline_fx_rate=_optional_decimal(fx.get("rate"), "baseline_fx_rate"),
     )
 
@@ -611,7 +611,6 @@ def build_projection(
     candidates: list[CashFlowCandidate] = []
     processed: set[str] = set()
     cumulative_flow = Decimal("0")
-    investment_principal = baseline_model.initial_principal_krw
     segment_id = 0
     segment_twr = Decimal("0")
     previous = None
@@ -669,7 +668,6 @@ def build_projection(
                             amount if classification == "external_deposit" else -amount
                         )
                         cumulative_flow += signed
-                        investment_principal += signed
                         interval_issues.append(
                             "confirmed external flow requires TWR boundary"
                         )
@@ -711,16 +709,17 @@ def build_projection(
             snapshot.get("invested_value_krw"), "invested_value_krw"
         )
         cash = _optional_decimal(snapshot.get("cash_value_krw"), "cash_value_krw")
+        cost_basis = _current_cost_basis(snapshot)
         if total is None or invested is None or cash is None:
             interval_issues.append("missing required account value")
         gain = (
-            total - baseline_model.initial_principal_krw - cumulative_flow
-            if total is not None
+            invested - cost_basis
+            if invested is not None and cost_basis is not None
             else None
         )
         simple_return = (
-            gain / investment_principal
-            if gain is not None and investment_principal > 0
+            gain / cost_basis
+            if gain is not None and cost_basis is not None and cost_basis > 0
             else None
         )
         interval_twr = None
@@ -750,9 +749,9 @@ def build_projection(
                 "total_value_krw": _money(total),
                 "invested_value_krw": _money(invested),
                 "cash_value_krw": _money(cash),
-                "current_cost_basis_krw": _money(_current_cost_basis(snapshot)),
+                "current_cost_basis_krw": _money(cost_basis),
                 "unrealized_pnl_krw": _money(_unrealized(snapshot)),
-                "investment_principal_krw": _money(investment_principal),
+                "investment_principal_krw": _money(cost_basis),
                 "cumulative_external_flow_krw": _money(cumulative_flow),
                 "account_gain_krw": _money(gain),
                 "simple_return": _money(simple_return),

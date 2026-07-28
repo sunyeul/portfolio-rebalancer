@@ -1,3 +1,4 @@
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
@@ -9,6 +10,7 @@ from services.account_performance import (
     build_projection,
     canonical_executions,
     detect_cash_candidates,
+    validate_baseline_snapshot,
 )
 
 
@@ -100,20 +102,59 @@ def _order(
     }
 
 
-def test_baseline_and_no_flow_projection_have_zero_then_positive_twr():
+def test_purchase_cost_projection_separates_holdings_gain_from_account_twr():
     baseline = _baseline()
-    snapshots = [_snapshot(1), _snapshot(2, total=8400000.0)]
+    snapshots = [
+        _snapshot(1, holdings=[_holding(market_value=7200000.0)]),
+        _snapshot(2, total=8400000.0, holdings=[_holding(market_value=7400000.0)]),
+    ]
 
     projection = build_projection(baseline, snapshots, {})
 
     assert projection.state == "complete"
-    assert projection.points[0]["account_gain_krw"] == pytest.approx(0.0)
+    assert projection.points[0]["investment_principal_krw"] == pytest.approx(6500000.0)
+    assert projection.points[0]["account_gain_krw"] == pytest.approx(700000.0)
+    assert projection.points[0]["simple_return"] == pytest.approx(700000 / 6500000)
     assert projection.points[0]["interval_twr"] == pytest.approx(0.0)
-    assert projection.points[1]["account_gain_krw"] == pytest.approx(200000.0)
+    assert projection.points[1]["investment_principal_krw"] == pytest.approx(6500000.0)
+    assert projection.points[1]["account_gain_krw"] == pytest.approx(900000.0)
     assert projection.points[1]["interval_twr"] == pytest.approx(200000 / 8200000)
-    assert projection.points[0]["investment_principal_krw"] == pytest.approx(8200000.0)
-    assert projection.points[1]["investment_principal_krw"] == pytest.approx(8200000.0)
-    assert projection.points[1]["simple_return"] == pytest.approx(200000 / 8200000)
+    assert projection.points[1]["simple_return"] == pytest.approx(900000 / 6500000)
+
+
+def test_purchase_cost_metrics_ignore_confirmed_external_principal():
+    baseline = replace(_baseline(), initial_principal_krw=Decimal("7000000"))
+    snapshots = [_snapshot(1), _snapshot(2, total=8400000.0)]
+
+    projection = build_projection(baseline, snapshots, {})
+
+    assert projection.points[0]["investment_principal_krw"] == pytest.approx(6500000.0)
+    assert projection.points[0]["account_gain_krw"] == pytest.approx(700000.0)
+    assert projection.points[0]["simple_return"] == pytest.approx(700000 / 6500000)
+    assert projection.points[1]["account_gain_krw"] == pytest.approx(900000.0)
+    assert projection.points[1]["simple_return"] == pytest.approx(900000 / 6500000)
+
+
+def test_missing_purchase_cost_keeps_twr_but_withholds_cost_based_metrics():
+    baseline = _baseline()
+    missing_cost = _holding(market_value=7200000.0)
+    missing_cost["cost_krw"] = None
+    snapshots = [_snapshot(1, holdings=[missing_cost])]
+
+    projection = build_projection(baseline, snapshots, {})
+
+    point = projection.points[0]
+    assert point["evaluation_state"] == "evaluable"
+    assert point["investment_principal_krw"] is None
+    assert point["account_gain_krw"] is None
+    assert point["simple_return"] is None
+    assert point["interval_twr"] == pytest.approx(0.0)
+
+
+def test_baseline_validation_keeps_confirmed_principal_independent():
+    baseline = validate_baseline_snapshot(_snapshot(1), Decimal("7000000"))
+
+    assert baseline.initial_principal_krw == Decimal("7000000")
 
 
 def test_external_flow_changes_investment_principal_and_return_denominator():
@@ -139,9 +180,9 @@ def test_external_flow_changes_investment_principal_and_return_denominator():
     )
 
     point = projection.points[1]
-    assert point["investment_principal_krw"] == pytest.approx(8220000.0)
-    assert point["account_gain_krw"] == pytest.approx(200000.0)
-    assert point["simple_return"] == pytest.approx(200000 / 8220000)
+    assert point["investment_principal_krw"] == pytest.approx(6500000.0)
+    assert point["account_gain_krw"] == pytest.approx(900000.0)
+    assert point["simple_return"] == pytest.approx(900000 / 6500000)
 
 
 def test_material_cash_residual_creates_non_evaluable_candidate():

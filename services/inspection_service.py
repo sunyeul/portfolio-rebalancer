@@ -4,18 +4,20 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from services.account_projection import AccountProjectionError, build_account_projection
+from services.account_projection import (
+    AccountProjectionError,
+    build_account_projection,
+    layer_map_from_policy,
+)
 from services.inspection_engine import (
     ENGINE_VERSION,
     evaluation_fingerprint,
     evaluate_inspection,
-    profile_snapshot,
 )
 from services.risk_evidence import build_risk_evidence
 from storage.account_observation_store import get_snapshot, list_snapshots
 from storage.database import initialize_database
 from storage.evaluation_store import insert_evaluation_run
-from storage.instrument_profile_store import profile_map
 from storage.market_store import list_adjusted_stock_candles
 from storage.performance_store import latest_performance_run
 from storage.policy_store import get_active_policy, policy_hash
@@ -59,8 +61,7 @@ def _prepare_inputs(
         raise RuntimeError(
             "active IPS policy lacks risk_review; validate and explicitly activate a Phase 5 policy"
         )
-    profiles = profile_map(account_alias)
-    profile_values, profile_hash = profile_snapshot(profiles)
+    layer_map = layer_map_from_policy(policy)
     performance: dict[str, Any] | None = None
     projection: dict[str, Any] | None = None
     source_error: str | None = None
@@ -70,7 +71,9 @@ def _prepare_inputs(
         source_snapshot = recent[0] if recent else None
     try:
         projection = build_account_projection(
-            snapshot_id=snapshot_id, account_alias=account_alias
+            snapshot_id=snapshot_id,
+            account_alias=account_alias,
+            layer_map=layer_map,
         )
     except AccountProjectionError as exc:
         source_error = str(exc)
@@ -112,7 +115,6 @@ def _prepare_inputs(
         "performance_run_id": performance["id"] if performance else None,
         "policy_version_id": policy_version_id,
         "policy_hash": policy_hash_value,
-        "profile_hash": profile_hash,
         "market_evidence_fingerprint": risk_evidence[
             "market_evidence_fingerprint"
         ],
@@ -121,7 +123,6 @@ def _prepare_inputs(
         projection,
         performance,
         policy,
-        profiles,
         risk_evidence=risk_evidence,
         evidence_refs=evidence_refs,
         source_error=source_error,
@@ -137,7 +138,6 @@ def _prepare_inputs(
         if performance
         else None,
         policy_hash=policy_hash_value,
-        profile_hash=profile_hash,
         market_evidence_fingerprint=risk_evidence[
             "market_evidence_fingerprint"
         ],
@@ -159,8 +159,6 @@ def _prepare_inputs(
         else None,
         "policy_version_id": policy_version_id,
         "policy_hash": policy_hash_value,
-        "profile_snapshot": profile_values,
-        "profile_hash": profile_hash,
         # The persistence wrapper retains its historical state column while
         # the result itself uses the explicit allocation evaluability axis.
         "state": persisted_state,

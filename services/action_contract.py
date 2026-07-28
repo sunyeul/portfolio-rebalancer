@@ -18,12 +18,11 @@ PRIORITY_LABELS = {
 }
 
 SUGGESTION_LABELS = {
-    "review_increase_regular_purchase_pace": "향후 정기매수 속도 확대 검토",
-    "review_reduce_or_pause_regular_purchase_pace": "향후 정기매수 속도 축소·중단 검토",
-    "review_increase_regular_purchase_allocation": "향후 정기매수 배분 확대 검토",
-    "review_overweight_normalization": "정기매수 축소·중단 우선 후 초과비중 정상화 검토",
-    "review_thesis_or_constraints": "논지와 제약 조건 검토",
-    "inspect_exceptional_intervention": "예외적 개입 가능성 검토",
+    "review_increase_regular_purchase_pace": "현금 비중 과다: 향후 정기매수 속도 확대 검토",
+    "review_reduce_or_pause_regular_purchase_pace": "현금 비중 확보: 향후 정기매수 축소·중단 검토",
+    "review_increase_regular_purchase_allocation": "비중 확대: 향후 정기매수 배분 확대 검토",
+    "review_overweight_normalization": "초과비중 완화: 향후 정기매수 축소·중단 검토",
+    "inspect_exceptional_intervention": "예외 개입 가능성 점검",
     "hold_and_observe": "관찰 유지",
 }
 
@@ -49,11 +48,10 @@ def unit_suggestion(
     minimum: float | None,
     maximum: float | None,
     triggers: list[str],
-    thesis_status: str | None = None,
     eligible_for_increase: bool = False,
 ) -> tuple[str, dict[str, str]]:
     """Apply the documented precedence and return ``(priority, suggestion)``."""
-    if status == "Action" or "broken_thesis_and_hard_maximum_breach" in triggers:
+    if status == "Action":
         return "P1", suggestion("inspect_exceptional_intervention")
     if kind == "cash":
         if current is not None and minimum is not None and current < minimum:
@@ -69,11 +67,6 @@ def unit_suggestion(
         and eligible_for_increase
     ):
         return "P3", suggestion("review_increase_regular_purchase_allocation")
-    if thesis_status in {"unknown", "watch", "broken"} or any(
-        trigger.endswith("_review") or trigger.endswith("_unknown")
-        for trigger in triggers
-    ):
-        return "P2", suggestion("review_thesis_or_constraints")
     return "P4", suggestion("hold_and_observe")
 
 
@@ -81,7 +74,6 @@ def attach_decision(
     item: Mapping[str, Any],
     *,
     eligible_for_increase: bool = False,
-    thesis_status: str | None = None,
 ) -> dict[str, Any]:
     """Add backend-owned priority and suggestion fields to an evaluable unit."""
     values = dict(item)
@@ -92,7 +84,6 @@ def attach_decision(
         minimum=values.get("minimum"),
         maximum=values.get("maximum"),
         triggers=list(values.get("triggers") or []),
-        thesis_status=thesis_status,
         eligible_for_increase=eligible_for_increase,
     )
     values["priority"] = priority

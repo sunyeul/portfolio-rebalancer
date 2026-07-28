@@ -24,8 +24,6 @@ def insert_evaluation_run(evaluation: dict[str, Any]) -> dict[str, Any]:
         "policy_version_id",
         "source_fingerprint",
         "policy_hash",
-        "profile_snapshot",
-        "profile_hash",
         "engine_version",
         "state",
         "result",
@@ -50,10 +48,10 @@ def insert_evaluation_run(evaluation: dict[str, Any]) -> dict[str, Any]:
             INSERT INTO ips_evaluation_runs (
                 account_alias, snapshot_id, performance_run_id, policy_version_id,
                 source_fingerprint, performance_fingerprint, policy_hash,
-                profile_snapshot_json, profile_hash, engine_version, state,
+                engine_version, state,
                 non_evaluable_reason, result_json, market_evidence_fingerprint,
                 market_evidence_json, evaluation_fingerprint
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 evaluation["account_alias"],
@@ -63,8 +61,6 @@ def insert_evaluation_run(evaluation: dict[str, Any]) -> dict[str, Any]:
                 evaluation["source_fingerprint"],
                 evaluation.get("performance_fingerprint"),
                 evaluation["policy_hash"],
-                _json(evaluation["profile_snapshot"]),
-                evaluation["profile_hash"],
                 evaluation["engine_version"],
                 evaluation["state"],
                 evaluation.get("non_evaluable_reason"),
@@ -79,7 +75,6 @@ def insert_evaluation_run(evaluation: dict[str, Any]) -> dict[str, Any]:
 
 def _decode(row: sqlite3.Row) -> dict[str, Any]:
     result = dict(row)
-    result["profile_snapshot"] = json.loads(result.pop("profile_snapshot_json"))
     result["result"] = json.loads(result.pop("result_json"))
     result["market_evidence"] = json.loads(result.pop("market_evidence_json"))
     result["id"] = int(result["id"])
