@@ -55,3 +55,21 @@ class SourceSnapshot:
 
     def candles_for(self, key: str) -> tuple[Candle, ...]:
         return tuple(item for item in self.candles if item.key == key)
+
+
+@dataclass(frozen=True)
+class ReplayPoint:
+    month: str
+    decision_timestamp: datetime
+    regime: str | None
+    reason: str
+    cutoffs: dict[str, str]
+
+    def record(self) -> dict[str, Any]:
+        return {
+            "month": self.month,
+            "decision_timestamp": self.decision_timestamp.isoformat(),
+            "regime": self.regime,
+            "reason": self.reason,
+            "cutoffs": dict(sorted(self.cutoffs.items())),
+        }
