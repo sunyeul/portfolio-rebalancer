@@ -1,0 +1,18 @@
+{
+  "description": "ACE collaboration context restoration for IPS Pilot.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/ace_session_start.py\"",
+            "timeout": 10,
+            "statusMessage": "Restoring ACE collaboration context"
+          }
+        ]
+      }
+    ]
+  }
+}
