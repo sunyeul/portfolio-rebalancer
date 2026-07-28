@@ -1,0 +1,24 @@
+{
+  "protocol_version": "stage1-v1",
+  "minimum_history": 200,
+  "maximum_staleness_days": 7,
+  "horizons": [20, 60],
+  "minimum_risk_off_episodes": 3,
+  "bootstrap": {
+    "block_months": 3,
+    "samples": 10000,
+    "seed": 20260728,
+    "confidence": 0.95
+  },
+  "availability_rules": {
+    "KR": {"timezone": "Asia/Seoul", "conservative_close": "16:00"},
+    "US": {"timezone": "America/New_York", "conservative_close": "16:00"}
+  },
+  "signal_rule": {
+    "primary_metric": "max_drawdown",
+    "comparison": "risk_off_minus_other",
+    "required_baskets": ["benchmarks", "policy_instruments"],
+    "supported_upper_ci_below": 0.0,
+    "not_supported_point_at_or_above": 0.0
+  }
+}

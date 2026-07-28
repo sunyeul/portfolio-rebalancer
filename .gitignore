@@ -28,3 +28,6 @@ data/*.sqlite3.pre-v*-to-v*-*.bak
 .serena/
 .tokensave/
 .superpowers/
+
+# Isolated Qlib research artifacts
+research/qlib_validation/artifacts/
