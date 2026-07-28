@@ -85,11 +85,13 @@ Within those boundaries, responses should be specific:
 
 ### 4. Side-effect authority
 
-Read-only interpretation may proceed autonomously. Commands that can create or
-refresh evaluations, sync snapshots, activate policy, or otherwise persist
-state remain gated by an explicit user request. A user-authorized state change
-is still subject to the repository contract and is outside this skill-editing
-scope.
+Interpretation of already available evidence may proceed autonomously. A CLI
+command that initializes or migrates the database is not state-free merely
+because its user-facing purpose is reading. Commands that can initialize or
+change storage, create or refresh evaluations, sync snapshots, activate policy,
+or otherwise persist state remain gated by an explicit user request. A
+user-authorized state change is still subject to the repository contract and is
+outside this skill-editing scope.
 
 ## Skill changes
 
@@ -123,6 +125,8 @@ scope.
 - Rank human review directions using current account evidence and user intent,
   with return, profit/loss, concentration, overlap, and gap as supporting
   evidence rather than mechanical triggers.
+- Label a request-scoped analysis rank separately from persisted backend
+  `priority`; never present one as the other.
 - Permit a separate candidate-instrument section when a new instrument has a
   distinct role. Do not mix a non-held candidate into current-weight or
   unrealized-profit calculations.
