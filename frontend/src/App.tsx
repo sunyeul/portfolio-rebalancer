@@ -157,39 +157,6 @@ function AllocationOverview({ cash, layers, instruments, layerByIdentity }: { ca
   </section>;
 }
 
-function AnnualTargetCard({ performance }: { performance?: JsonObject }) {
-  const historyDays = finiteNumber(performance?.history_days);
-  const measurement = String(performance?.measurement ?? "ytd_twr");
-  const ytdTwr = finiteNumber(performance?.ytd_twr) ?? (measurement === "ytd_twr" ? finiteNumber(performance?.annual_twr) : null);
-  const trailingTwr = finiteNumber(performance?.trailing_12m_twr);
-  return <article className="annual-target-card">
-    <div className="annual-target-heading"><div><p className="eyebrow">YTD ACCOUNT TARGET</p><h2>연간 목표 점검</h2></div><Status value={performance?.status} /></div>
-    <div className="annual-target-comparison">
-      <div><span>현재 YTD 계좌 TWR</span><strong>{ytdTwr === null ? "산출 전" : percent(ytdTwr)}</strong></div>
-      <div><span>연간 목표</span><strong>{percent(performance?.annual_target)}</strong></div>
-    </div>
-    <dl className="annual-target-facts">
-      <div><dt>누적 계좌 TWR</dt><dd>{percent(performance?.cumulative_twr)}</dd></div>
-      <div><dt>지원 이력</dt><dd>{historyDays === null ? "—" : `${historyDays.toLocaleString()}일`}</dd></div>
-      <div><dt>최근 1년 보조</dt><dd>{trailingTwr === null ? "산출 전" : percent(trailingTwr)}</dd></div>
-    </dl>
-    <small>{measurement === "ytd_twr" ? "YTD는 1월 1일 기준 스냅샷과 이후 평가 포인트가 있어야 산출합니다." : "최근 1년 TWR은 365일 근거가 쌓인 뒤 산출합니다."} 보유 평가손익률과는 다른 계좌 성과 지표입니다.</small>
-  </article>;
-}
-
-function CashReserveOverview({ cash, cashValue }: { cash?: JsonObject | null; cashValue?: unknown }) {
-  const supportedCashValue = finiteNumber(cashValue) ?? finiteNumber(cash?.cash_value_krw);
-  return <section className="section cash-reserve-overview">
-    <div className="section-title"><div><p className="eyebrow">CASH RESERVE</p><h2>현금 리저브</h2></div><div className="section-status"><span className="denominator">총계좌 평가금 기준</span><Status value={cash?.status} /></div></div>
-    <div className="cash-reserve-grid">
-      <article className="cash-reserve-current"><span>현재 현금</span><strong>{money(supportedCashValue)}</strong><small>현재 비중 {percent(cash?.current)}</small></article>
-      <article><span>최소</span><strong>{percent(cash?.minimum)}</strong><small>승인 범위 하단</small></article>
-      <article><span>목표</span><strong>{percent(cash?.target)}</strong><small>정책 기준점</small></article>
-      <article><span>최대</span><strong>{percent(cash?.maximum)}</strong><small>승인 범위 상단</small></article>
-    </div>
-  </section>;
-}
-
 const queueKindLabel: Record<string, string> = { source: "원천", cash: "현금", layer: "레이어", instrument: "종목", performance: "성과", account_risk: "계좌 리스크" };
 
 function ReviewQueue({ items }: { items: InspectionItem[] }) {
