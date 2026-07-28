@@ -120,6 +120,48 @@ def test_forecast_rejects_a_holdout_without_a_label_embargo(snapshot_factory):
         )
 
 
+def test_chronological_splits_purge_labels_that_reach_the_next_segment():
+    from research.qlib_validation.forecast import _split, _split_inner_validation
+
+    sessions = pd.date_range("2026-01-01", periods=10, freq="D")
+    rows = [
+        {
+            "key": key,
+            "decision_session": decision.date().isoformat(),
+            "target_session": sessions[min(index + 1, len(sessions) - 1)]
+            .date()
+            .isoformat(),
+        }
+        for index, decision in enumerate(sessions)
+        for key in ("KR/KOSPI", "US/SPY")
+    ]
+    labeled = pd.DataFrame(rows)
+    labeled.loc[
+        (labeled["key"] == "KR/KOSPI")
+        & (labeled["decision_session"] == "2026-01-07"),
+        "target_session",
+    ] = "2026-01-09"
+
+    train, holdout = _split(
+        labeled,
+        test_sessions=2,
+        embargo_sessions=1,
+        minimum_train_dates=3,
+    )
+    inner_train, validation = _split_inner_validation(
+        train,
+        embargo_sessions=1,
+        validation_sessions=2,
+        minimum_train_dates=2,
+    )
+
+    assert train["target_session"].max() < holdout["decision_session"].min()
+    assert (
+        inner_train["target_session"].max()
+        < validation["decision_session"].min()
+    )
+
+
 def test_lightgbm_refits_on_full_outer_train_after_inner_selection(
     snapshot_factory, monkeypatch
 ):

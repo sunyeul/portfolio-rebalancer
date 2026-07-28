@@ -80,18 +80,24 @@ def _available_at(candle_at: datetime, market_country: str) -> datetime:
     return datetime.combine(session_date, conservative_close, timezone).astimezone(UTC)
 
 
-def _active_policy(conn: sqlite3.Connection) -> dict[str, Any]:
+def _active_policy(
+    conn: sqlite3.Connection, *, as_of: datetime
+) -> dict[str, Any]:
+    as_of_utc = _require_aware(as_of, label="as_of")
     row = conn.execute(
         """
         SELECT id, account_alias, version, policy_json, policy_hash, created_at
         FROM ips_policy_versions
-        WHERE account_alias = 'toss-brokerage' AND superseded_at IS NULL
+        WHERE account_alias = 'toss-brokerage'
+          AND datetime(created_at) <= datetime(?)
+          AND (superseded_at IS NULL OR datetime(superseded_at) > datetime(?))
         ORDER BY version DESC, id DESC
         LIMIT 1
-        """
+        """,
+        (as_of_utc.isoformat(), as_of_utc.isoformat()),
     ).fetchone()
     if row is None:
-        raise SourceError("active toss-brokerage policy not found")
+        raise SourceError("toss-brokerage policy unavailable at research as_of")
     try:
         policy = json.loads(row["policy_json"])
     except (TypeError, json.JSONDecodeError) as error:
@@ -374,11 +380,12 @@ def _load_series(
                 AND revision.interval = current.interval
                 AND revision.candle_at = current.candle_at
                 AND revision.adjusted = current.adjusted
+                AND datetime(revision.created_at) <= datetime(?)
           )
         """
         + adjusted_filter
         + " ORDER BY datetime(current.candle_at), current.id",
-        (spec.source_kind, spec.market_country, spec.symbol),
+        (spec.source_kind, spec.market_country, spec.symbol, as_of.isoformat()),
     ).fetchall()
     result: list[Candle] = []
     timezone = _availability()[spec.market_country][0]
@@ -438,7 +445,7 @@ def load_snapshot(
     if universe not in UNIVERSE_MODES:
         raise SourceError(f"unsupported research universe: {universe}")
     with open_readonly(path) as conn:
-        policy_record = _active_policy(conn)
+        policy_record = _active_policy(conn, as_of=as_of_utc)
         benchmark_specs, policy_specs = _specs(policy_record["policy"])
         research_universe: dict[str, Any] = {"mode": "active-policy"}
         if universe == "current-holdings":

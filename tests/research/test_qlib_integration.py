@@ -51,6 +51,11 @@ def _seed_dynamic_policy(database):
             "WHERE account_alias = 'toss-brokerage' AND superseded_at IS NULL",
             (canonical_policy_json(dynamic), policy_hash(dynamic)),
         )
+        conn.execute(
+            "UPDATE ips_policy_versions SET created_at = ? "
+            "WHERE account_alias = 'toss-brokerage' AND superseded_at IS NULL",
+            ("2023-01-01T00:00:00+00:00",),
+        )
     return dynamic
 
 
@@ -106,6 +111,11 @@ def test_real_cli_keeps_fixture_database_bytes_unchanged(monkeypatch, capsys, tm
                 }
                 for index, session in enumerate(sessions)
             ]
+        )
+    with sqlite3.connect(database) as conn:
+        conn.execute(
+            "UPDATE toss_market_candles SET created_at = ?",
+            ("2023-01-01T00:00:00+00:00",),
         )
     before = sha256(database.read_bytes()).hexdigest()
     as_of = datetime.combine(

@@ -285,8 +285,13 @@ def _split(
     test_sessions_set = set(sessions[-test_sessions:])
     train = labeled[labeled["decision_session"].isin(train_sessions)].copy()
     holdout = labeled[labeled["decision_session"].isin(test_sessions_set)].copy()
+    if not holdout.empty:
+        holdout_start = pd.to_datetime(holdout["decision_session"]).min()
+        train = train[pd.to_datetime(train["target_session"]) < holdout_start].copy()
     if train.empty or holdout.empty:
         raise ForecastError("chronological train or holdout frame is empty")
+    if train["decision_session"].nunique() < minimum_train_dates:
+        raise ForecastError("insufficient chronological history after label embargo")
     return train, holdout
 
 
@@ -307,8 +312,17 @@ def _split_inner_validation(
     validation_sessions_set = set(sessions[-validation_sessions:])
     inner_train = train[train["decision_session"].isin(train_sessions)].copy()
     validation = train[train["decision_session"].isin(validation_sessions_set)].copy()
+    if not validation.empty:
+        validation_start = pd.to_datetime(validation["decision_session"]).min()
+        inner_train = inner_train[
+            pd.to_datetime(inner_train["target_session"]) < validation_start
+        ].copy()
     if inner_train.empty or validation.empty:
         raise ForecastError("LightGBM inner train or validation frame is empty")
+    if inner_train["decision_session"].nunique() < minimum_train_dates:
+        raise ForecastError(
+            "insufficient chronological history after LightGBM label embargo"
+        )
     return inner_train, validation
 
 

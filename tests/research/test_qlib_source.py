@@ -49,6 +49,11 @@ def _seed_dynamic_policy(database):
             "WHERE account_alias = 'toss-brokerage' AND superseded_at IS NULL",
             (canonical_policy_json(dynamic), policy_hash(dynamic)),
         )
+        conn.execute(
+            "UPDATE ips_policy_versions SET created_at = ? "
+            "WHERE account_alias = 'toss-brokerage' AND superseded_at IS NULL",
+            ("2025-12-01T00:00:00+00:00",),
+        )
     return dynamic
 
 
@@ -100,7 +105,15 @@ def _holding(symbol: str, market_country: str) -> NormalizedHolding:
     )
 
 
-def _seed_factor_history(policy, *, sessions: list[date]) -> set[str]:
+def _backdate_candles(database, created_at="2026-01-01T00:00:00+00:00"):
+    with sqlite3.connect(database) as conn:
+        conn.execute(
+            "UPDATE toss_market_candles SET created_at = ?",
+            (created_at,),
+        )
+
+
+def _seed_factor_history(database, policy, *, sessions: list[date]) -> set[str]:
     specs = [
         *allocation_benchmarks(policy),
         *[
@@ -131,6 +144,7 @@ def _seed_factor_history(policy, *, sessions: list[date]) -> set[str]:
                 for index, session in enumerate(sessions)
             ]
         )
+    _backdate_candles(database)
     return {f"{item['market_country']}/{item['symbol']}" for item in unique.values()}
 
 
@@ -169,7 +183,9 @@ def test_snapshot_reads_active_policy_and_never_opens_database_for_write(
                     "adjusted_supported": spec["source_kind"] == "stock",
                 }
             ]
-        )
+            )
+
+    _backdate_candles(database)
 
     snapshot = load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
     assert snapshot.policy_record["policy_hash"] == active["policy_hash"]
@@ -195,7 +211,7 @@ def test_snapshot_derives_trailing_factor_without_future_candles(tmp_path, monke
     initialize_database()
     policy = _seed_dynamic_policy(database)
     sessions = _weekday_sessions(date(2026, 1, 2), 21)
-    keys = _seed_factor_history(policy, sessions=sessions)
+    keys = _seed_factor_history(database, policy, sessions=sessions)
 
     complete = load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
 
@@ -220,7 +236,7 @@ def test_current_holdings_universe_uses_only_latest_complete_toss_holdings(
     initialize_database()
     policy = _seed_dynamic_policy(database)
     sessions = _weekday_sessions(date(2026, 1, 2), 21)
-    _seed_factor_history(policy, sessions=sessions)
+    _seed_factor_history(database, policy, sessions=sessions)
     account_snapshot = insert_snapshot(
         replace(
             _snapshot(
@@ -263,7 +279,9 @@ def test_current_holdings_universe_rejects_a_snapshot_after_research_as_of(
     monkeypatch.setenv("PORTFOLIO_DB_PATH", str(database))
     initialize_database()
     policy = _seed_dynamic_policy(database)
-    _seed_factor_history(policy, sessions=_weekday_sessions(date(2026, 1, 2), 21))
+    _seed_factor_history(
+        database, policy, sessions=_weekday_sessions(date(2026, 1, 2), 21)
+    )
     insert_snapshot(
         replace(
             _snapshot(
@@ -290,7 +308,9 @@ def test_current_holdings_universe_replays_the_latest_snapshot_available_at_as_o
     monkeypatch.setenv("PORTFOLIO_DB_PATH", str(database))
     initialize_database()
     policy = _seed_dynamic_policy(database)
-    _seed_factor_history(policy, sessions=_weekday_sessions(date(2026, 1, 2), 21))
+    _seed_factor_history(
+        database, policy, sessions=_weekday_sessions(date(2026, 1, 2), 21)
+    )
     earlier = insert_snapshot(
         replace(
             _snapshot(fingerprint="earlier", synced_at="2026-02-01T00:00:00+00:00"),
@@ -322,7 +342,7 @@ def test_snapshot_uses_latest_candle_revision_once(tmp_path, monkeypatch):
     initialize_database()
     policy = _seed_dynamic_policy(database)
     sessions = _weekday_sessions(date(2026, 1, 2), 21)
-    _seed_factor_history(policy, sessions=sessions)
+    _seed_factor_history(database, policy, sessions=sessions)
     spy = next(
         item
         for item in allocation_benchmarks(policy)
@@ -332,6 +352,7 @@ def test_snapshot_uses_latest_candle_revision_once(tmp_path, monkeypatch):
         sessions[-1], time(9, 30), ZoneInfo("America/New_York")
     ).isoformat()
     insert_candles([_candle(spy, revised_at, price=130.0)])
+    _backdate_candles(database)
 
     snapshot = load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
     spy_candles = [item for item in snapshot.candles if item.key == "US/SPY"]
@@ -339,6 +360,70 @@ def test_snapshot_uses_latest_candle_revision_once(tmp_path, monkeypatch):
     assert len(spy_candles) == 1
     assert spy_candles[0].close_price == 130.0
     assert spy_candles[0].factor == pytest.approx(0.3)
+
+
+def test_policy_selection_respects_research_as_of(tmp_path, monkeypatch):
+    from research.qlib_validation.source import _active_policy, open_readonly
+
+    database = tmp_path / "portfolio.sqlite3"
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(database))
+    initialize_database()
+    earlier = _seed_dynamic_policy(database)
+    later = deepcopy(earlier)
+    later["performance"]["annual_return_target"] = 0.12
+    with sqlite3.connect(database) as conn:
+        active_id = conn.execute(
+            "SELECT id FROM ips_policy_versions WHERE superseded_at IS NULL"
+        ).fetchone()[0]
+        conn.execute(
+            "UPDATE ips_policy_versions SET created_at = ?, superseded_at = ? WHERE id = ?",
+            ("2026-01-01T00:00:00+00:00", "2026-03-01T00:00:00+00:00", active_id),
+        )
+        conn.execute(
+            "INSERT INTO ips_policy_versions "
+            "(account_alias, version, policy_json, policy_hash, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                "toss-brokerage",
+                2,
+                canonical_policy_json(later),
+                policy_hash(later),
+                "2026-03-01T00:00:00+00:00",
+            ),
+        )
+
+    with open_readonly(database) as conn:
+        selected = _active_policy(conn, as_of=datetime(2026, 2, 1, tzinfo=UTC))
+
+    assert selected["version"] == 1
+    assert selected["policy_hash"] == policy_hash(earlier)
+
+
+def test_candle_revision_selection_respects_research_as_of(tmp_path, monkeypatch):
+    from research.qlib_validation.contracts import SeriesSpec
+    from research.qlib_validation.source import _load_series, open_readonly
+
+    database = tmp_path / "portfolio.sqlite3"
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(database))
+    initialize_database()
+    spec = SeriesSpec("US/SPY", "stock", "US", "SPY", 1.0, "policy_instrument")
+    candle_at = "2026-01-30T09:30:00-05:00"
+    insert_candles([_candle(spec.__dict__, candle_at, price=100.0)])
+    insert_candles([_candle(spec.__dict__, candle_at, price=130.0)])
+    with sqlite3.connect(database) as conn:
+        conn.execute(
+            "UPDATE toss_market_candles SET created_at = CASE close_price "
+            "WHEN 100.0 THEN '2026-01-31T00:00:00+00:00' "
+            "ELSE '2026-02-02T00:00:00+00:00' END"
+        )
+
+    with open_readonly(database) as conn:
+        candles = _load_series(
+            conn, spec, as_of=datetime(2026, 2, 1, tzinfo=UTC)
+        )
+
+    assert len(candles) == 1
+    assert candles[0].close_price == 100.0
 
 
 def test_readonly_transaction_keeps_one_snapshot_during_concurrent_commit(
@@ -380,6 +465,11 @@ def test_default_policy_without_dynamic_allocation_fails_closed(tmp_path, monkey
     database = tmp_path / "portfolio.sqlite3"
     monkeypatch.setenv("PORTFOLIO_DB_PATH", str(database))
     initialize_database()
+    with sqlite3.connect(database) as conn:
+        conn.execute(
+            "UPDATE ips_policy_versions SET created_at = ?",
+            ("2025-12-01T00:00:00+00:00",),
+        )
 
     with pytest.raises(SourceError, match="dynamic allocation policy configuration"):
         load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
@@ -451,6 +541,7 @@ def test_snapshot_rejects_invalid_or_gapped_candles(tmp_path, monkeypatch):
             _candle(spec, "2026-01-30T09:30:00-05:00", price=-101.0),
         ]
     )
+    _backdate_candles(database)
 
     with pytest.raises(SourceError, match="invalid positive OHLC"):
         load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
@@ -463,6 +554,7 @@ def test_snapshot_rejects_invalid_or_gapped_candles(tmp_path, monkeypatch):
             _candle(spec, "2026-01-30T09:30:00-05:00"),
         ]
     )
+    _backdate_candles(database)
 
     with pytest.raises(SourceError, match="history gap"):
         load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
