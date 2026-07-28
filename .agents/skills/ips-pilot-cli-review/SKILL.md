@@ -36,6 +36,11 @@ The CLI emits one JSON object. Check `ok`, `error`, and
 evaluation contains `run_id`, `snapshot_id`, `state`, and `evaluation`; read
 the inspection result from `evaluation.result`.
 
+If `ok` is false, `error` is non-null, or `contract_supported` is false, stop
+interpretation. Report the machine-readable error or unsupported-contract
+reason and the verification needed; do not summarize or repair the
+`evaluation` payload.
+
 Use these result fields as separate axes:
 
 - `allocation_state`: whether allocation is evaluable.
@@ -62,10 +67,16 @@ The second and third classes can support a per-holding direction, alternative
 comparison, or new-instrument scenario, but they cannot replace saved facts,
 change the active policy, or be presented as current account weights.
 
+A candidate instrument is not a current holding: keep its status, priority,
+queue class, weight, return, and profit/loss unasserted until it appears in a
+normalized Toss snapshot.
+
 ## Response shape
 
 1. State `run_id`, `snapshot_id`, and whether the contract is supported.
-2. Summarize the four status counts and material allocation state.
+2. Repeat the four status counts and material allocation state only when they
+   are present in the persisted result. Never infer missing counts, weights,
+   gaps, or allocation state from a partial payload or queue item.
 3. For non-`OK` findings, give the raw trigger, plain Korean meaning, the
    adjustment direction, and the verification task. When the user supplied a
    role or target, label it as a response-scoped analysis input and show any
@@ -75,6 +86,11 @@ change the active policy, or be presented as current account weights.
    clearly labeled conditional scenario or alternative comparison when useful.
 5. End with verification or future regular-purchase-policy review—not a buy,
    sell, quantity, price, timing, or execution instruction.
+
+Use plain inspection directions such as `maintain`, `future-allocation
+direction`, `concentration-normalization review`, or `exceptional-review`.
+Do not paraphrase any direction as a transaction verb or add a percentage,
+quantity, price, timing, or execution step.
 
 Missing, stale, unreconciled, or incomplete source data is a blocking
 verification item. `Action` means inspect a possible exceptional intervention;
