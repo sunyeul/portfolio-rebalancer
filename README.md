@@ -141,7 +141,8 @@ Preview는 정책을 활성화하거나 평가 행을 저장하지 않습니다.
 ```bash
 uv run ruff format --check .
 uv run ruff check .
-uv run pytest -q
+uv run pytest -q tests --ignore=tests/research
+uv run --project research/qlib_validation pytest -q tests/research
 ```
 
-현재 구현은 Phase 0–4의 Toss 전용 관찰·대시보드와 Phase 5의 손익·drawdown·예외 검토 및 `phase5-v2` 결과-first 비중 조정 계약까지 포함합니다. Phase 6(인증된 의도 편집과 사람의 결정 기록)은 다음 로드맵 단계입니다. 현재 로드맵은 [`docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md`](docs/superpowers/specs/2026-07-22-cash-account-observability-roadmap-design.md)에 있으며, 승인된 Pattern B 정책은 [`docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md`](docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md)에 기록되어 있습니다.
+현재 구현은 Phase 0–4의 Toss 전용 관찰·대시보드와 Phase 5의 손익·drawdown·예외 검토 및 `phase5-v2` 결과-first 비중 조정 계약까지 포함합니다. 인증된 의도 편집과 사람의 결정 기록은 아직 구현하지 않습니다. 승인된 Pattern B 정책은 [`docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md`](docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md)에 기록되어 있습니다.

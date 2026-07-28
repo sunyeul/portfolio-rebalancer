@@ -15,14 +15,22 @@ wheels/
 !.env.example
 
 # Frontend dependencies and build output
+/node_modules/
 frontend/node_modules/
 frontend/dist/
 frontend/tsconfig.tsbuildinfo
+
+# Local scratch and research output
+/.codex_tmp/
+/mlruns/
+/private/
 
 # Local SQLite data
 data/*.sqlite3
 data/*.sqlite3-*
 data/*.sqlite3.pre-v*-to-v*-*.bak
+data/*.db
+data/stream_store/
 
 # Local agent indexes and memories
 .serena/
