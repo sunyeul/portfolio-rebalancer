@@ -107,9 +107,7 @@ def _seed_factor_history(policy, *, sessions: list[date]) -> set[str]:
                 for index, session in enumerate(sessions)
             ]
         )
-    return {
-        f"{item['market_country']}/{item['symbol']}" for item in unique.values()
-    }
+    return {f"{item['market_country']}/{item['symbol']}" for item in unique.values()}
 
 
 def test_snapshot_reads_active_policy_and_never_opens_database_for_write(

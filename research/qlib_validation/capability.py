@@ -32,6 +32,12 @@ def static_roundtrip(snapshot: SourceSnapshot) -> dict[str, Any]:
 
 def assess_capability(snapshot: SourceSnapshot) -> dict[str, Any]:
     reasons: list[str] = []
+    required_keys = {
+        spec.key for spec in (*snapshot.benchmark_specs, *snapshot.policy_specs)
+    }
+    observed_keys = {item.key for item in snapshot.candles}
+    if required_keys - observed_keys:
+        reasons.append("required_series_unavailable")
     if not snapshot.candles or any(item.factor is None for item in snapshot.candles):
         reasons.append("factor_unavailable")
     if {item.market_country for item in snapshot.benchmark_specs} != {"KR", "US"}:

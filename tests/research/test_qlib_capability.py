@@ -27,3 +27,18 @@ def test_static_loader_round_trip_preserves_verified_fixture(snapshot_factory):
         snapshot.policy_record, snapshot.benchmark_specs, snapshot.policy_specs, candles
     )
     assert static_roundtrip(verified) == {"rows": len(candles), "matched": True}
+
+
+def test_capability_fails_closed_when_a_required_series_is_absent(snapshot_factory):
+    snapshot = snapshot_factory()
+    candles = tuple(
+        replace(item, factor=1.0) for item in snapshot.candles if item.key != "US/TQQQ"
+    )
+    incomplete = SourceSnapshot(
+        snapshot.policy_record, snapshot.benchmark_specs, snapshot.policy_specs, candles
+    )
+
+    result = assess_capability(incomplete)
+
+    assert result["data_adapter_suitable"] is False
+    assert "required_series_unavailable" in result["reasons"]
