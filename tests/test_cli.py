@@ -5,6 +5,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from cli import app
+from services.dynamic_allocation import DEFAULT_ALLOCATION_REVIEW
 
 
 runner = CliRunner()
@@ -30,7 +31,6 @@ def test_help_exposes_only_toss_product_commands():
         "toss-sync",
         "toss-snapshots",
         "performance",
-        "profiles",
         "account-view",
         "policy",
         "inspection",
@@ -50,7 +50,7 @@ def test_account_view_emits_one_projection_json(monkeypatch):
     )
     monkeypatch.setattr(
         "cli.build_account_projection",
-        lambda snapshot_id=None: {"snapshot_id": snapshot_id or 7},
+        lambda snapshot_id=None, layer_map=None: {"snapshot_id": snapshot_id or 7},
     )
 
     result = runner.invoke(app, ["account-view", "--snapshot-id", "7"])
@@ -68,7 +68,7 @@ def test_account_view_returns_machine_readable_error(monkeypatch):
     monkeypatch.setattr("cli.initialize_database", lambda: None)
     monkeypatch.setattr(
         "cli.build_account_projection",
-        lambda snapshot_id=None: (_ for _ in ()).throw(
+        lambda snapshot_id=None, layer_map=None: (_ for _ in ()).throw(
             ValueError("complete Toss snapshot not found")
         ),
     )
@@ -80,89 +80,6 @@ def test_account_view_returns_machine_readable_error(monkeypatch):
     assert payload["ok"] is False
     assert payload["command"] == "account-view"
     assert payload["error"]["message"] == "complete Toss snapshot not found"
-
-
-def test_profiles_set_only_emits_profile_metadata(monkeypatch):
-    monkeypatch.setattr("cli.initialize_database", lambda: None)
-    monkeypatch.setattr(
-        "cli.upsert_profile",
-        lambda **kwargs: {
-            "account_alias": "toss-brokerage",
-            "market_country": kwargs["market_country"].upper(),
-            "symbol": kwargs["symbol"].upper(),
-            "layer": kwargs["layer"],
-            "thesis_status": kwargs["thesis_status"],
-            "thesis_note": kwargs["thesis_note"],
-        },
-    )
-
-    result = runner.invoke(
-        app,
-        [
-            "profiles",
-            "set",
-            "--symbol",
-            "AAPL",
-            "--market-country",
-            "US",
-            "--layer",
-            "core",
-            "--thesis-status",
-            "valid",
-            "--note",
-            "Long-term core",
-        ],
-    )
-
-    assert result.exit_code == 0
-    payload = _payload(result)
-    assert payload["command"] == "profiles set"
-    assert payload["profile"]["symbol"] == "AAPL"
-    assert "quantity" not in payload["profile"]
-    assert "market_value_krw" not in payload["profile"]
-
-
-def test_profiles_set_forwards_structured_review_factors(monkeypatch):
-    captured = {}
-    monkeypatch.setattr("cli.initialize_database", lambda: None)
-
-    def persist(**kwargs):
-        captured.update(kwargs)
-        return {"symbol": kwargs["symbol"], **kwargs}
-
-    monkeypatch.setattr("cli.upsert_profile", persist)
-    result = runner.invoke(
-        app,
-        [
-            "profiles",
-            "set",
-            "--symbol",
-            "NBIS",
-            "--market-country",
-            "US",
-            "--layer",
-            "satellite",
-            "--thesis-status",
-            "watch",
-            "--overlap-status",
-            "review",
-            "--management-burden-status",
-            "clear",
-            "--holdability-status",
-            "unknown",
-            "--etf-substitution-status",
-            "not_applicable",
-            "--review-factors-note",
-            "ETF 대체 검토",
-        ],
-    )
-
-    assert result.exit_code == 0
-    assert captured["overlap_status"] == "review"
-    assert captured["management_burden_status"] == "clear"
-    assert captured["holdability_status"] == "unknown"
-    assert captured["etf_substitution_status"] == "not_applicable"
-    assert captured["review_factors_note"] == "ETF 대체 검토"
 
 
 def test_inspection_preview_emits_one_non_persisting_json_object(monkeypatch, tmp_path):
@@ -309,28 +226,33 @@ def test_web_rejects_non_loopback_binding():
     assert _payload(result)["error"]["stage"] == "input"
 
 
-def test_market_context_persists_candidate_without_activation(monkeypatch):
+def test_market_context_persists_composite_candidate_without_activation(monkeypatch):
     candidate_calls = []
+    captured = {}
     active = {
         "id": 8,
         "account_alias": "toss-brokerage",
         "created_at": "2026-07-01T00:00:00+00:00",
-        "policy": {"cash_reserve": {"target": 0.15}},
+        "policy": {
+            "cash_reserve": {"target": 0.05},
+            "allocation_review": DEFAULT_ALLOCATION_REVIEW,
+        },
     }
     monkeypatch.setattr("cli.initialize_database", lambda: None)
     monkeypatch.setattr("cli.get_active_policy", lambda: active)
-    monkeypatch.setattr("cli.list_candles", lambda **_: [{"close_price": 1}])
-    monkeypatch.setattr(
-        "cli.evaluate_market_context",
-        lambda candles, **kwargs: {
+    monkeypatch.setattr("cli.list_candles", lambda **kwargs: [kwargs])
+
+    def evaluate(series, **kwargs):
+        captured["series"] = series
+        captured.update(kwargs)
+        return {
             "status": "Review",
             "candidate_state": "candidate",
-            "current_target": 0.15,
-            "proposed_target": 0.2,
-            "history_points": 200,
+            "regime": "risk_on",
             "verification_task": "verify",
-        },
-    )
+        }
+
+    monkeypatch.setattr("cli.evaluate_dynamic_allocation", evaluate)
 
     def persist(candidate):
         candidate_calls.append(candidate)
@@ -345,7 +267,165 @@ def test_market_context_persists_candidate_without_activation(monkeypatch):
     payload = _payload(result)
     assert payload["candidate"]["id"] == 3
     assert candidate_calls[0]["base_policy_version_id"] == 8
+    assert set(captured["series"]) == {
+        "US/SPY",
+        "US/QQQ",
+        "KR/KOSPI",
+        "KR/KOSDAQ",
+    }
+    assert captured["active_policy"] is active["policy"]
+    assert captured["last_change_at"] == active["created_at"]
     assert payload["activation"] == "human approval required; active policy unchanged"
+
+
+def test_market_sync_deduplicates_required_stocks_and_collects_both_indicators(
+    monkeypatch,
+):
+    calls = []
+
+    class Service:
+        def collect_history(self, **kwargs):
+            calls.append(kwargs)
+            return []
+
+    class Transport:
+        def close(self):
+            return None
+
+    active = {
+        "id": 8,
+        "account_alias": "toss-brokerage",
+        "created_at": "2026-07-01T00:00:00+00:00",
+        "policy": {"allocation_review": DEFAULT_ALLOCATION_REVIEW},
+    }
+    monkeypatch.setattr("cli.initialize_database", lambda: None)
+    monkeypatch.setattr("cli.get_active_policy", lambda: active)
+    monkeypatch.setattr("cli.list_observed_identities", lambda: [("US", "SPY")])
+    monkeypatch.setattr(
+        "cli._build_toss_market_service", lambda: (Service(), Transport())
+    )
+    monkeypatch.setattr("cli.insert_candles", lambda candles: list(candles))
+    monkeypatch.setattr("cli.list_candles", lambda **_: [])
+    monkeypatch.setattr(
+        "cli.evaluate_dynamic_allocation",
+        lambda *args, **kwargs: {
+            "status": "Watch",
+            "candidate_state": "observe",
+        },
+    )
+
+    result = runner.invoke(
+        app,
+        ["market", "sync", "--symbols", "US/SPY,US/QQQ"],
+    )
+
+    assert result.exit_code == 0
+    stock_calls = [call for call in calls if call["source_kind"] == "stock"]
+    indicator_calls = [
+        call for call in calls if call["source_kind"] == "market_indicator"
+    ]
+    assert [(call["market_country"], call["symbol"]) for call in stock_calls] == [
+        ("US", "SPY"),
+        ("US", "QQQ"),
+    ]
+    assert [call["symbol"] for call in indicator_calls] == ["KOSPI", "KOSDAQ"]
+    assert _payload(result)["symbols"] == [
+        "US/SPY",
+        "US/QQQ",
+        "KR/KOSPI",
+        "KR/KOSDAQ",
+    ]
+
+
+def test_market_sync_research_only_collects_policy_universe_without_policy_side_effects(
+    monkeypatch,
+):
+    calls = []
+
+    class Service:
+        def collect_history(self, **kwargs):
+            calls.append(kwargs)
+            return []
+
+    class Transport:
+        def close(self):
+            return None
+
+    active = {
+        "id": 8,
+        "account_alias": "toss-brokerage",
+        "created_at": "2026-07-01T00:00:00+00:00",
+        "policy": {
+            "instruments": [
+                {"market_country": "US", "symbol": "SPY"},
+                {"market_country": "US", "symbol": "GLD"},
+            ],
+            "allocation_review": DEFAULT_ALLOCATION_REVIEW,
+        },
+    }
+    monkeypatch.setattr("cli.initialize_database", lambda: None)
+    monkeypatch.setattr("cli.get_active_policy", lambda: active)
+    monkeypatch.setattr("cli.list_observed_identities", lambda: [("US", "SPY")])
+    monkeypatch.setattr(
+        "cli._build_toss_market_service", lambda: (Service(), Transport())
+    )
+    monkeypatch.setattr("cli.insert_candles", lambda candles: list(candles))
+    monkeypatch.setattr("cli.list_candles", lambda **_: [])
+    monkeypatch.setattr(
+        "cli.evaluate_dynamic_allocation",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("research-only must not evaluate allocation")
+        ),
+    )
+    monkeypatch.setattr(
+        "cli.insert_policy_candidate",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("research-only must not persist policy candidates")
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "market",
+            "sync",
+            "--research-only",
+            "--target-points",
+            "756",
+            "--max-pages",
+            "4",
+        ],
+    )
+
+    assert result.exit_code == 0
+    stock_calls = [call for call in calls if call["source_kind"] == "stock"]
+    indicator_calls = [
+        call for call in calls if call["source_kind"] == "market_indicator"
+    ]
+    assert [(call["market_country"], call["symbol"]) for call in stock_calls] == [
+        ("US", "SPY"),
+        ("US", "GLD"),
+        ("US", "QQQ"),
+    ]
+    assert [call["symbol"] for call in indicator_calls] == ["KOSPI", "KOSDAQ"]
+    assert all(call["target_points"] == 756 for call in calls)
+    assert _payload(result) == {
+        "ok": True,
+        "command": "market sync",
+        "symbols": [
+            "US/SPY",
+            "US/GLD",
+            "US/QQQ",
+            "KR/KOSPI",
+            "KR/KOSDAQ",
+        ],
+        "candle_count": 0,
+        "context": None,
+        "candidate": None,
+        "research_only": True,
+        "target_points": 756,
+        "error": None,
+    }
 
 
 def test_policy_validate_emits_one_json_object(monkeypatch, tmp_path):

@@ -6,7 +6,7 @@ import json
 import math
 import sys
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Mapping
 
 import typer
 
@@ -15,16 +15,18 @@ from integrations.toss.config import TossApiConfig
 from integrations.toss.observation import TossObservationService
 from integrations.toss.market import TossMarketDataService
 from integrations.toss.transport import TossTransport
-from services.account_projection import build_account_projection
+from services.account_projection import build_account_projection, layer_map_from_policy
+from services.dynamic_allocation import (
+    allocation_benchmarks,
+    evaluate_dynamic_allocation,
+)
 from services.inspection_service import preview_inspection, run_inspection
-from services.market_context import evaluate_market_context
 from storage.account_observation_store import (
     get_snapshot as get_account_snapshot,
     list_snapshots as list_account_snapshots,
 )
 from storage.database import initialize_database
 from storage.evaluation_store import get_evaluation_run, latest_evaluation_run
-from storage.instrument_profile_store import upsert_profile
 from storage.policy_store import (
     activate_policy,
     get_active_policy,
@@ -52,12 +54,10 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 performance_app = typer.Typer(help="Inspect Toss account performance history.")
-profiles_app = typer.Typer(help="Manage Toss instrument IPS profiles.")
 policy_app = typer.Typer(help="Inspect and activate versioned Toss IPS policies.")
 inspection_app = typer.Typer(help="Run and inspect deterministic Toss evaluations.")
 market_app = typer.Typer(help="Inspect official Toss market context.")
 app.add_typer(performance_app, name="performance")
-app.add_typer(profiles_app, name="profiles")
 app.add_typer(policy_app, name="policy")
 app.add_typer(inspection_app, name="inspection")
 app.add_typer(market_app, name="market")
@@ -120,6 +120,30 @@ def _build_toss_market_service() -> tuple[TossMarketDataService, TossTransport]:
     tokens = TossTokenProvider(config, transport)
     reader = TossAuthorizedReader(config, transport, tokens)
     return TossMarketDataService(reader), transport
+
+
+def _stored_allocation_series(
+    policy: Mapping[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    return {
+        item["key"]: list_candles(
+            source_kind=item["source_kind"],
+            market_country=item["market_country"],
+            symbol=item["symbol"],
+        )
+        for item in allocation_benchmarks(policy)
+    }
+
+
+def _stable_identities(identities: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for identity in identities:
+        normalized = identity.strip().upper()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            result.append(normalized)
+    return result
 
 
 @app.command("toss-health")
@@ -215,7 +239,11 @@ def account_view(
     """Project the latest or explicit complete Toss account snapshot."""
     try:
         initialize_database()
-        projection = build_account_projection(snapshot_id=snapshot_id)
+        active = get_active_policy()
+        projection = build_account_projection(
+            snapshot_id=snapshot_id,
+            layer_map=layer_map_from_policy(active["policy"] if active else None),
+        )
         _emit_json(
             {
                 "ok": True,
@@ -226,79 +254,6 @@ def account_view(
         )
     except Exception as exc:
         _exit_with_command_error("account-view", exc)
-
-
-@profiles_app.command("set")
-def profiles_set(
-    symbol: Annotated[str, typer.Option("--symbol")],
-    market_country: Annotated[str, typer.Option("--market-country")],
-    layer: Annotated[str, typer.Option("--layer")],
-    thesis_status: Annotated[str, typer.Option("--thesis-status")],
-    note: Annotated[str, typer.Option("--note")] = "",
-    overlap_status: Annotated[str, typer.Option("--overlap-status")] = "unknown",
-    management_burden_status: Annotated[
-        str, typer.Option("--management-burden-status")
-    ] = "unknown",
-    holdability_status: Annotated[str, typer.Option("--holdability-status")] = "unknown",
-    etf_substitution_status: Annotated[
-        str, typer.Option("--etf-substitution-status")
-    ] = "unknown",
-    review_factors_note: Annotated[
-        str, typer.Option("--review-factors-note")
-    ] = "",
-) -> None:
-    """Set IPS metadata for a previously observed Toss instrument."""
-    try:
-        initialize_database()
-        profile = upsert_profile(
-            symbol=symbol,
-            market_country=market_country,
-            layer=layer,
-            thesis_status=thesis_status,
-            thesis_note=note,
-            overlap_status=overlap_status,
-            management_burden_status=management_burden_status,
-            holdability_status=holdability_status,
-            etf_substitution_status=etf_substitution_status,
-            review_factors_note=review_factors_note,
-        )
-        _emit_json(
-            {
-                "ok": True,
-                "command": "profiles set",
-                "profile": profile,
-                "error": None,
-            }
-        )
-    except Exception as exc:
-        _exit_with_command_error("profiles set", exc)
-
-
-@profiles_app.command("list")
-def profiles_list(
-    snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
-) -> None:
-    """Show current Toss holdings and their IPS classification coverage."""
-    try:
-        initialize_database()
-        projection = build_account_projection(snapshot_id=snapshot_id)
-        profiles = {
-            (item["market_country"], item["symbol"]): item
-            for item in projection["positions"]
-            if item["layer"] is not None
-        }
-        _emit_json(
-            {
-                "ok": True,
-                "command": "profiles list",
-                "snapshot_id": projection["snapshot_id"],
-                "profiles": [profiles[key] for key in sorted(profiles)],
-                "unclassified": projection["unclassified"],
-                "error": None,
-            }
-        )
-    except Exception as exc:
-        _exit_with_command_error("profiles list", exc)
 
 
 @policy_app.command("show")
@@ -409,7 +364,9 @@ def inspection_preview_command(
         from services.policy_validation import policy_metadata, validate_policy
 
         payload = json.loads(policy_file.read_text(encoding="utf-8"))
-        policy = payload.get("policy", payload) if isinstance(payload, dict) else payload
+        policy = (
+            payload.get("policy", payload) if isinstance(payload, dict) else payload
+        )
         normalized = validate_policy(policy, list_observed_identities())
         preview = preview_inspection(normalized, snapshot_id=snapshot_id)
         _emit_json(
@@ -489,19 +446,39 @@ def inspection_show_command(
 def market_sync_command(
     symbols: Annotated[str | None, typer.Option("--symbols")] = None,
     max_pages: Annotated[int, typer.Option("--max-pages")] = 5,
+    target_points: Annotated[int, typer.Option("--target-points")] = 252,
+    research_only: Annotated[bool, typer.Option("--research-only")] = False,
 ) -> None:
     """Read official Toss daily candles and persist immutable observations."""
     transport: TossTransport | None = None
     try:
         initialize_database()
+        if target_points < 1:
+            raise CliError("input", "--target-points는 1 이상이어야 합니다.")
+        active = get_active_policy()
+        if active is None:
+            raise CliError("persistence", "활성 정책을 찾을 수 없습니다.")
+        policy = active["policy"]
+        benchmarks = allocation_benchmarks(policy)
         service, transport = _build_toss_market_service()
         identities = list_observed_identities()
         requested = [
             item.strip() for item in (symbols or "").split(",") if item.strip()
         ]
-        stock_symbols = requested or [
+        selected_stocks = requested or [
             f"{country}/{symbol}" for country, symbol in identities
         ]
+        if research_only:
+            selected_stocks.extend(
+                f"{item['market_country']}/{item['symbol']}"
+                for item in policy.get("instruments", [])
+            )
+        selected_stocks.extend(
+            f"{item['market_country']}/{item['symbol']}"
+            for item in benchmarks
+            if item["source_kind"] == "stock"
+        )
+        stock_symbols = _stable_identities(selected_stocks)
         stored: list[dict[str, Any]] = []
         for identity in stock_symbols:
             if "/" in identity:
@@ -513,28 +490,28 @@ def market_sync_command(
                 market_country=market_country,
                 source_kind="stock",
                 max_pages=max_pages,
+                target_points=target_points,
             )
             stored.extend(insert_candles(item.as_dict() for item in candles))
-        benchmark = service.collect_history(
-            symbol="KOSPI",
-            source_kind="market_indicator",
-            market_country="KR",
-            max_pages=max_pages,
-        )
-        stored.extend(insert_candles(item.as_dict() for item in benchmark))
-        active = get_active_policy()
+        indicator_keys: list[str] = []
+        for item in benchmarks:
+            if item["source_kind"] != "market_indicator":
+                continue
+            indicator_keys.append(item["key"])
+            candles = service.collect_history(
+                symbol=item["symbol"],
+                source_kind="market_indicator",
+                market_country=item["market_country"],
+                max_pages=max_pages,
+                target_points=target_points,
+            )
+            stored.extend(insert_candles(candle.as_dict() for candle in candles))
         context = None
         candidate = None
-        if active is not None:
-            context = evaluate_market_context(
-                list_candles(
-                    source_kind="market_indicator",
-                    market_country="KR",
-                    symbol="KOSPI",
-                ),
-                current_target=float(
-                    active["policy"].get("cash_reserve", {}).get("target", 0.15)
-                ),
+        if not research_only:
+            context = evaluate_dynamic_allocation(
+                _stored_allocation_series(policy),
+                active_policy=policy,
                 last_change_at=active.get("created_at"),
             )
             if context.get("candidate_state") == "candidate":
@@ -542,17 +519,22 @@ def market_sync_command(
                     {
                         "account_alias": active["account_alias"],
                         "base_policy_version_id": active["id"],
-                        "candidate_json": {"benchmark": "KR/KOSPI", "context": context},
+                        "candidate_json": {
+                            "strategy": policy["allocation_review"]["strategy"],
+                            "context": context,
+                        },
                     }
                 )
         _emit_json(
             {
                 "ok": True,
                 "command": "market sync",
-                "symbols": stock_symbols + ["KR/KOSPI"],
+                "symbols": stock_symbols + indicator_keys,
                 "candle_count": len(stored),
                 "context": context,
                 "candidate": candidate,
+                "research_only": research_only,
+                "target_points": target_points,
                 "error": None,
             }
         )
@@ -564,9 +546,7 @@ def market_sync_command(
 
 
 @market_app.command("context")
-def market_context_command(
-    benchmark: Annotated[str, typer.Option("--benchmark")] = "KOSPI",
-) -> None:
+def market_context_command() -> None:
     """Evaluate stored Toss market context without activating a policy."""
     try:
         initialize_database()
@@ -574,13 +554,9 @@ def market_context_command(
         if active is None:
             raise CliError("persistence", "활성 정책을 찾을 수 없습니다.")
         policy = active["policy"]
-        current_target = float(policy.get("cash_reserve", {}).get("target", 0.15))
-        candles = list_candles(
-            source_kind="market_indicator", market_country="KR", symbol=benchmark
-        )
-        context = evaluate_market_context(
-            candles,
-            current_target=current_target,
+        context = evaluate_dynamic_allocation(
+            _stored_allocation_series(policy),
+            active_policy=policy,
             last_change_at=active.get("created_at"),
         )
         candidate = None
@@ -590,7 +566,7 @@ def market_context_command(
                     "account_alias": active["account_alias"],
                     "base_policy_version_id": active["id"],
                     "candidate_json": {
-                        "benchmark": f"KR/{benchmark.upper()}",
+                        "strategy": policy["allocation_review"]["strategy"],
                         "context": context,
                     },
                 }
@@ -599,7 +575,7 @@ def market_context_command(
             {
                 "ok": True,
                 "command": "market context",
-                "benchmark": f"KR/{benchmark.upper()}",
+                "benchmarks": [item["key"] for item in allocation_benchmarks(policy)],
                 "policy_version_id": active["id"],
                 "context": context,
                 "candidate": candidate,
@@ -672,7 +648,13 @@ def performance_baseline_preview(
 @performance_app.command("baseline-confirm")
 def performance_baseline_confirm(
     snapshot_id: Annotated[int, typer.Option("--snapshot-id")],
-    expected_principal_krw: Annotated[float, typer.Option("--expected-principal-krw")],
+    expected_principal_krw: Annotated[
+        float,
+        typer.Option(
+            "--expected-principal-krw",
+            help="현재 평가금이 아닌 확인된 누적 외부 순입금 기준 투자 원금.",
+        ),
+    ],
 ) -> None:
     """Confirm one immutable account performance tracking baseline."""
     try:
