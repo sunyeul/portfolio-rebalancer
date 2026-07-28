@@ -43,6 +43,22 @@ def test_help_exposes_only_toss_product_commands():
     assert "│ snapshots " not in result.stdout
 
 
+def test_parser_errors_emit_one_machine_readable_json_object():
+    cases = (
+        ["unknown-command"],
+        ["account-view", "--snapshot-id", "not-an-integer"],
+        ["policy", "activate"],
+    )
+
+    for arguments in cases:
+        result = runner.invoke(app, arguments)
+        assert result.exit_code != 0
+        payload = _payload(result)
+        assert payload["ok"] is False
+        assert payload["error"]["stage"] == "input"
+        assert result.stderr == ""
+
+
 def test_account_view_emits_one_projection_json(monkeypatch):
     monkeypatch.setattr(
         "cli.initialize_database",

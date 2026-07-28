@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 import json
 import math
 import sys
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Annotated, Any, Mapping
 
 import typer
+from typer import _click
+from typer.core import TyperGroup
 
 from integrations.toss.auth import TossAuthorizedReader, TossTokenProvider
 from integrations.toss.config import TossApiConfig
@@ -49,9 +52,51 @@ from storage.performance_store import (
 )
 
 
+class JsonTyperGroup(TyperGroup):
+    """Keep parser failures inside the CLI's one-JSON stdout contract."""
+
+    def main(
+        self,
+        args: Sequence[str] | None = None,
+        prog_name: str | None = None,
+        complete_var: str | None = None,
+        standalone_mode: bool = True,
+        windows_expand_args: bool = True,
+        **extra: Any,
+    ) -> Any:
+        try:
+            result = super().main(
+                args=args,
+                prog_name=prog_name,
+                complete_var=complete_var,
+                standalone_mode=False,
+                windows_expand_args=windows_expand_args,
+                **extra,
+            )
+        except _click.ClickException as exc:
+            _emit_json(
+                {
+                    "ok": False,
+                    "command": "cli",
+                    "error": {
+                        "stage": "input",
+                        "message": exc.format_message(),
+                        "hint": None,
+                    },
+                }
+            )
+            if standalone_mode:
+                raise SystemExit(exc.exit_code) from exc
+            raise
+        if standalone_mode and isinstance(result, int) and result != 0:
+            raise SystemExit(result)
+        return result
+
+
 app = typer.Typer(
     help="IPS Pilot Toss Securities inspection CLI.",
     no_args_is_help=True,
+    cls=JsonTyperGroup,
 )
 performance_app = typer.Typer(help="Inspect Toss account performance history.")
 policy_app = typer.Typer(help="Inspect and activate versioned Toss IPS policies.")
