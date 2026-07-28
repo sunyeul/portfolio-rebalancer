@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from hashlib import sha256
 from math import sqrt
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import numpy as np
@@ -34,6 +37,11 @@ DEFAULT_HORIZON_SESSIONS = 20
 DEFAULT_TEST_SESSIONS = 120
 DEFAULT_EMBARGO_SESSIONS = 20
 DEFAULT_MINIMUM_TRAIN_DATES = 100
+DEFAULT_INNER_VALIDATION_SESSIONS = 60
+LGB_NUM_BOOST_ROUND_CAP = 120
+LGB_EARLY_STOPPING_ROUNDS = 20
+LGB_RANDOM_SEED = 1729
+LGB_NUM_THREADS = 1
 
 
 class ForecastError(RuntimeError):
@@ -109,7 +117,7 @@ def _verify_qlib_static_loader(frame: pd.DataFrame) -> dict[str, bool]:
 
 
 class _FrameDataset:
-    """Minimal tabular dataset adapter for Qlib's native linear model."""
+    """Minimal tabular dataset adapter for Qlib's native tabular models."""
 
     def __init__(
         self,
@@ -117,10 +125,16 @@ class _FrameDataset:
         train_features: pd.DataFrame,
         train_labels: pd.Series,
         test_features: pd.DataFrame,
+        valid_features: pd.DataFrame | None = None,
+        valid_labels: pd.Series | None = None,
     ) -> None:
         self.segments = {"train": (), "test": ()}
         self._features = {"train": train_features, "test": test_features}
         self._labels = {"train": train_labels}
+        if valid_features is not None and valid_labels is not None:
+            self.segments["valid"] = ()
+            self._features["valid"] = valid_features
+            self._labels["valid"] = valid_labels
 
     def prepare(self, segment: str, *, col_set, data_key: str) -> pd.DataFrame:
         del data_key
@@ -146,27 +160,87 @@ def _standardize(
     return tuple((frame - means) / scales for frame in (train, *others))
 
 
-def _qlib_native_ridge_predict(
+@contextmanager
+def _qlib_tracking_run() -> Iterator[Path]:
+    """Give Qlib's model workflow an isolated, disposable experiment store."""
+    import qlib
+    from mlflow.tracking import MlflowClient
+    from qlib.workflow import R
+    from qlib.workflow.recorder import MLflowRecorder
+
+    with TemporaryDirectory(prefix="qlib-lightgbm-") as temporary_directory:
+        temporary_root = Path(temporary_directory)
+        provider = temporary_root / "provider"
+        artifacts = temporary_root / "artifacts"
+        provider.mkdir()
+        artifacts.mkdir()
+        tracking_uri = f"sqlite:///{temporary_root / 'tracking.db'}"
+        qlib.init(
+            provider_uri=provider,
+            exp_manager={
+                "class": "MLflowExpManager",
+                "module_path": "qlib.workflow.expm",
+                "kwargs": {
+                    "uri": tracking_uri,
+                    "default_exp_name": "research-forecast",
+                },
+            },
+        )
+        MlflowClient(tracking_uri=tracking_uri).create_experiment(
+            "research-forecast",
+            artifact_location=artifacts.as_uri(),
+        )
+        original_code_logger = MLflowRecorder._log_uncommitted_code
+        MLflowRecorder._log_uncommitted_code = lambda _: None
+        try:
+            with R.start(experiment_name="research-forecast", recorder_name="lightgbm"):
+                yield temporary_root
+        finally:
+            MLflowRecorder._log_uncommitted_code = original_code_logger
+
+
+def _qlib_native_lgb_predict(
     *,
     train_features: pd.DataFrame,
     train_labels: pd.Series,
     test_features: pd.DataFrame,
-) -> pd.Series:
-    """Fit and predict through Qlib's native ``LinearModel`` implementation."""
-    from qlib.contrib.model.linear import LinearModel
+    valid_features: pd.DataFrame | None = None,
+    valid_labels: pd.Series | None = None,
+    num_boost_round: int = LGB_NUM_BOOST_ROUND_CAP,
+) -> tuple[pd.Series, int]:
+    """Fit and predict through Qlib's native ``LGBModel`` implementation."""
+    from qlib.contrib.model.gbdt import LGBModel
 
     dataset = _FrameDataset(
         train_features=train_features,
         train_labels=train_labels,
         test_features=test_features,
+        valid_features=valid_features,
+        valid_labels=valid_labels,
     )
-    model = LinearModel(
-        estimator=LinearModel.RIDGE,
-        alpha=1.0,
-        fit_intercept=True,
+    model = LGBModel(
+        num_boost_round=num_boost_round,
+        early_stopping_rounds=LGB_EARLY_STOPPING_ROUNDS,
+        learning_rate=0.03,
+        num_leaves=15,
+        min_data_in_leaf=20,
+        lambda_l2=1.0,
+        feature_fraction=1.0,
+        bagging_fraction=1.0,
+        bagging_freq=0,
+        seed=LGB_RANDOM_SEED,
+        feature_fraction_seed=LGB_RANDOM_SEED,
+        bagging_seed=LGB_RANDOM_SEED,
+        data_random_seed=LGB_RANDOM_SEED,
+        num_threads=LGB_NUM_THREADS,
     )
-    model.fit(dataset)
-    return model.predict(dataset, segment="test")
+    model.fit(dataset, verbose_eval=0)
+    selected_rounds = (
+        int(model.model.best_iteration)
+        if model.model is not None and model.model.best_iteration > 0
+        else num_boost_round
+    )
+    return model.predict(dataset, segment="test"), selected_rounds
 
 
 def _rmse(actual: pd.Series, predicted: pd.Series) -> float:
@@ -216,6 +290,28 @@ def _split(
     return train, holdout
 
 
+def _split_inner_validation(
+    train: pd.DataFrame,
+    *,
+    embargo_sessions: int,
+    validation_sessions: int,
+    minimum_train_dates: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    sessions = sorted(train["decision_session"].unique())
+    needed = minimum_train_dates + embargo_sessions + validation_sessions
+    if len(sessions) < needed:
+        raise ForecastError(
+            "insufficient chronological history for LightGBM inner validation"
+        )
+    train_sessions = set(sessions[: -(embargo_sessions + validation_sessions)])
+    validation_sessions_set = set(sessions[-validation_sessions:])
+    inner_train = train[train["decision_session"].isin(train_sessions)].copy()
+    validation = train[train["decision_session"].isin(validation_sessions_set)].copy()
+    if inner_train.empty or validation.empty:
+        raise ForecastError("LightGBM inner train or validation frame is empty")
+    return inner_train, validation
+
+
 def _json_rows(frame: pd.DataFrame, columns: tuple[str, ...]) -> list[dict[str, Any]]:
     return [
         {
@@ -251,15 +347,36 @@ def forecast_snapshot(
         embargo_sessions=embargo_sessions,
         minimum_train_dates=minimum_train_dates,
     )
-    train_features, holdout_features = _standardize(
-        train[list(FEATURE_NAMES)], holdout[list(FEATURE_NAMES)]
+    inner_train, validation = _split_inner_validation(
+        train,
+        embargo_sessions=embargo_sessions,
+        validation_sessions=DEFAULT_INNER_VALIDATION_SESSIONS,
+        minimum_train_dates=minimum_train_dates,
     )
-    holdout["predicted_return"] = _qlib_native_ridge_predict(
-        train_features=train_features,
-        train_labels=train["actual_return"],
-        test_features=holdout_features,
-    ).to_numpy()
-    baseline_return = float(train["actual_return"].mean())
+    train_features, validation_features, holdout_features = _standardize(
+        inner_train[list(FEATURE_NAMES)],
+        validation[list(FEATURE_NAMES)],
+        holdout[list(FEATURE_NAMES)],
+    )
+    all_features, current_features = _standardize(
+        labeled[list(FEATURE_NAMES)], current[list(FEATURE_NAMES)]
+    )
+    with _qlib_tracking_run():
+        holdout_predictions, selected_rounds = _qlib_native_lgb_predict(
+            train_features=train_features,
+            train_labels=inner_train["actual_return"],
+            valid_features=validation_features,
+            valid_labels=validation["actual_return"],
+            test_features=holdout_features,
+        )
+        current_predictions, _ = _qlib_native_lgb_predict(
+            train_features=all_features,
+            train_labels=labeled["actual_return"],
+            test_features=current_features,
+            num_boost_round=selected_rounds,
+        )
+    holdout["predicted_return"] = holdout_predictions.to_numpy()
+    baseline_return = float(inner_train["actual_return"].mean())
     baseline = pd.Series(baseline_return, index=holdout.index)
     actual = holdout["actual_return"]
     model_rmse = _rmse(actual, holdout["predicted_return"])
@@ -278,14 +395,7 @@ def forecast_snapshot(
         if metrics["model_beats_mean_baseline"]
         else "holdout_model_rmse_is_not_lower_than_mean_baseline"
     )
-    all_features, current_features = _standardize(
-        labeled[list(FEATURE_NAMES)], current[list(FEATURE_NAMES)]
-    )
-    current["predicted_return"] = _qlib_native_ridge_predict(
-        train_features=all_features,
-        train_labels=labeled["actual_return"],
-        test_features=current_features,
-    ).to_numpy()
+    current["predicted_return"] = current_predictions.to_numpy()
     current_forecasts = _json_rows(
         current,
         (
@@ -300,9 +410,15 @@ def forecast_snapshot(
     return {
         "forecast_protocol": {
             "model": {
-                "family": "ridge_regression",
+                "family": "lightgbm_regression",
                 "backend": "qlib_native",
-                "qlib_component": "qlib.contrib.model.linear.LinearModel",
+                "qlib_component": "qlib.contrib.model.gbdt.LGBModel",
+                "model_selection": "chronological_inner_validation",
+                "num_boost_round_cap": LGB_NUM_BOOST_ROUND_CAP,
+                "early_stopping_rounds": LGB_EARLY_STOPPING_ROUNDS,
+                "random_seed": LGB_RANDOM_SEED,
+                "num_threads": LGB_NUM_THREADS,
+                "experiment_tracking": "isolated_temporary_sqlite",
             },
             "horizon_sessions": horizon_sessions,
             "target": "native_close_return_after_horizon_sessions",
@@ -323,6 +439,15 @@ def forecast_snapshot(
             "row_count": len(holdout),
             "metrics": metrics,
             "interpretation": interpretation,
+            "model_selection": {
+                "train_first_session": str(inner_train["decision_session"].min()),
+                "train_last_session": str(inner_train["decision_session"].max()),
+                "validation_first_session": str(validation["decision_session"].min()),
+                "validation_last_session": str(validation["decision_session"].max()),
+                "embargo_sessions": embargo_sessions,
+                "validation_sessions": DEFAULT_INNER_VALIDATION_SESSIONS,
+                "selected_boosting_rounds": selected_rounds,
+            },
         },
         "holdout_predictions": _json_rows(
             holdout,
