@@ -29,6 +29,9 @@ test("account return formatting distinguishes zero from missing principal eviden
 });
 
 test("allocation blocking reasons remain human-readable without inventing a decision", () => {
+  expect(formatAllocationReason("gross_account_denominator_invalid")).toBe(
+    "총계좌 평가금 분모를 확인할 수 없습니다.",
+  );
   expect(formatAllocationReason("invested_denominator_unavailable")).toBe(
     "투자금 평가금 분모를 확인할 수 없습니다.",
   );

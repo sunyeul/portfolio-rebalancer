@@ -47,7 +47,7 @@ export function evidenceValue(
 const allocationReasonLabels: Record<string, string> = {
   source_not_current_evaluable: "현재 Toss 스냅샷이 평가 가능 상태가 아닙니다.",
   holdings_reconciliation_failed: "보유 종목 조정 검증이 완료되지 않았습니다.",
-  gross_denominator_invalid: "총계좌 평가금 분모를 확인할 수 없습니다.",
+  gross_account_denominator_invalid: "총계좌 평가금 분모를 확인할 수 없습니다.",
   invested_denominator_unavailable: "투자금 평가금 분모를 확인할 수 없습니다.",
   policy_coverage_incomplete: "정책의 종목·레이어 커버리지가 완전하지 않습니다.",
 };
