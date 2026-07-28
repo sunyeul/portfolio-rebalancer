@@ -66,7 +66,6 @@ export type Evaluation = {
   engine_version?: string;
   state?: "complete" | "not_evaluable" | "failed";
   non_evaluable_reason?: string | null;
-  profile_snapshot?: Array<Record<string, unknown>>;
   account?: AccountSummary;
   result?: InspectionResult;
   market_evidence?: JsonObject;
