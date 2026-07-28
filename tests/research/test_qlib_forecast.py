@@ -1,6 +1,8 @@
+from contextlib import nullcontext
 from importlib.util import find_spec
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 pytestmark = pytest.mark.skipif(
@@ -57,6 +59,7 @@ def test_forecast_uses_chronological_holdout_and_emits_latest_scores(
         "random_seed": 1729,
         "num_threads": 1,
         "experiment_tracking": "isolated_temporary_sqlite",
+        "holdout_refit": "outer_train_at_selected_rounds",
     }
     assert result["forecast_protocol"]["target"] == (
         "native_close_return_after_horizon_sessions"
@@ -115,3 +118,47 @@ def test_forecast_rejects_a_holdout_without_a_label_embargo(snapshot_factory):
             embargo_sessions=20,
             minimum_train_dates=100,
         )
+
+
+def test_lightgbm_refits_on_full_outer_train_after_inner_selection(
+    snapshot_factory, monkeypatch
+):
+    from research.qlib_validation import forecast
+
+    snapshot = snapshot_factory(days=360)
+    labeled, _ = forecast._feature_frames(snapshot, horizon_sessions=20)
+    outer_train, _ = forecast._split(
+        labeled,
+        test_sessions=80,
+        embargo_sessions=20,
+        minimum_train_dates=100,
+    )
+    calls = []
+
+    def fake_lgb_predict(**kwargs):
+        calls.append(kwargs)
+        return pd.Series(0.0, index=kwargs["test_features"].index), 7
+
+    monkeypatch.setattr(forecast, "_qlib_tracking_run", lambda: nullcontext(Path(".")))
+    monkeypatch.setattr(forecast, "_qlib_native_lgb_predict", fake_lgb_predict)
+
+    result = forecast.forecast_snapshot(
+        snapshot,
+        horizon_sessions=20,
+        test_sessions=80,
+        embargo_sessions=20,
+        minimum_train_dates=100,
+    )
+
+    assert len(calls) == 3
+    selection_call, holdout_call, current_call = calls
+    assert len(selection_call["train_labels"]) < len(outer_train)
+    assert selection_call["valid_labels"] is not None
+    assert len(holdout_call["train_labels"]) == len(outer_train)
+    assert holdout_call.get("valid_labels") is None
+    assert holdout_call["num_boost_round"] == 7
+    assert len(current_call["train_labels"]) == len(labeled)
+    assert current_call["num_boost_round"] == 7
+    assert result["holdout"]["model_selection"]["holdout_refit"] == (
+        "outer_train_at_selected_rounds"
+    )

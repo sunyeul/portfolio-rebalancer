@@ -44,8 +44,9 @@ rtk uv run --project research/qlib_validation python -m research.qlib_validation
 
 예측은 Qlib `StaticDataLoader`를 통과한 입력에 Qlib 네이티브 `LGBModel`을
 적용한다. LightGBM의 학습 횟수는 바깥 holdout보다 앞선 구간에서 20 거래일
-간격을 둔 안쪽 검증으로만 고른다. 예측 대상은 종목별 현지 통화 종가 기준의
-20거래일 수익률이며, 환율·계좌 수익률·정책 변경을 포함하지 않는다.
+간격을 둔 안쪽 검증으로만 고르고, 고른 횟수로 바깥 holdout 전 전체 자료를
+다시 학습한다. 예측 대상은 종목별 현지 통화 종가 기준의 20거래일 수익률이며,
+환율·계좌 수익률·정책 변경을 포함하지 않는다.
 Qlib의 실험 기록은 실행 중에만 존재하는 임시 SQLite 저장소에 격리한다.
 `holdout-predictions.json`의 20거래일 결과는 날짜별로 겹칠 수 있으므로 행 수를
 독립 표본 수처럼 해석하지 않는다.

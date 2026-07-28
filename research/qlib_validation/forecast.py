@@ -353,21 +353,30 @@ def forecast_snapshot(
         validation_sessions=DEFAULT_INNER_VALIDATION_SESSIONS,
         minimum_train_dates=minimum_train_dates,
     )
-    train_features, validation_features, holdout_features = _standardize(
+    inner_train_features, validation_features = _standardize(
         inner_train[list(FEATURE_NAMES)],
         validation[list(FEATURE_NAMES)],
+    )
+    train_features, holdout_features = _standardize(
+        train[list(FEATURE_NAMES)],
         holdout[list(FEATURE_NAMES)],
     )
     all_features, current_features = _standardize(
         labeled[list(FEATURE_NAMES)], current[list(FEATURE_NAMES)]
     )
     with _qlib_tracking_run():
-        holdout_predictions, selected_rounds = _qlib_native_lgb_predict(
-            train_features=train_features,
+        _, selected_rounds = _qlib_native_lgb_predict(
+            train_features=inner_train_features,
             train_labels=inner_train["actual_return"],
             valid_features=validation_features,
             valid_labels=validation["actual_return"],
+            test_features=validation_features,
+        )
+        holdout_predictions, _ = _qlib_native_lgb_predict(
+            train_features=train_features,
+            train_labels=train["actual_return"],
             test_features=holdout_features,
+            num_boost_round=selected_rounds,
         )
         current_predictions, _ = _qlib_native_lgb_predict(
             train_features=all_features,
@@ -376,7 +385,7 @@ def forecast_snapshot(
             num_boost_round=selected_rounds,
         )
     holdout["predicted_return"] = holdout_predictions.to_numpy()
-    baseline_return = float(inner_train["actual_return"].mean())
+    baseline_return = float(train["actual_return"].mean())
     baseline = pd.Series(baseline_return, index=holdout.index)
     actual = holdout["actual_return"]
     model_rmse = _rmse(actual, holdout["predicted_return"])
@@ -419,6 +428,7 @@ def forecast_snapshot(
                 "random_seed": LGB_RANDOM_SEED,
                 "num_threads": LGB_NUM_THREADS,
                 "experiment_tracking": "isolated_temporary_sqlite",
+                "holdout_refit": "outer_train_at_selected_rounds",
             },
             "horizon_sessions": horizon_sessions,
             "target": "native_close_return_after_horizon_sessions",
@@ -447,6 +457,7 @@ def forecast_snapshot(
                 "embargo_sessions": embargo_sessions,
                 "validation_sessions": DEFAULT_INNER_VALIDATION_SESSIONS,
                 "selected_boosting_rounds": selected_rounds,
+                "holdout_refit": "outer_train_at_selected_rounds",
             },
         },
         "holdout_predictions": _json_rows(
