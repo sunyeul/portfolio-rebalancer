@@ -15,7 +15,7 @@ from storage.policy_store import (
 )
 
 
-def _seed_dynamic_policy(database):
+def _dynamic_policy():
     policy = deepcopy(DEFAULT_POLICY)
     policy["instruments"] = [
         {"market_country": "US", "symbol": "SPY", "layer": "core", "target": 0.7},
@@ -33,7 +33,11 @@ def _seed_dynamic_policy(database):
             "target": 0.1,
         },
     ]
-    dynamic = build_neutral_policy(policy)
+    return build_neutral_policy(policy)
+
+
+def _seed_dynamic_policy(database):
+    dynamic = _dynamic_policy()
     with sqlite3.connect(database) as conn:
         conn.execute(
             "UPDATE ips_policy_versions SET policy_json = ?, policy_hash = ? "
@@ -41,6 +45,24 @@ def _seed_dynamic_policy(database):
             (canonical_policy_json(dynamic), policy_hash(dynamic)),
         )
     return dynamic
+
+
+def _candle(spec, candle_at, *, price=100.0):
+    return {
+        "source_kind": spec["source_kind"],
+        "market_country": spec["market_country"],
+        "symbol": spec["symbol"],
+        "interval": "1d",
+        "candle_at": candle_at,
+        "currency": "KRW" if spec["market_country"] == "KR" else "USD",
+        "open_price": price,
+        "high_price": price + 1.0,
+        "low_price": price - 1.0,
+        "close_price": price,
+        "volume": 1000.0,
+        "adjusted": spec["source_kind"] == "stock",
+        "adjusted_supported": spec["source_kind"] == "stock",
+    }
 
 
 def test_snapshot_reads_active_policy_and_never_opens_database_for_write(
@@ -91,8 +113,42 @@ def test_snapshot_reads_active_policy_and_never_opens_database_for_write(
     assert all(candle.factor is None for candle in snapshot.candles)
 
     with open_readonly(database) as conn:
+        assert conn.in_transaction is True
         with pytest.raises(sqlite3.OperationalError, match="readonly"):
             conn.execute("CREATE TABLE forbidden_write (id INTEGER)")
+
+
+def test_readonly_transaction_keeps_one_snapshot_during_concurrent_commit(
+    tmp_path, monkeypatch
+):
+    from research.qlib_validation.source import open_readonly
+
+    database = tmp_path / "portfolio.sqlite3"
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(database))
+    initialize_database()
+    with sqlite3.connect(database) as conn:
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("CREATE TABLE qlib_transaction_probe (value INTEGER NOT NULL)")
+
+    with open_readonly(database) as reader:
+        assert (
+            reader.execute("SELECT COUNT(*) FROM qlib_transaction_probe").fetchone()[0]
+            == 0
+        )
+        with sqlite3.connect(database) as writer:
+            writer.execute("INSERT INTO qlib_transaction_probe VALUES (1)")
+        assert (
+            reader.execute("SELECT COUNT(*) FROM qlib_transaction_probe").fetchone()[0]
+            == 0
+        )
+
+    with sqlite3.connect(database) as observer:
+        assert (
+            observer.execute("SELECT COUNT(*) FROM qlib_transaction_probe").fetchone()[
+                0
+            ]
+            == 1
+        )
 
 
 def test_default_policy_without_dynamic_allocation_fails_closed(tmp_path, monkeypatch):
@@ -109,24 +165,7 @@ def test_default_policy_without_dynamic_allocation_fails_closed(tmp_path, monkey
 def test_malformed_dynamic_policy_duplicates_fail_closed():
     from research.qlib_validation.source import SourceError, _specs
 
-    policy = deepcopy(DEFAULT_POLICY)
-    policy["instruments"] = [
-        {"market_country": "US", "symbol": "SPY", "layer": "core", "target": 0.7},
-        {"market_country": "US", "symbol": "GLD", "layer": "core", "target": 0.1},
-        {
-            "market_country": "US",
-            "symbol": "QQQ",
-            "layer": "satellite",
-            "target": 0.2,
-        },
-        {
-            "market_country": "US",
-            "symbol": "TQQQ",
-            "layer": "experiment",
-            "target": 0.1,
-        },
-    ]
-    dynamic = build_neutral_policy(policy)
+    dynamic = _dynamic_policy()
     dynamic["instruments"].append(deepcopy(dynamic["instruments"][0]))
 
     with pytest.raises(SourceError, match="duplicate identities"):
@@ -139,6 +178,94 @@ def test_malformed_dynamic_policy_duplicates_fail_closed():
     )
     with pytest.raises(SourceError, match="duplicate keys"):
         _specs(benchmark_duplicate)
+
+
+def test_malformed_dynamic_policy_requires_exact_benchmark_identities():
+    from research.qlib_validation.source import SourceError, _specs
+
+    dynamic = _dynamic_policy()
+    benchmarks = dynamic["allocation_review"]["benchmarks"]
+    dynamic["allocation_review"]["benchmarks"] = [
+        {**benchmarks[0], "weight": 0.5},
+        {**benchmarks[2], "weight": 0.5},
+    ]
+
+    with pytest.raises(SourceError, match="exactly the required identities"):
+        _specs(dynamic)
+
+
+def test_snapshot_rejects_policy_hash_mismatch(tmp_path, monkeypatch):
+    from research.qlib_validation.source import SourceError, load_snapshot
+
+    database = tmp_path / "portfolio.sqlite3"
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(database))
+    initialize_database()
+    dynamic = _seed_dynamic_policy(database)
+    tampered = deepcopy(dynamic)
+    tampered["performance"]["annual_return_target"] = 0.99
+    with sqlite3.connect(database) as conn:
+        conn.execute(
+            "UPDATE ips_policy_versions SET policy_json = ? "
+            "WHERE account_alias = 'toss-brokerage' AND superseded_at IS NULL",
+            (canonical_policy_json(tampered),),
+        )
+
+    with pytest.raises(SourceError, match="policy hash mismatch"):
+        load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
+
+
+def test_snapshot_rejects_invalid_or_gapped_candles(tmp_path, monkeypatch):
+    from research.qlib_validation.source import SourceError, load_snapshot
+
+    database = tmp_path / "portfolio.sqlite3"
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(database))
+    initialize_database()
+    dynamic = _seed_dynamic_policy(database)
+    spec = allocation_benchmarks(dynamic)[0]
+    insert_candles(
+        [
+            _candle(spec, "2026-01-02T09:30:00-05:00", price=-100.0),
+            _candle(spec, "2026-01-30T09:30:00-05:00", price=-101.0),
+        ]
+    )
+
+    with pytest.raises(SourceError, match="invalid positive OHLC"):
+        load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
+
+    with sqlite3.connect(database) as conn:
+        conn.execute("DELETE FROM toss_market_candles")
+    insert_candles(
+        [
+            _candle(spec, "2026-01-02T09:30:00-05:00"),
+            _candle(spec, "2026-01-30T09:30:00-05:00"),
+        ]
+    )
+
+    with pytest.raises(SourceError, match="history gap"):
+        load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
+
+    with sqlite3.connect(database) as conn:
+        conn.execute("DELETE FROM toss_market_candles")
+        for fingerprint in ("duplicate-a", "duplicate-b"):
+            conn.execute(
+                """
+                INSERT INTO toss_market_candles (
+                    source_kind, market_country, symbol, interval, candle_at,
+                    currency, open_price, high_price, low_price, close_price,
+                    volume, adjusted, adjusted_supported, source_fingerprint
+                ) VALUES (?, ?, ?, '1d', ?, 'USD', 100, 101, 99, 100, 1000, 1, 1, ?)
+                """,
+                (
+                    spec["source_kind"],
+                    spec["market_country"],
+                    spec["symbol"],
+                    "2026-01-02T09:30:00-05:00",
+                    fingerprint,
+                ),
+            )
+
+    with pytest.raises(SourceError, match="duplicate session"):
+        load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
 
 
 def test_availability_rules_fail_closed_for_naive_time_and_unknown_market():

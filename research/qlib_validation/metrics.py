@@ -1,4 +1,6 @@
-from math import sqrt
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from math import isfinite, sqrt
 import random
 from statistics import mean, pstdev
 from typing import Any
@@ -6,12 +8,63 @@ from typing import Any
 from research.qlib_validation.contracts import ReplayPoint, SourceSnapshot
 
 
-REQUIRED_EFFECTS = {
-    ("benchmarks", 20),
-    ("benchmarks", 60),
-    ("policy_instruments", 20),
-    ("policy_instruments", 60),
-}
+REQUIRED_EFFECTS = frozenset(
+    {
+        ("benchmarks", 20),
+        ("benchmarks", 60),
+        ("policy_instruments", 20),
+        ("policy_instruments", 60),
+    }
+)
+ALLOWED_BASKETS = frozenset({"benchmarks", "policy_instruments"})
+
+
+@dataclass(frozen=True)
+class SignalRule:
+    horizons: tuple[int, ...]
+    required_effects: frozenset[tuple[str, int]]
+    supported_upper_ci_below: float
+    not_supported_point_at_or_above: float
+
+
+def parse_signal_rule(value: Any, horizons: Sequence[Any]) -> SignalRule:
+    if not isinstance(value, Mapping):
+        raise ValueError("signal_rule must be an object")
+    if value.get("primary_metric") != "max_drawdown":
+        raise ValueError("signal_rule.primary_metric must be max_drawdown")
+    if value.get("comparison") != "risk_off_minus_other":
+        raise ValueError("signal_rule.comparison must be risk_off_minus_other")
+    raw_baskets = value.get("required_baskets")
+    if not isinstance(raw_baskets, list) or not raw_baskets:
+        raise ValueError("signal_rule.required_baskets must be a non-empty array")
+    baskets = tuple(str(item) for item in raw_baskets)
+    if len(set(baskets)) != len(baskets) or not set(baskets) <= ALLOWED_BASKETS:
+        raise ValueError("signal_rule.required_baskets contains invalid values")
+    parsed_horizons: list[int] = []
+    for item in horizons:
+        if isinstance(item, bool) or not isinstance(item, int) or item < 1:
+            raise ValueError("signal_rule horizons must be positive integers")
+        parsed_horizons.append(item)
+    if not parsed_horizons or len(set(parsed_horizons)) != len(parsed_horizons):
+        raise ValueError("signal_rule horizons must be non-empty and unique")
+    try:
+        supported = float(value.get("supported_upper_ci_below"))
+        not_supported = float(value.get("not_supported_point_at_or_above"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("signal_rule thresholds must be finite") from error
+    if not isfinite(supported) or not isfinite(not_supported):
+        raise ValueError("signal_rule thresholds must be finite")
+    if supported > not_supported:
+        raise ValueError("signal_rule thresholds are ambiguous")
+    parsed = tuple(parsed_horizons)
+    return SignalRule(
+        horizons=parsed,
+        required_effects=frozenset(
+            (basket, horizon) for basket in baskets for horizon in parsed
+        ),
+        supported_upper_ci_below=supported,
+        not_supported_point_at_or_above=not_supported,
+    )
 
 
 def downside_metrics(closes: list[float]) -> dict[str, float | int | None]:
@@ -133,35 +186,52 @@ def build_forward_observations(
     samples: int = 10000,
     seed: int = 20260728,
     confidence: float = 0.95,
+    required_effects: frozenset[tuple[str, int]] = REQUIRED_EFFECTS,
 ) -> dict[str, Any]:
     series_rows: list[dict[str, Any]] = []
     basket_rows: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
-    baskets = {
+    available_baskets = {
         "benchmarks": snapshot.benchmark_specs,
         "policy_instruments": snapshot.policy_specs,
     }
+    required_basket_names = {basket for basket, _ in required_effects}
+    if not required_basket_names or not required_basket_names <= set(available_baskets):
+        raise ValueError("required_effects contains invalid baskets")
+    baskets = {
+        name: specs
+        for name, specs in available_baskets.items()
+        if name in required_basket_names
+    }
+    reference_specs = (
+        snapshot.benchmark_specs
+        if "benchmarks" in required_basket_names
+        else tuple(spec for specs in baskets.values() for spec in specs)
+    )
+    partial_reason = (
+        "benchmark_forward_history_short"
+        if "benchmarks" in required_basket_names
+        else "required_series_forward_history_short"
+    )
     for point in replay_points:
         if point.regime not in {"risk_on", "neutral", "risk_off"}:
             continue
         for horizon in horizons:
             reference_missing = [
                 spec.key
-                for spec in snapshot.benchmark_specs
+                for spec in reference_specs
                 if _next_closes(snapshot, spec.key, point.decision_timestamp, horizon)
                 is None
             ]
             if reference_missing:
-                right_censored = len(reference_missing) == len(snapshot.benchmark_specs)
+                right_censored = len(reference_missing) == len(reference_specs)
                 missing.extend(
                     {
                         "month": point.month,
                         "key": key,
                         "horizon": horizon,
                         "reason": (
-                            "right_censored"
-                            if right_censored
-                            else "benchmark_forward_history_short"
+                            "right_censored" if right_censored else partial_reason
                         ),
                         "blocking": not right_censored,
                     }
@@ -226,7 +296,7 @@ def build_forward_observations(
                     }
                 )
     effects: dict[tuple[str, int], dict[str, float]] = {}
-    for basket, horizon in REQUIRED_EFFECTS:
+    for basket, horizon in required_effects:
         observations = [
             (str(row["regime"]), float(row["max_drawdown"]))
             for row in basket_rows
@@ -266,6 +336,9 @@ def signal_verdict(
     source_fresh: bool = True,
     replay_complete: bool = True,
     minimum_risk_off_episodes: int = 3,
+    required_effects: frozenset[tuple[str, int]] = REQUIRED_EFFECTS,
+    supported_upper_ci_below: float = 0.0,
+    not_supported_point_at_or_above: float = 0.0,
 ) -> dict[str, Any]:
     if not complete_coverage:
         return {
@@ -280,10 +353,12 @@ def signal_verdict(
         return {"verdict": "inconclusive", "reason": "replay_incomplete"}
     if risk_off_episodes < minimum_risk_off_episodes:
         return {"verdict": "inconclusive", "reason": "risk_off_episodes_below_three"}
-    if set(effects) != REQUIRED_EFFECTS:
+    if set(effects) != required_effects:
         return {"verdict": "inconclusive", "reason": "required_effects_missing"}
-    if any(item["estimate"] >= 0.0 for item in effects.values()):
+    if any(
+        item["estimate"] >= not_supported_point_at_or_above for item in effects.values()
+    ):
         return {"verdict": "not_supported", "reason": "max_drawdown_direction_failed"}
-    if all(item["ci_high"] < 0.0 for item in effects.values()):
+    if all(item["ci_high"] < supported_upper_ci_below for item in effects.values()):
         return {"verdict": "supported", "reason": "downside_signal_confirmed"}
     return {"verdict": "inconclusive", "reason": "confidence_interval_crosses_zero"}

@@ -15,9 +15,16 @@ from zoneinfo import ZoneInfo
 
 from research.qlib_validation.contracts import Candle, SeriesSpec, SourceSnapshot
 from services.dynamic_allocation import DynamicAllocationError, allocation_benchmarks
+from storage.policy_store import policy_hash
 
 
 PROTOCOL_PATH = Path(__file__).with_name("protocol.json")
+REQUIRED_BENCHMARKS = {
+    "KR/KOSDAQ": ("market_indicator", "KR", "KOSDAQ"),
+    "KR/KOSPI": ("market_indicator", "KR", "KOSPI"),
+    "US/QQQ": ("stock", "US", "QQQ"),
+    "US/SPY": ("stock", "US", "SPY"),
+}
 
 
 class SourceError(RuntimeError):
@@ -46,6 +53,7 @@ def open_readonly(path: Path) -> Iterator[sqlite3.Connection]:
     try:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA query_only = ON")
+        conn.execute("BEGIN")
         yield conn
     finally:
         conn.close()
@@ -87,12 +95,15 @@ def _active_policy(conn: sqlite3.Connection) -> dict[str, Any]:
         raise SourceError("active policy JSON is invalid") from error
     if not isinstance(policy, dict):
         raise SourceError("active policy JSON must be an object")
+    stored_hash = str(row["policy_hash"])
+    if policy_hash(policy) != stored_hash:
+        raise SourceError("active policy hash mismatch")
     return {
         "id": int(row["id"]),
         "account_alias": str(row["account_alias"]),
         "version": int(row["version"]),
         "policy": policy,
-        "policy_hash": str(row["policy_hash"]),
+        "policy_hash": stored_hash,
         "created_at": str(row["created_at"]),
     }
 
@@ -174,6 +185,12 @@ def _specs(
     benchmark_total = sum(item.weight for item in benchmark_specs)
     if not math.isclose(benchmark_total, 1.0, abs_tol=1e-9):
         raise SourceError("benchmark weights must sum to one")
+    actual_benchmarks = {
+        item.key: (item.source_kind, item.market_country, item.symbol)
+        for item in benchmark_specs
+    }
+    if actual_benchmarks != REQUIRED_BENCHMARKS:
+        raise SourceError("active policy must contain exactly the required identities")
 
     instruments = policy.get("instruments")
     if not isinstance(instruments, list):
@@ -219,6 +236,52 @@ def _candle_at(value: Any) -> datetime:
     except ValueError as error:
         raise SourceError(f"stored candle timestamp is invalid: {value}") from error
     return _require_aware(parsed, label="stored candle timestamp")
+
+
+def _maximum_gap_days(policy: Mapping[str, Any]) -> int:
+    config = policy.get("allocation_review")
+    value = config.get("max_gap_days") if isinstance(config, Mapping) else None
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise SourceError(
+            "allocation_review.max_gap_days must be a positive integer"
+        ) from error
+    if not math.isfinite(number) or number < 1 or not number.is_integer():
+        raise SourceError("allocation_review.max_gap_days must be a positive integer")
+    return int(number)
+
+
+def _validate_series(
+    spec: SeriesSpec, candles: tuple[Candle, ...], *, maximum_gap_days: int
+) -> None:
+    seen_sessions = set()
+    previous: Candle | None = None
+    for candle in candles:
+        prices = (
+            candle.open_price,
+            candle.high_price,
+            candle.low_price,
+            candle.close_price,
+        )
+        if not all(math.isfinite(value) and value > 0 for value in prices):
+            raise SourceError(f"invalid positive OHLC for series: {spec.key}")
+        if candle.low_price > min(
+            candle.open_price, candle.close_price
+        ) or candle.high_price < max(candle.open_price, candle.close_price):
+            raise SourceError(f"invalid OHLC relationship for series: {spec.key}")
+        if not math.isfinite(candle.volume) or candle.volume < 0:
+            raise SourceError(f"invalid volume for series: {spec.key}")
+        if candle.session_date in seen_sessions:
+            raise SourceError(f"duplicate session for series: {spec.key}")
+        seen_sessions.add(candle.session_date)
+        if previous is not None:
+            gap_days = (candle.session_date - previous.session_date).days
+            if gap_days > maximum_gap_days:
+                raise SourceError(
+                    f"history gap exceeds policy limit for series: {spec.key}"
+                )
+        previous = candle
 
 
 def _load_series(
@@ -277,6 +340,7 @@ def load_snapshot(path: Path, *, as_of: datetime) -> SourceSnapshot:
     with open_readonly(path) as conn:
         policy_record = _active_policy(conn)
         benchmark_specs, policy_specs = _specs(policy_record["policy"])
+        maximum_gap_days = _maximum_gap_days(policy_record["policy"])
         unique_specs: dict[str, SeriesSpec] = {}
         for spec in (*benchmark_specs, *policy_specs):
             existing = unique_specs.get(spec.key)
@@ -289,11 +353,12 @@ def load_snapshot(path: Path, *, as_of: datetime) -> SourceSnapshot:
                     f"conflicting series specifications for key: {spec.key}"
                 )
             unique_specs.setdefault(spec.key, spec)
-        candles = tuple(
-            candle
-            for spec in sorted(unique_specs.values(), key=lambda item: item.key)
-            for candle in _load_series(conn, spec, as_of=as_of_utc)
-        )
+        loaded: list[Candle] = []
+        for spec in sorted(unique_specs.values(), key=lambda item: item.key):
+            series = _load_series(conn, spec, as_of=as_of_utc)
+            _validate_series(spec, series, maximum_gap_days=maximum_gap_days)
+            loaded.extend(series)
+        candles = tuple(loaded)
     return SourceSnapshot(
         policy_record=policy_record,
         benchmark_specs=benchmark_specs,

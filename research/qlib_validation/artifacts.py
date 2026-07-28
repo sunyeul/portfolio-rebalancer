@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from hashlib import sha256
 import json
 import os
@@ -11,11 +13,15 @@ from research.qlib_validation.contracts import SourceSnapshot
 
 RELEVANT_SOURCE_PATHS = (
     "services/dynamic_allocation.py",
+    "services/policy_validation.py",
+    "storage/policy_store.py",
     "research/qlib_validation",
 )
 
 FIXED_REPRODUCIBILITY_FILES = (
     "services/dynamic_allocation.py",
+    "services/policy_validation.py",
+    "storage/policy_store.py",
     "research/qlib_validation/protocol.json",
     "research/qlib_validation/pyproject.toml",
     "research/qlib_validation/uv.lock",
@@ -42,6 +48,25 @@ def _atomic_write(path: Path, payload: bytes) -> None:
 
 def write_json(path: Path, value: Any) -> None:
     _atomic_write(path, canonical_bytes(value))
+
+
+@contextmanager
+def staged_run(final_dir: Path) -> Iterator[Path]:
+    """Publish a complete run directory without exposing partial results."""
+    final = Path(final_dir)
+    if final.exists():
+        raise ArtifactError(f"run directory already exists: {final}")
+    final.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        dir=final.parent, prefix=f".{final.name}.staging-"
+    ) as temporary_root:
+        staging = Path(temporary_root) / "run"
+        yield staging
+        if not staging.is_dir():
+            raise ArtifactError("staged run directory was not created")
+        if final.exists():
+            raise ArtifactError(f"run directory already exists: {final}")
+        os.replace(staging, final)
 
 
 def _digest(payload: bytes) -> str:

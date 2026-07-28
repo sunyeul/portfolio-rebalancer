@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from research.qlib_validation.report import run_stage1
 
 
@@ -76,3 +78,60 @@ def test_stage1_summary_never_claims_stage2_or_emits_execution_fields(
         return set()
 
     assert forbidden.isdisjoint(keys(summary))
+
+
+def test_stage1_failure_does_not_publish_or_block_retry(
+    monkeypatch, snapshot_factory, tmp_path
+):
+    snapshot = snapshot_factory(days=80)
+    output = tmp_path / "artifacts"
+    monkeypatch.setattr(
+        "research.qlib_validation.report.load_snapshot",
+        lambda *args, **kwargs: snapshot,
+    )
+    monkeypatch.setattr(
+        "research.qlib_validation.report.assess_capability",
+        lambda value: {"data_adapter_suitable": False, "reasons": []},
+    )
+    monkeypatch.setattr(
+        "research.qlib_validation.report.replay_regimes",
+        lambda value, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        "research.qlib_validation.report.build_forward_observations",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("mid-run")),
+    )
+
+    with pytest.raises(RuntimeError, match="mid-run"):
+        run_stage1(
+            database=tmp_path / "ignored.sqlite3",
+            as_of=datetime(2026, 7, 28, tzinfo=UTC),
+            output=output,
+        )
+
+    assert output.is_dir()
+    assert list(output.iterdir()) == []
+
+    monkeypatch.setattr(
+        "research.qlib_validation.report.build_forward_observations",
+        lambda *args, **kwargs: {
+            "rows": [],
+            "missing": [],
+            "analysis": {
+                "effects": {},
+                "effects_serializable": {},
+                "risk_off_episodes": 0,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "research.qlib_validation.report.environment_info",
+        lambda: {"python": "3.12.test", "pyqlib": "0.9.7"},
+    )
+    summary = run_stage1(
+        database=tmp_path / "ignored.sqlite3",
+        as_of=datetime(2026, 7, 28, tzinfo=UTC),
+        output=output,
+    )
+
+    assert (output / summary["run_id"] / "summary.json").is_file()

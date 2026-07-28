@@ -6,6 +6,7 @@ import pytest
 from research.qlib_validation.artifacts import (
     ArtifactError,
     canonical_bytes,
+    staged_run,
     write_inputs,
 )
 
@@ -26,6 +27,29 @@ def test_write_inputs_is_canonical_hashed_and_never_overwrites(
     source = json.loads((tmp_path / "run" / "source-manifest.json").read_text())
     assert "research/qlib_validation/protocol.json" in source["files"]
     assert "research/qlib_validation/uv.lock" in source["files"]
+    assert "services/policy_validation.py" in source["files"]
+    assert "storage/policy_store.py" in source["files"]
 
     with pytest.raises(ArtifactError, match="already exists"):
         write_inputs(snapshot, tmp_path / "run", repository_root=tmp_path)
+
+
+def test_staged_run_only_publishes_complete_results(tmp_path):
+    final = tmp_path / "artifacts" / "fixed-run"
+
+    with pytest.raises(RuntimeError, match="mid-run failure"):
+        with staged_run(final) as staging:
+            staging.mkdir()
+            (staging / "partial.json").write_text("partial")
+            raise RuntimeError("mid-run failure")
+
+    assert not final.exists()
+
+    with staged_run(final) as staging:
+        staging.mkdir()
+        (staging / "summary.json").write_text("complete")
+
+    assert (final / "summary.json").read_text() == "complete"
+    with pytest.raises(ArtifactError, match="already exists"):
+        with staged_run(final):
+            pass

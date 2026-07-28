@@ -4,11 +4,20 @@ import json
 from pathlib import Path
 from typing import Any
 
-from research.qlib_validation.artifacts import canonical_bytes, write_inputs, write_json
+from research.qlib_validation.artifacts import (
+    canonical_bytes,
+    staged_run,
+    write_inputs,
+    write_json,
+)
 from research.qlib_validation.capability import assess_capability
 from research.qlib_validation.contracts import SourceSnapshot
 from research.qlib_validation.environment import environment_info
-from research.qlib_validation.metrics import build_forward_observations, signal_verdict
+from research.qlib_validation.metrics import (
+    build_forward_observations,
+    parse_signal_rule,
+    signal_verdict,
+)
 from research.qlib_validation.replay import replay_regimes
 from research.qlib_validation.source import load_snapshot
 
@@ -45,6 +54,9 @@ def run_stage1(*, database: Path, as_of: datetime, output: Path) -> dict[str, An
         raise ValueError("as_of must be timezone-aware")
     as_of = as_of.astimezone(UTC)
     protocol, protocol_hash = _protocol()
+    signal_rule = parse_signal_rule(
+        protocol.get("signal_rule"), protocol.get("horizons", ())
+    )
     snapshot = load_snapshot(database, as_of=as_of)
     input_fingerprint = sha256(
         canonical_bytes(
@@ -57,66 +69,72 @@ def run_stage1(*, database: Path, as_of: datetime, output: Path) -> dict[str, An
         )
     ).hexdigest()
     run_id = f"{as_of.strftime('%Y%m%dT%H%M%SZ')}-{input_fingerprint[:12]}"
-    run_dir = output / run_id
-    input_manifest = write_inputs(snapshot, run_dir, repository_root=ROOT)
-    capability = assess_capability(snapshot)
-    points = replay_regimes(
-        snapshot,
-        minimum_history=int(protocol["minimum_history"]),
-    )
-    forward = build_forward_observations(
-        snapshot,
-        points,
-        tuple(protocol["horizons"]),
-        **protocol["bootstrap"],
-    )
-    analysis = forward["analysis"]
-    stale_series = _stale_series(
-        snapshot,
-        as_of=as_of,
-        maximum_staleness_days=int(protocol["maximum_staleness_days"]),
-    )
-    unclassified_months = [
-        point.month
-        for point in points
-        if point.regime not in {"risk_on", "neutral", "risk_off"}
-    ]
-    verdict = signal_verdict(
-        analysis["effects"],
-        risk_off_episodes=analysis["risk_off_episodes"],
-        complete_coverage=not any(item["blocking"] for item in forward["missing"]),
-        reproducible=not input_manifest["relevant_source_dirty"],
-        source_fresh=not stale_series,
-        replay_complete=not unclassified_months,
-        minimum_risk_off_episodes=int(protocol["minimum_risk_off_episodes"]),
-    )
-    manifest = {
-        "run_id": run_id,
-        "as_of": as_of.isoformat(),
-        "protocol_hash": protocol_hash,
-        "policy_hash": snapshot.policy_record["policy_hash"],
-        "environment": environment_info(),
-        "qlib_capability": capability,
-        "source_manifest": input_manifest["source_manifest"],
-        "input_manifest": input_manifest["input_manifest"],
-    }
-    summary = {
-        "run_id": run_id,
-        "as_of": as_of.isoformat(),
-        "protocol_hash": protocol_hash,
-        "policy_hash": snapshot.policy_record["policy_hash"],
-        "qlib_capability": capability,
-        "regime_signal_verdict": verdict["verdict"],
-        "regime_signal_reason": verdict["reason"],
-        "target_policy_verdict": "inconclusive",
-        "target_policy_reason": "stage2_not_run",
-        "coverage_missing": forward["missing"],
-        "stale_series": stale_series,
-        "unclassified_months": unclassified_months,
-        "effects": analysis["effects_serializable"],
-    }
-    write_json(run_dir / "manifest.json", manifest)
-    write_json(run_dir / "replay.json", [item.record() for item in points])
-    write_json(run_dir / "stage1-metrics.json", forward["rows"])
-    write_json(run_dir / "summary.json", summary)
+    with staged_run(output / run_id) as run_dir:
+        input_manifest = write_inputs(snapshot, run_dir, repository_root=ROOT)
+        capability = assess_capability(snapshot)
+        points = replay_regimes(
+            snapshot,
+            minimum_history=int(protocol["minimum_history"]),
+        )
+        forward = build_forward_observations(
+            snapshot,
+            points,
+            signal_rule.horizons,
+            required_effects=signal_rule.required_effects,
+            **protocol["bootstrap"],
+        )
+        analysis = forward["analysis"]
+        stale_series = _stale_series(
+            snapshot,
+            as_of=as_of,
+            maximum_staleness_days=int(protocol["maximum_staleness_days"]),
+        )
+        unclassified_months = [
+            point.month
+            for point in points
+            if point.regime not in {"risk_on", "neutral", "risk_off"}
+        ]
+        verdict = signal_verdict(
+            analysis["effects"],
+            risk_off_episodes=analysis["risk_off_episodes"],
+            complete_coverage=not any(item["blocking"] for item in forward["missing"]),
+            reproducible=not input_manifest["relevant_source_dirty"],
+            source_fresh=not stale_series,
+            replay_complete=not unclassified_months,
+            minimum_risk_off_episodes=int(protocol["minimum_risk_off_episodes"]),
+            required_effects=signal_rule.required_effects,
+            supported_upper_ci_below=signal_rule.supported_upper_ci_below,
+            not_supported_point_at_or_above=(
+                signal_rule.not_supported_point_at_or_above
+            ),
+        )
+        manifest = {
+            "run_id": run_id,
+            "as_of": as_of.isoformat(),
+            "protocol_hash": protocol_hash,
+            "policy_hash": snapshot.policy_record["policy_hash"],
+            "environment": environment_info(),
+            "qlib_capability": capability,
+            "source_manifest": input_manifest["source_manifest"],
+            "input_manifest": input_manifest["input_manifest"],
+        }
+        summary = {
+            "run_id": run_id,
+            "as_of": as_of.isoformat(),
+            "protocol_hash": protocol_hash,
+            "policy_hash": snapshot.policy_record["policy_hash"],
+            "qlib_capability": capability,
+            "regime_signal_verdict": verdict["verdict"],
+            "regime_signal_reason": verdict["reason"],
+            "target_policy_verdict": "inconclusive",
+            "target_policy_reason": "stage2_not_run",
+            "coverage_missing": forward["missing"],
+            "stale_series": stale_series,
+            "unclassified_months": unclassified_months,
+            "effects": analysis["effects_serializable"],
+        }
+        write_json(run_dir / "manifest.json", manifest)
+        write_json(run_dir / "replay.json", [item.record() for item in points])
+        write_json(run_dir / "stage1-metrics.json", forward["rows"])
+        write_json(run_dir / "summary.json", summary)
     return summary

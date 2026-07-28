@@ -1,8 +1,10 @@
 from copy import deepcopy
+from datetime import UTC, date, datetime, time, timedelta
 from hashlib import sha256
 from importlib.util import find_spec
 import json
 import sqlite3
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -71,8 +73,18 @@ def test_real_cli_keeps_fixture_database_bytes_unchanged(monkeypatch, capsys, tm
         (item["source_kind"], item["market_country"], item["symbol"]): item
         for item in [*allocation_benchmarks(active["policy"]), *policy_specs]
     }
-    for spec in unique_specs.values():
+    sessions = []
+    cursor = date(2024, 1, 2)
+    while len(sessions) < 280:
+        if cursor.weekday() < 5:
+            sessions.append(cursor)
+        cursor += timedelta(days=1)
+    for spec_index, spec in enumerate(unique_specs.values()):
         is_stock = spec["source_kind"] == "stock"
+        timezone = ZoneInfo(
+            "Asia/Seoul" if spec["market_country"] == "KR" else "America/New_York"
+        )
+        market_time = time(9, 0) if spec["market_country"] == "KR" else time(9, 30)
         insert_candles(
             [
                 {
@@ -80,36 +92,42 @@ def test_real_cli_keeps_fixture_database_bytes_unchanged(monkeypatch, capsys, tm
                     "market_country": spec["market_country"],
                     "symbol": spec["symbol"],
                     "interval": "1d",
-                    "candle_at": (
-                        "2026-01-30T09:00:00+09:00"
-                        if spec["market_country"] == "KR"
-                        else "2026-01-30T09:30:00-05:00"
-                    ),
-                    "currency": "KRW" if spec["market_country"] == "KR" else "USD",
-                    "open_price": 100.0,
-                    "high_price": 101.0,
-                    "low_price": 99.0,
-                    "close_price": 100.5,
-                    "volume": 1000.0,
+                    "candle_at": datetime.combine(
+                        session, market_time, timezone
+                    ).isoformat(),
+                    "currency": ("KRW" if spec["market_country"] == "KR" else "USD"),
+                    "open_price": 100.0 + spec_index + index * 0.1,
+                    "high_price": 101.0 + spec_index + index * 0.1,
+                    "low_price": 99.0 + spec_index + index * 0.1,
+                    "close_price": 100.5 + spec_index + index * 0.1,
+                    "volume": 1000.0 + index,
                     "adjusted": is_stock,
                     "adjusted_supported": is_stock,
                 }
+                for index, session in enumerate(sessions)
             ]
         )
     before = sha256(database.read_bytes()).hexdigest()
+    as_of = datetime.combine(
+        sessions[-1] + timedelta(days=1), time(23), UTC
+    ).isoformat()
+    output = tmp_path / "artifacts"
     code = main(
         [
             "stage1",
             "--db",
             str(database),
             "--as-of",
-            "2026-02-01T00:00:00+00:00",
+            as_of,
             "--output",
-            str(tmp_path / "artifacts"),
+            str(output),
         ]
     )
     result = json.loads(capsys.readouterr().out)
     assert code == 0
     assert result["regime_signal_verdict"] == "inconclusive"
     assert result["target_policy_verdict"] == "inconclusive"
+    run_dir = output / result["run_id"]
+    assert json.loads((run_dir / "replay.json").read_text())
+    assert json.loads((run_dir / "stage1-metrics.json").read_text())
     assert sha256(database.read_bytes()).hexdigest() == before

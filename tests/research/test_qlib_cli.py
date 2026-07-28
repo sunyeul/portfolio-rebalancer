@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from research.qlib_validation.cli import main
 
 
@@ -26,3 +28,24 @@ def test_cli_writes_one_json_object_to_stdout(monkeypatch, capsys, tmp_path):
     )
     assert code == 0
     assert json.loads(capsys.readouterr().out)["run_id"] == "fixed-run"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        [],
+        ["stage1"],
+        ["stage1", "--db", "fixture.sqlite3"],
+        ["unknown"],
+    ],
+)
+def test_cli_argument_errors_are_one_json_object_on_stdout(argv, capsys):
+    code = main(argv)
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert code == 2
+    assert payload["ok"] is False
+    assert payload["error"] == "ArgumentError"
+    assert payload["message"]
+    assert captured.err == ""
