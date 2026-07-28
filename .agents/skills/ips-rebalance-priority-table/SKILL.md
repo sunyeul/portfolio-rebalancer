@@ -40,9 +40,21 @@ Before ranking, extract and restate the inputs supplied in the current request. 
 - a cash objective;
 - a user-defined role, such as treating an instrument as a core hedge;
 - holdings to preserve, simplify, or compare for overlap;
-- tax, liquidity, or currency constraints.
+- tax, liquidity, or currency constraints;
+- a candidate instrument that may fill a distinct role or return driver.
 
-Use these inputs only for this response. Do not persist them as metadata or change the active policy. If an input reclassifies a holding, show both `정책 레이어` and `분석 레이어`. Retain the policy target and gap unless the user supplies an analysis target; otherwise label the analysis target `미정`.
+Use these inputs only for this response. They are analysis inputs, not current
+account facts. Do not persist them as metadata or change the active policy. If
+an input reclassifies a holding, show both `정책 레이어` and `분석 레이어`.
+Retain the policy target and gap unless the user supplies an analysis target;
+otherwise label the analysis target `미정`. Treat policy targets as directional
+vectors and ranges, not mandatory destinations for every holding.
+
+If the selected snapshot is partial, stale, failed, or unreconciled, do not
+assert current weights, gaps, returns, profit/loss, or candidate holdings. You
+may still show a clearly labeled conditional scenario—for example, “가정: 총계좌
+평가액 기준 현금 10%”—and list the verification needed before using it as a
+current-account conclusion.
 
 ## Calculations and table contract
 
@@ -67,6 +79,21 @@ Then create one table for each analysis layer that has holdings. Use these colum
 | ---: | --- | --- | --- | ---: | ---: | ---: | --- | --- |
 
 Generate `우선 이유` from the current user inputs first. Use role fit, concentration, overlap, target gap, return, and profit/loss only as supporting evidence. Explain that the rank is a human review order, not a transaction instruction. Do not reuse a previous response's rationale after the user supplies a new input.
+
+Give each relevant holding a plain analysis direction such as cash direction,
+maintain, future-allocation direction, concentration-normalization review, or
+exceptional-review. Label the table ordering as `분석 순위` and keep it
+separate from persisted backend `priority` (`P1`–`P4`); do not reclassify or
+overwrite the backend priority. When a persisted inspection or Review Queue
+item is used, reproduce backend-owned `status`, `priority`, `queue_class`, and
+`suggestion` unchanged; the analysis rank and direction are supplemental.
+
+When a candidate instrument is supplied or discovered through clearly labeled
+research, show it in a separate `후보 종목` section. A candidate is not a
+current holding: do not give it current weight, gap, return, profit/loss,
+status, queue class, or backend priority until it appears in a normalized Toss
+snapshot. Screen its distinct role, cost, overlap, thesis, burden, liquidity,
+tax, and policy fit before carrying it into a future policy comparison.
 
 ## Guardrails
 
