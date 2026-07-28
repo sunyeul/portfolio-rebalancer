@@ -1,6 +1,6 @@
-from importlib import import_module, metadata
 import json
 import platform
+from importlib import import_module, metadata
 
 
 def environment_info() -> dict[str, object]:
@@ -14,5 +14,17 @@ def environment_info() -> dict[str, object]:
     }
 
 
+def main() -> None:
+    try:
+        print(json.dumps(environment_info(), sort_keys=True))
+    except Exception as error:
+        payload = {
+            "error": f"{type(error).__name__}: {error}"[:240],
+            "qlib_imported": False,
+        }
+        print(json.dumps(payload, sort_keys=True))
+        raise SystemExit(1) from error
+
+
 if __name__ == "__main__":
-    print(json.dumps(environment_info(), sort_keys=True))
+    main()
