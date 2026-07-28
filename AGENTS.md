@@ -54,9 +54,9 @@ Good additions are durable product guardrails, repo-specific gotchas, safety-cri
 
 ## ACE 협업 운영
 
-- 작업 시작, 목표·범위 변경, 사용자의 협업 선호·정정 수신, 예상 밖의 재사용 가능한 실패, 메모리 후보가 있는 작업의 마무리에서 `.agent/skills/ace-collaboration-memory/SKILL.md`를 읽고 ACE 절차를 적용한다.
+- 작업 시작, 목표·범위 변경, 사용자의 협업 선호·정정 수신, 예상 밖의 재사용 가능한 실패, 메모리 후보가 있는 작업의 마무리에서 `.agents/skills/ace-collaboration-memory/SKILL.md`를 읽고 ACE 절차를 적용한다.
 - 매번 `PURPOSE`, `GOAL`, `ALIGNMENT`, `WORKING LOG`를 함께 확인한다. 훅이 없거나 신뢰되지 않으면 같은 순서를 수동으로 수행한다.
 - 현재 시스템·개발자·사용자 지시와 기존 저장소 계약은 ACE 메모리보다 우선한다.
-- 공유 교훈은 `.agent/playbooks/collaboration-lessons.md`에 Git 추적하고, 개인 선호는 `.serena/memories/local/user_preferences.md`에만 기록한다.
+- 공유 교훈은 `.agents/playbooks/collaboration-lessons.md`에 Git 추적하고, 개인 선호는 `.serena/memories/local/user_preferences.md`에만 기록한다.
 
 @RTK.md

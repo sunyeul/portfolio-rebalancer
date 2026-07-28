@@ -82,6 +82,7 @@ def test_restores_confirmed_preferences_only(tmp_path: Path) -> None:
     assert result["continue"] is True
     message = _additional_context(result)
     assert "Read AGENTS.md" in message
+    assert ".agents/skills/ace-collaboration-memory/SKILL.md" in message
     assert "show evidence before completion" in message
     assert "infer my preferred format" not in message
 

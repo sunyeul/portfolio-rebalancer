@@ -33,7 +33,7 @@ ALLOWED_EVENTS = {"startup", "resume", "clear", "compact"}
 FIXED_INSTRUCTION = "\n".join(
     (
         "ACE session context restoration:",
-        "- Read AGENTS.md and .agent/skills/ace-collaboration-memory/SKILL.md.",
+        "- Read AGENTS.md and .agents/skills/ace-collaboration-memory/SKILL.md.",
         "- Declare PURPOSE, GOAL, ALIGNMENT, and WORKING LOG together.",
         "- Search only Active shared lessons relevant to the current task.",
         "- Apply only complete Confirmed local preferences; never apply Pending, Rejected, or Superseded entries.",

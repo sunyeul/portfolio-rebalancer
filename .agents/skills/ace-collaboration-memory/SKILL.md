@@ -16,7 +16,7 @@ Use this workflow when starting work, changing scope or goals, receiving an expl
    - `ALIGNMENT`: why the result supports the purpose.
    - `WORKING LOG`: only decisions, evidence, open questions, and next action.
 3. Read the repository's `AGENTS.md` and this skill.
-4. Search `.agent/playbooks/collaboration-lessons.md` for only the `Active` lessons relevant to the task.
+4. Search `.agents/playbooks/collaboration-lessons.md` for only the `Active` lessons relevant to the task.
 5. Read `.serena/memories/local/user_preferences.md` and apply only complete `Confirmed` entries relevant to the task. If the file is missing or invalid, continue with no preferences and report that fact briefly.
 
 Repeat the four fields immediately after any goal or scope change and before claiming completion. A trusted session hook may restore the fixed retrieval instruction and confirmed preferences, but it never replaces this protocol.
