@@ -101,8 +101,7 @@ def test_chronological_split_purges_labels_that_reach_the_holdout():
     ]
     labeled = pd.DataFrame(rows)
     labeled.loc[
-        (labeled["key"] == "KR/KOSPI")
-        & (labeled["decision_session"] == "2026-01-07"),
+        (labeled["key"] == "KR/KOSPI") & (labeled["decision_session"] == "2026-01-07"),
         "target_session",
     ] = "2026-01-09"
 
@@ -134,9 +133,7 @@ def test_ridge_uses_full_outer_train_and_all_labeled_rows_for_current_scores(
         calls.append(kwargs)
         return pd.Series(0.0, index=kwargs["test_features"].index), {
             "intercept": 0.0,
-            "feature_coefficients": {
-                name: 0.0 for name in forecast.FEATURE_NAMES
-            },
+            "feature_coefficients": {name: 0.0 for name in forecast.FEATURE_NAMES},
         }
 
     monkeypatch.setattr(forecast, "_qlib_native_ridge_predict", fake_ridge_predict)
