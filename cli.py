@@ -452,9 +452,9 @@ def market_sync_command(
     """Read official Toss daily candles and persist immutable observations."""
     transport: TossTransport | None = None
     try:
-        initialize_database()
         if target_points < 1:
             raise CliError("input", "--target-points는 1 이상이어야 합니다.")
+        initialize_database()
         active = get_active_policy()
         if active is None:
             raise CliError("persistence", "활성 정책을 찾을 수 없습니다.")

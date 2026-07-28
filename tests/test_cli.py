@@ -428,6 +428,28 @@ def test_market_sync_research_only_collects_policy_universe_without_policy_side_
     }
 
 
+def test_market_sync_rejects_invalid_target_points_before_database_access(monkeypatch):
+    monkeypatch.setattr(
+        "cli.initialize_database",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("invalid input must not initialize the database")
+        ),
+    )
+
+    result = runner.invoke(app, ["market", "sync", "--target-points", "0"])
+
+    assert result.exit_code == 1
+    assert _payload(result) == {
+        "ok": False,
+        "command": "market sync",
+        "error": {
+            "stage": "input",
+            "message": "--target-points는 1 이상이어야 합니다.",
+            "hint": None,
+        },
+    }
+
+
 def test_policy_validate_emits_one_json_object(monkeypatch, tmp_path):
     monkeypatch.setattr("cli.initialize_database", lambda: None)
     monkeypatch.setattr("cli.list_observed_identities", lambda: [("US", "AAA")])
