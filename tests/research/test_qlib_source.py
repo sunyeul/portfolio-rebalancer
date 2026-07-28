@@ -183,7 +183,7 @@ def test_snapshot_reads_active_policy_and_never_opens_database_for_write(
                     "adjusted_supported": spec["source_kind"] == "stock",
                 }
             ]
-            )
+        )
 
     _backdate_candles(database)
 
@@ -418,9 +418,7 @@ def test_candle_revision_selection_respects_research_as_of(tmp_path, monkeypatch
         )
 
     with open_readonly(database) as conn:
-        candles = _load_series(
-            conn, spec, as_of=datetime(2026, 2, 1, tzinfo=UTC)
-        )
+        candles = _load_series(conn, spec, as_of=datetime(2026, 2, 1, tzinfo=UTC))
 
     assert len(candles) == 1
     assert candles[0].close_price == 100.0

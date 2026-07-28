@@ -26,7 +26,9 @@ SUGGESTION_LABELS = {
     "hold_and_observe": "관찰 유지",
 }
 
-SUGGESTION = {code: {"code": code, "label": label} for code, label in SUGGESTION_LABELS.items()}
+SUGGESTION = {
+    code: {"code": code, "label": label} for code, label in SUGGESTION_LABELS.items()
+}
 
 
 def suggestion(code: str) -> dict[str, str]:

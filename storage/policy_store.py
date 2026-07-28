@@ -243,7 +243,10 @@ def policy_template(
     account_alias: str = "toss-brokerage",
 ) -> dict[str, Any]:
     """Build an app-owned target template from Toss identities only."""
-    from services.account_projection import build_account_projection, layer_map_from_policy
+    from services.account_projection import (
+        build_account_projection,
+        layer_map_from_policy,
+    )
 
     active = get_active_policy(account_alias)
     active_policy = active["policy"] if active is not None else None

@@ -78,8 +78,7 @@ def test_fresh_database_uses_current_schema(monkeypatch, tmp_path):
     assert _table_names(path) == ACTIVE_TABLES
     with sqlite3.connect(path) as conn:
         evaluation_columns = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(ips_evaluation_runs)")
+            row[1] for row in conn.execute("PRAGMA table_info(ips_evaluation_runs)")
         }
         assert {"market_evidence_fingerprint", "market_evidence_json"}.issubset(
             evaluation_columns
@@ -98,10 +97,13 @@ def test_existing_v10_database_preserves_user_data(monkeypatch, tmp_path):
 
     assert _schema_version(path) == LATEST_SCHEMA_VERSION
     with sqlite3.connect(path) as conn:
-        assert conn.execute(
-            "SELECT source_fingerprint FROM broker_account_snapshots WHERE id = ?",
-            (snapshot_id,),
-        ).fetchone()[0] == "preservation-source"
+        assert (
+            conn.execute(
+                "SELECT source_fingerprint FROM broker_account_snapshots WHERE id = ?",
+                (snapshot_id,),
+            ).fetchone()[0]
+            == "preservation-source"
+        )
 
 
 def test_empty_unversioned_database_is_initialized(monkeypatch, tmp_path):
@@ -131,7 +133,9 @@ def test_nonempty_unversioned_database_is_rejected_without_mutation(
         assert conn.execute("SELECT value FROM sentinel").fetchone()[0] == "unchanged"
 
 
-@pytest.mark.parametrize("version", [LATEST_SCHEMA_VERSION - 1, LATEST_SCHEMA_VERSION + 1])
+@pytest.mark.parametrize(
+    "version", [LATEST_SCHEMA_VERSION - 1, LATEST_SCHEMA_VERSION + 1]
+)
 def test_unsupported_schema_is_rejected_without_mutation(
     monkeypatch, tmp_path, version
 ):
@@ -153,7 +157,9 @@ def test_unsupported_schema_is_rejected_without_mutation(
 def test_failed_baseline_creation_rolls_back(monkeypatch, tmp_path):
     path = tmp_path / "rollback.sqlite3"
     _set_database_path(monkeypatch, path)
-    broken = schema_module.CURRENT_SCHEMA_SQL + "\nINSERT INTO missing_table VALUES (1);"
+    broken = (
+        schema_module.CURRENT_SCHEMA_SQL + "\nINSERT INTO missing_table VALUES (1);"
+    )
     monkeypatch.setattr(schema_module, "CURRENT_SCHEMA_SQL", broken)
 
     with pytest.raises(sqlite3.OperationalError):

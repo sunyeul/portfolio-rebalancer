@@ -148,9 +148,7 @@ def _ytd_twr(points: list[Mapping[str, Any]]) -> float | None:
     supported = [(timestamp, point) for timestamp, point in supported if timestamp]
     if not supported:
         return None
-    year_start = datetime(
-        supported[-1][0].year, 1, 1, tzinfo=timezone.utc
-    )
+    year_start = datetime(supported[-1][0].year, 1, 1, tzinfo=timezone.utc)
     baseline_index = max(
         (
             index
@@ -394,7 +392,9 @@ def evaluate_inspection(
         elif not projection.get(
             "invested_weights_evaluable",
             bool(projection.get("layer_weights_invested"))
-            or any(position.get("invested_weight") is not None for position in positions),
+            or any(
+                position.get("invested_weight") is not None for position in positions
+            ),
         ):
             # A zero-investment account still has a valid gross cash denominator.
             allocation_reason = "invested_denominator_unavailable"
@@ -408,7 +408,10 @@ def evaluate_inspection(
         if isinstance(item, Mapping)
     }
     position_map = {
-        (str(position.get("market_country", "")).upper(), str(position.get("symbol", "")).upper()): position
+        (
+            str(position.get("market_country", "")).upper(),
+            str(position.get("symbol", "")).upper(),
+        ): position
         for position in positions
     }
     invested_denominator_evaluable = bool(
@@ -416,22 +419,30 @@ def evaluate_inspection(
         and projection.get(
             "invested_weights_evaluable",
             bool(projection.get("layer_weights_invested"))
-            or any(position.get("invested_weight") is not None for position in positions),
+            or any(
+                position.get("invested_weight") is not None for position in positions
+            ),
         )
     )
     holding_coverage_complete = bool(source_ok) and all(
         position.get("layer") is not None
-        and (str(position.get("market_country", "")).upper(), str(position.get("symbol", "")).upper()) in configured
+        and (
+            str(position.get("market_country", "")).upper(),
+            str(position.get("symbol", "")).upper(),
+        )
+        in configured
         and _target_ready(
             configured.get(
-                (str(position.get("market_country", "")).upper(), str(position.get("symbol", "")).upper())
+                (
+                    str(position.get("market_country", "")).upper(),
+                    str(position.get("symbol", "")).upper(),
+                )
             )
         )
-    for position in positions
+        for position in positions
     )
     configured_coverage_complete = all(
-        str(target.get("layer", "")).lower() in LAYERS
-        and _target_ready(target)
+        str(target.get("layer", "")).lower() in LAYERS and _target_ready(target)
         for key, target in configured.items()
     )
     if invested_denominator_evaluable:
@@ -517,19 +528,33 @@ def evaluate_inspection(
         for key in universe:
             position = position_map.get(key)
             target = configured.get(key)
-            evidence = (risk_evidence.get("instruments") or {}).get(f"{key[0]}/{key[1]}", {})
+            evidence = (risk_evidence.get("instruments") or {}).get(
+                f"{key[0]}/{key[1]}", {}
+            )
             target_ready = _target_ready(target)
             is_absent = position is None
-            layer = str((target or {}).get("layer") or (position or {}).get("layer") or "").lower()
+            layer = str(
+                (target or {}).get("layer") or (position or {}).get("layer") or ""
+            ).lower()
             triggers: list[str] = []
             status = "OK"
-            current = 0.0 if is_absent and target_ready else (position.get("invested_weight") if position and target_ready else None)
+            current = (
+                0.0
+                if is_absent and target_ready
+                else (
+                    position.get("invested_weight")
+                    if position and target_ready
+                    else None
+                )
+            )
             ready = target_ready and layer in LAYERS
             if not ready:
                 status = "Review"
                 triggers.append("policy_target_or_layer_missing")
             else:
-                if position is not None and position.get("layer") != target.get("layer"):
+                if position is not None and position.get("layer") != target.get(
+                    "layer"
+                ):
                     status = "Review"
                     triggers.append("layer_identity_mismatch")
                 if not _within(current, target):
@@ -541,17 +566,39 @@ def evaluate_inspection(
                         status = _raise_status(status, "Watch")
                         triggers.append("instrument_drawdown_evidence_unavailable")
                     else:
-                        threshold = (risk_policy.get("instrument_drawdown_review") or {}).get(layer)
-                        if threshold is not None and drawdown.get("current") is not None and float(drawdown["current"]) <= float(threshold):
+                        threshold = (
+                            risk_policy.get("instrument_drawdown_review") or {}
+                        ).get(layer)
+                        if (
+                            threshold is not None
+                            and drawdown.get("current") is not None
+                            and float(drawdown["current"]) <= float(threshold)
+                        ):
                             candidate = "Watch" if layer == "core" else "Review"
                             status = _raise_status(status, candidate)
-                            triggers.append("core_drawdown_review_threshold" if layer == "core" else "strict_layer_drawdown_review_threshold")
-                pnl = _finite_number(evidence.get("unrealized_pnl_krw", position.get("profit_loss_krw") if position else None))
-                hard_maximum_breach = current is not None and float(current) > float(target["maximum"])
+                            triggers.append(
+                                "core_drawdown_review_threshold"
+                                if layer == "core"
+                                else "strict_layer_drawdown_review_threshold"
+                            )
+                pnl = _finite_number(
+                    evidence.get(
+                        "unrealized_pnl_krw",
+                        position.get("profit_loss_krw") if position else None,
+                    )
+                )
+                hard_maximum_breach = current is not None and float(current) > float(
+                    target["maximum"]
+                )
                 if pnl is not None and pnl > 0 and hard_maximum_breach:
                     status = _raise_status(status, "Review")
                     triggers.append("gain_with_instrument_overweight")
-            eligible = cash_allocation_available and ready and current is not None and float(current) < float(target["minimum"])
+            eligible = (
+                cash_allocation_available
+                and ready
+                and current is not None
+                and float(current) < float(target["minimum"])
+            )
             next_step = "레이어·종목 목표와 향후 정기매수 정책을 검토합니다."
             result["instruments"].append(
                 attach_decision(
@@ -568,9 +615,14 @@ def evaluate_inspection(
                         next_step=next_step,
                         status=status,
                         extra={
-                            "market_country": key[0], "symbol": key[1],
-                            "layer": target.get("layer") if target else (position.get("layer") if position else None),
-                            "unrealized_pnl_krw": position.get("profit_loss_krw") if position else None,
+                            "market_country": key[0],
+                            "symbol": key[1],
+                            "layer": target.get("layer")
+                            if target
+                            else (position.get("layer") if position else None),
+                            "unrealized_pnl_krw": position.get("profit_loss_krw")
+                            if position
+                            else None,
                             "evidence": evidence,
                         },
                     ),
@@ -580,7 +632,10 @@ def evaluate_inspection(
 
     if allocation_reason is None:
         result["allocation_state"] = "complete"
-    elif allocation_reason == "invested_denominator_unavailable" and result["cash"] is not None:
+    elif (
+        allocation_reason == "invested_denominator_unavailable"
+        and result["cash"] is not None
+    ):
         result["allocation_state"] = "partial"
     else:
         result["allocation_state"] = "not_evaluable"
@@ -597,7 +652,9 @@ def evaluate_inspection(
     ) -> None:
         if item.get("status") == "OK" and not blocking:
             return
-        priority = priority_override if priority_override is not None else item.get("priority")
+        priority = (
+            priority_override if priority_override is not None else item.get("priority")
+        )
         queue.append(
             {
                 "priority": None if blocking else priority,
@@ -607,14 +664,23 @@ def evaluate_inspection(
                 "identity": item.get("identity"),
                 "status": item.get("status", "Review"),
                 "triggers": list(item.get("triggers") or []),
-                "suggestion": None if blocking else suggestion_override or item.get("suggestion") or suggestion("hold_and_observe"),
+                "suggestion": None
+                if blocking
+                else suggestion_override
+                or item.get("suggestion")
+                or suggestion("hold_and_observe"),
                 "meaning": item.get("meaning"),
                 "verification_task": item.get("verification_task"),
                 "evidence_refs": {
                     **dict(evidence_refs),
                     **(
-                        {"market_source_fingerprint": (item.get("evidence") or {}).get("drawdown", {}).get("source_fingerprint")}
-                        if item.get("kind") == "instrument" else {}
+                        {
+                            "market_source_fingerprint": (item.get("evidence") or {})
+                            .get("drawdown", {})
+                            .get("source_fingerprint")
+                        }
+                        if item.get("kind") == "instrument"
+                        else {}
                     ),
                 },
             }
@@ -686,13 +752,32 @@ def evaluate_inspection(
         {
             key: item[key]
             for key in (
-                "priority", "priority_label", "kind", "identity", "status",
-                "current", "minimum", "target", "maximum", "gap", "denominator",
-                "suggestion", "meaning", "verification_task", "triggers",
+                "priority",
+                "priority_label",
+                "kind",
+                "identity",
+                "status",
+                "current",
+                "minimum",
+                "target",
+                "maximum",
+                "gap",
+                "denominator",
+                "suggestion",
+                "meaning",
+                "verification_task",
+                "triggers",
             )
             if key in item
         }
-        for item in sorted(units, key=lambda value: (priority_rank(value.get("priority")), value.get("kind", ""), value.get("identity", "")))
+        for item in sorted(
+            units,
+            key=lambda value: (
+                priority_rank(value.get("priority")),
+                value.get("kind", ""),
+                value.get("identity", ""),
+            ),
+        )
         if item.get("status") != "OK"
         and item.get("priority") in {"P1", "P2", "P3"}
         and result["allocation_state"] in {"complete", "partial"}

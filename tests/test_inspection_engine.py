@@ -103,6 +103,7 @@ def _risk_evidence(
             "maximum": current,
             "history_points": 252,
         }
+
     return {
         "account_profit_loss": {
             "state": "complete",
@@ -302,7 +303,9 @@ def test_account_and_core_drawdown_are_reviewed_without_action():
 
     aaa = next(item for item in result["instruments"] if item["symbol"] == "AAA")
     assert result["account_profit_loss"]["status"] == "Review"
-    assert "account_drawdown_review_threshold" in result["account_profit_loss"]["triggers"]
+    assert (
+        "account_drawdown_review_threshold" in result["account_profit_loss"]["triggers"]
+    )
     assert aaa["status"] == "Watch"
     assert "core_drawdown_review_threshold" in aaa["triggers"]
     assert all(item["status"] != "Action" for item in result["instruments"])
@@ -321,8 +324,13 @@ def test_satellite_drawdown_is_review():
     assert bbb["status"] == "Review"
     assert bbb["triggers"] == ["strict_layer_drawdown_review_threshold"]
     encoded = str(bbb).lower()
-    assert all(term not in encoded for term in ("overlap", "burden", "holdability", "substitution", "thesis"))
-    queue_items = [item for item in result["review_queue"] if item["identity"] == "US/BBB"]
+    assert all(
+        term not in encoded
+        for term in ("overlap", "burden", "holdability", "substitution", "thesis")
+    )
+    queue_items = [
+        item for item in result["review_queue"] if item["identity"] == "US/BBB"
+    ]
     assert len(queue_items) == 1
 
 
@@ -450,7 +458,10 @@ def test_cash_shortfall_blocks_layer_and_instrument_p3_suggestions():
         _layer_map(),
     )
     assert result["cash"]["priority"] == "P1"
-    assert result["cash"]["suggestion"]["code"] == "review_reduce_or_pause_regular_purchase_pace"
+    assert (
+        result["cash"]["suggestion"]["code"]
+        == "review_reduce_or_pause_regular_purchase_pace"
+    )
     assert all(item["priority"] != "P3" for item in result["adjustment_suggestions"])
 
 

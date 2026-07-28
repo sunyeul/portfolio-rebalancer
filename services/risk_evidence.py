@@ -64,16 +64,16 @@ def _market_descriptor(
         "history_points": history_points,
         "raw_points": len(candles),
         "source_fingerprint": _fingerprint(
-            [str(candle.get("source_fingerprint") or _fingerprint(dict(candle))) for candle in candles]
+            [
+                str(candle.get("source_fingerprint") or _fingerprint(dict(candle)))
+                for candle in candles
+            ]
         ),
     }
 
 
 def _curve_drawdown(points: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    timestamped = [
-        (_timestamp(point.get("point_at")), point)
-        for point in points
-    ]
+    timestamped = [(_timestamp(point.get("point_at")), point) for point in points]
     if any(timestamp is None for timestamp, _ in timestamped):
         return _unavailable_drawdown("invalid_point_timestamp")
     ordered = sorted(
@@ -105,13 +105,17 @@ def _curve_drawdown(points: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _position_totals(projection: Mapping[str, Any] | None) -> tuple[float | None, float | None]:
+def _position_totals(
+    projection: Mapping[str, Any] | None,
+) -> tuple[float | None, float | None]:
     if projection is None:
         return None, None
     positions = list(projection.get("positions", []))
     costs = [_finite(position.get("cost_krw")) for position in positions]
     pnls = [_finite(position.get("profit_loss_krw")) for position in positions]
-    cost = sum(costs) if positions and all(value is not None for value in costs) else None
+    cost = (
+        sum(costs) if positions and all(value is not None for value in costs) else None
+    )
     pnl = sum(pnls) if positions and all(value is not None for value in pnls) else None
     return cost, pnl
 
@@ -142,9 +146,9 @@ def build_account_profit_loss(
     return {
         "snapshot_id": snapshot_id,
         "performance_run_id": (performance_run or {}).get("id"),
-        "state": "source_unavailable" if performance_run is None else (
-            "complete" if run_state == "complete" else "performance_unavailable"
-        ),
+        "state": "source_unavailable"
+        if performance_run is None
+        else ("complete" if run_state == "complete" else "performance_unavailable"),
         "cost_basis_krw": cost_basis,
         "unrealized_pnl_krw": unrealized_pnl,
         "unrealized_return": _safe_return(unrealized_pnl, cost_basis),
@@ -159,9 +163,9 @@ def build_account_profit_loss(
             else None
         ),
         "realized_pnl_supported": realized_supported,
-        "drawdown": _curve_drawdown(points) if performance_run else _unavailable_drawdown(
-            "performance_unavailable"
-        ),
+        "drawdown": _curve_drawdown(points)
+        if performance_run
+        else _unavailable_drawdown("performance_unavailable"),
     }
 
 
@@ -258,9 +262,7 @@ def _candle_drawdown(
 def build_risk_evidence(
     projection: Mapping[str, Any] | None,
     performance_run: Mapping[str, Any] | None,
-    candles_by_identity: Mapping[
-        tuple[str, str], Sequence[Mapping[str, Any]]
-    ],
+    candles_by_identity: Mapping[tuple[str, str], Sequence[Mapping[str, Any]]],
     risk_policy: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Return source-linked facts only; never assign IPS status."""

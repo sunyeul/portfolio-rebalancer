@@ -28,7 +28,9 @@ def _finite(value: Any, field: str) -> float:
     return number
 
 
-def layer_map_from_policy(policy: Mapping[str, Any] | None) -> dict[tuple[str, str], str]:
+def layer_map_from_policy(
+    policy: Mapping[str, Any] | None,
+) -> dict[tuple[str, str], str]:
     """Return the normalized instrument-layer map owned by one IPS policy."""
     result: dict[tuple[str, str], str] = {}
     for item in (policy or {}).get("instruments", []):

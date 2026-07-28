@@ -98,7 +98,9 @@ def test_preview_does_not_persist_evaluation(monkeypatch, tmp_path):
     assert before == after == 0
 
 
-def _phase5_snapshot(*, synced_at: str, fingerprint: str, kr_price: float, us_price: float):
+def _phase5_snapshot(
+    *, synced_at: str, fingerprint: str, kr_price: float, us_price: float
+):
     holdings = (
         NormalizedHolding(
             symbol="005930",
@@ -154,7 +156,9 @@ def _phase5_snapshot(*, synced_at: str, fingerprint: str, kr_price: float, us_pr
     )
 
 
-def _phase5_candles(symbol: str, country: str, through: date, *, base: float) -> list[dict[str, object]]:
+def _phase5_candles(
+    symbol: str, country: str, through: date, *, base: float
+) -> list[dict[str, object]]:
     return [
         {
             "source_kind": "stock",
@@ -194,7 +198,11 @@ def _assert_no_direct_action_semantics(value: object) -> None:
             for key, child in node.items():
                 if isinstance(child, str):
                     lowered = child.lower()
-                    assert not any(phrase in lowered for phrase in forbidden_phrases if phrase not in allowed)
+                    assert not any(
+                        phrase in lowered
+                        for phrase in forbidden_phrases
+                        if phrase not in allowed
+                    )
                 walk(child)
         elif isinstance(node, list):
             for child in node:
@@ -235,8 +243,22 @@ def test_phase5_offline_preview_is_deterministic_and_read_only(monkeypatch, tmp_
         "experiment": {"minimum": 0.0, "target": 0.0, "maximum": 0.05},
     }
     policy["instruments"] = [
-        {"market_country": "KR", "symbol": "005930", "layer": "core", "minimum": 0.7, "target": 0.8, "maximum": 0.9},
-        {"market_country": "US", "symbol": "NBIS", "layer": "satellite", "minimum": 0.1, "target": 0.2, "maximum": 0.3},
+        {
+            "market_country": "KR",
+            "symbol": "005930",
+            "layer": "core",
+            "minimum": 0.7,
+            "target": 0.8,
+            "maximum": 0.9,
+        },
+        {
+            "market_country": "US",
+            "symbol": "NBIS",
+            "layer": "satellite",
+            "minimum": 0.1,
+            "target": 0.2,
+            "maximum": 0.3,
+        },
     ]
     policy = validate_policy(policy, [("KR", "005930"), ("US", "NBIS")])
 
@@ -253,5 +275,8 @@ def test_phase5_offline_preview_is_deterministic_and_read_only(monkeypatch, tmp_
     assert first_preview["evaluation_fingerprint"]
     assert first_preview["market_evidence_fingerprint"]
     assert before == after == 0
-    assert all(item["status"] != "Action" for item in first_preview["evaluation"]["review_queue"])
+    assert all(
+        item["status"] != "Action"
+        for item in first_preview["evaluation"]["review_queue"]
+    )
     _assert_no_direct_action_semantics(first_preview)

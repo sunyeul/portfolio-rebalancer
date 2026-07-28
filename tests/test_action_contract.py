@@ -22,7 +22,12 @@ def test_priority_labels_and_suggestion_vocabulary_are_closed_and_exact():
         "inspect_exceptional_intervention": "예외 개입 가능성 점검",
         "hold_and_observe": "관찰 유지",
     }
-    assert priority_rank("P1") < priority_rank("P2") < priority_rank("P3") < priority_rank("P4")
+    assert (
+        priority_rank("P1")
+        < priority_rank("P2")
+        < priority_rank("P3")
+        < priority_rank("P4")
+    )
 
 
 def test_cash_and_allocation_precedence_use_policy_review_language():

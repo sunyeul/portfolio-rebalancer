@@ -80,9 +80,7 @@ def _available_at(candle_at: datetime, market_country: str) -> datetime:
     return datetime.combine(session_date, conservative_close, timezone).astimezone(UTC)
 
 
-def _active_policy(
-    conn: sqlite3.Connection, *, as_of: datetime
-) -> dict[str, Any]:
+def _active_policy(conn: sqlite3.Connection, *, as_of: datetime) -> dict[str, Any]:
     as_of_utc = _require_aware(as_of, label="as_of")
     row = conn.execute(
         """

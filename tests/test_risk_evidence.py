@@ -116,9 +116,7 @@ def test_account_drawdown_does_not_bridge_non_evaluable_boundary():
             "execution_count": 0,
             "points": [
                 _point("2026-01-01T00:00:00Z", 0.0),
-                _point(
-                    "2026-02-01T00:00:00Z", 0.0, state="non_evaluable"
-                ),
+                _point("2026-02-01T00:00:00Z", 0.0, state="non_evaluable"),
                 _point("2026-03-01T00:00:00Z", 0.2),
             ],
         },
@@ -201,10 +199,7 @@ def test_instrument_drawdown_rejects_stale_or_gapped_history(extra_day, expected
     through = datetime(2026, 7, 22, tzinfo=timezone.utc)
     if expected_state == "gap":
         days = [day for day in range(207, -1, -1) if not 93 <= day <= 100]
-        rows = [
-            _candle(through - timedelta(days=day), 100.0, str(day))
-            for day in days
-        ]
+        rows = [_candle(through - timedelta(days=day), 100.0, str(day)) for day in days]
     else:
         rows = [
             _candle(

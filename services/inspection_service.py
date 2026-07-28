@@ -115,9 +115,7 @@ def _prepare_inputs(
         "performance_run_id": performance["id"] if performance else None,
         "policy_version_id": policy_version_id,
         "policy_hash": policy_hash_value,
-        "market_evidence_fingerprint": risk_evidence[
-            "market_evidence_fingerprint"
-        ],
+        "market_evidence_fingerprint": risk_evidence["market_evidence_fingerprint"],
     }
     result = evaluate_inspection(
         projection,
@@ -129,18 +127,14 @@ def _prepare_inputs(
     )
     if projection is None and source_snapshot is not None:
         result["source"]["snapshot_id"] = source_snapshot["id"]
-        result["source"]["source_fingerprint"] = source_snapshot[
-            "source_fingerprint"
-        ]
+        result["source"]["source_fingerprint"] = source_snapshot["source_fingerprint"]
     fingerprint = evaluation_fingerprint(
         source_fingerprint=source_fingerprint,
         performance_fingerprint=performance.get("input_fingerprint")
         if performance
         else None,
         policy_hash=policy_hash_value,
-        market_evidence_fingerprint=risk_evidence[
-            "market_evidence_fingerprint"
-        ],
+        market_evidence_fingerprint=risk_evidence["market_evidence_fingerprint"],
     )
     allocation_state = result.get("allocation_state", "not_evaluable")
     persisted_state = (
@@ -166,9 +160,7 @@ def _prepare_inputs(
         if persisted_state == "not_evaluable"
         else None,
         "result": result,
-        "market_evidence_fingerprint": risk_evidence[
-            "market_evidence_fingerprint"
-        ],
+        "market_evidence_fingerprint": risk_evidence["market_evidence_fingerprint"],
         "market_evidence": risk_evidence["market_evidence"],
         "evaluation_fingerprint": fingerprint,
     }
@@ -220,9 +212,7 @@ def preview_inspection(
         "policy_hash": prepared["policy_hash"],
         "snapshot_id": prepared["snapshot_id"],
         "evaluation_fingerprint": prepared["evaluation_fingerprint"],
-        "market_evidence_fingerprint": prepared[
-            "market_evidence_fingerprint"
-        ],
+        "market_evidence_fingerprint": prepared["market_evidence_fingerprint"],
         "market_evidence": prepared["market_evidence"],
         "evaluation": prepared["result"],
     }
