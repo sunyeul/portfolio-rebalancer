@@ -106,6 +106,41 @@ def test_default_policy_without_dynamic_allocation_fails_closed(tmp_path, monkey
         load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
 
 
+def test_malformed_dynamic_policy_duplicates_fail_closed():
+    from research.qlib_validation.source import SourceError, _specs
+
+    policy = deepcopy(DEFAULT_POLICY)
+    policy["instruments"] = [
+        {"market_country": "US", "symbol": "SPY", "layer": "core", "target": 0.7},
+        {"market_country": "US", "symbol": "GLD", "layer": "core", "target": 0.1},
+        {
+            "market_country": "US",
+            "symbol": "QQQ",
+            "layer": "satellite",
+            "target": 0.2,
+        },
+        {
+            "market_country": "US",
+            "symbol": "TQQQ",
+            "layer": "experiment",
+            "target": 0.1,
+        },
+    ]
+    dynamic = build_neutral_policy(policy)
+    dynamic["instruments"].append(deepcopy(dynamic["instruments"][0]))
+
+    with pytest.raises(SourceError, match="duplicate identities"):
+        _specs(dynamic)
+
+    benchmark_duplicate = deepcopy(dynamic)
+    benchmark_duplicate["instruments"].pop()
+    benchmark_duplicate["allocation_review"]["benchmarks"].append(
+        deepcopy(benchmark_duplicate["allocation_review"]["benchmarks"][0])
+    )
+    with pytest.raises(SourceError, match="duplicate keys"):
+        _specs(benchmark_duplicate)
+
+
 def test_availability_rules_fail_closed_for_naive_time_and_unknown_market():
     from research.qlib_validation.source import SourceError, _available_at
 

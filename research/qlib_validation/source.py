@@ -158,6 +158,22 @@ def _specs(
             key=lambda item: item.key,
         )
     )
+    if not benchmark_specs:
+        raise SourceError("active policy requires benchmark specifications")
+    if len({item.key for item in benchmark_specs}) != len(benchmark_specs):
+        raise SourceError("active policy benchmarks contain duplicate keys")
+    if len(
+        {
+            (item.source_kind, item.market_country, item.symbol)
+            for item in benchmark_specs
+        }
+    ) != len(benchmark_specs):
+        raise SourceError("active policy benchmarks contain duplicate identities")
+    if any(item.weight < 0 for item in benchmark_specs):
+        raise SourceError("benchmark weights must not be negative")
+    benchmark_total = sum(item.weight for item in benchmark_specs)
+    if not math.isclose(benchmark_total, 1.0, abs_tol=1e-9):
+        raise SourceError("benchmark weights must sum to one")
 
     instruments = policy.get("instruments")
     if not isinstance(instruments, list):
@@ -174,6 +190,8 @@ def _specs(
     )
     if len(policy_specs) != len(instruments):
         raise SourceError("active policy instruments must be objects")
+    if len({item.key for item in policy_specs}) != len(policy_specs):
+        raise SourceError("active policy instruments contain duplicate identities")
     if any(item.weight < 0 for item in policy_specs):
         raise SourceError("policy instrument targets must not be negative")
     total = sum(item.weight for item in policy_specs)
