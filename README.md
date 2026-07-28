@@ -136,7 +136,7 @@ Preview는 정책을 활성화하거나 평가 행을 저장하지 않습니다.
 
 ## 저장소와 검증
 
-기본 SQLite 경로는 `data/portfolio_rebalancer.sqlite3`입니다. 스키마는 Toss 계좌 관찰, 성과 추적, 정책 버전, 시장 근거만 보존합니다. 마이그레이션은 무결성 검사와 secure delete를 수행합니다.
+기본 SQLite 경로는 `data/portfolio_rebalancer.sqlite3`입니다. 스키마는 Toss 계좌 관찰, 성과 추적, 정책 버전, 시장 근거만 보존합니다. 마이그레이션 후에는 무결성을 검사합니다.
 
 ```bash
 uv run ruff format --check .
