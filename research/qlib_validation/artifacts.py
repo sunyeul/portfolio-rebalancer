@@ -1,15 +1,14 @@
+import json
+import os
+import subprocess
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from hashlib import sha256
-import json
-import os
 from pathlib import Path
-import subprocess
-import tempfile
 from typing import Any
 
 from research.qlib_validation.contracts import SourceSnapshot
-
 
 RELEVANT_SOURCE_PATHS = (
     "services/dynamic_allocation.py",
@@ -73,8 +72,19 @@ def _digest(payload: bytes) -> str:
     return sha256(payload).hexdigest()
 
 
+def _first_party_python_files(repository_root: Path) -> set[Path]:
+    """Return only repository-owned research modules, never its local virtualenv."""
+    research_root = repository_root / "research" / "qlib_validation"
+    return {
+        path
+        for path in research_root.rglob("*.py")
+        if ".venv" not in path.relative_to(research_root).parts
+        and "__pycache__" not in path.relative_to(research_root).parts
+    }
+
+
 def _source_manifest(repository_root: Path) -> dict[str, Any]:
-    files = set((repository_root / "research/qlib_validation").rglob("*.py"))
+    files = _first_party_python_files(repository_root)
     files.update(repository_root / value for value in FIXED_REPRODUCIBILITY_FILES)
     hashes = {
         str(path.relative_to(repository_root)): sha256(path.read_bytes()).hexdigest()
@@ -107,8 +117,10 @@ def write_inputs(
         raise ArtifactError(f"run directory already exists: {run_dir}")
     run_dir.mkdir(parents=True)
     policy_payload = canonical_bytes(snapshot.policy_record["policy"])
+    universe_payload = canonical_bytes(snapshot.research_universe)
     candle_lines = b"".join(canonical_bytes(item.record()) for item in snapshot.candles)
     _atomic_write(run_dir / "policy.json", policy_payload)
+    _atomic_write(run_dir / "research-universe.json", universe_payload)
     _atomic_write(run_dir / "candles.jsonl", candle_lines)
     source = _source_manifest(repository_root)
     _atomic_write(run_dir / "source-manifest.json", canonical_bytes(source))
@@ -120,6 +132,7 @@ def write_inputs(
     }
     manifest = {
         "policy_hash": snapshot.policy_record["policy_hash"],
+        "research_universe": snapshot.research_universe,
         "series": {
             key: {
                 "rows": len(items),
@@ -134,6 +147,7 @@ def write_inputs(
         },
         "files": {
             "policy.json": {"sha256": _digest(policy_payload)},
+            "research-universe.json": {"sha256": _digest(universe_payload)},
             "candles.jsonl": {
                 "sha256": _digest(candle_lines),
                 "rows": len(snapshot.candles),
@@ -143,6 +157,9 @@ def write_inputs(
     _atomic_write(run_dir / "input-manifest.json", canonical_bytes(manifest))
     return {
         "policy_sha256": manifest["files"]["policy.json"]["sha256"],
+        "research_universe_sha256": manifest["files"]["research-universe.json"][
+            "sha256"
+        ],
         "candles_sha256": manifest["files"]["candles.jsonl"]["sha256"],
         "relevant_source_dirty": source["relevant_source_dirty"],
         "source_manifest": source,

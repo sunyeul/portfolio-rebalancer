@@ -49,7 +49,13 @@ def _stale_series(
     )
 
 
-def run_stage1(*, database: Path, as_of: datetime, output: Path) -> dict[str, Any]:
+def run_stage1(
+    *,
+    database: Path,
+    as_of: datetime,
+    output: Path,
+    universe: str = "active-policy",
+) -> dict[str, Any]:
     if as_of.tzinfo is None:
         raise ValueError("as_of must be timezone-aware")
     as_of = as_of.astimezone(UTC)
@@ -57,13 +63,14 @@ def run_stage1(*, database: Path, as_of: datetime, output: Path) -> dict[str, An
     signal_rule = parse_signal_rule(
         protocol.get("signal_rule"), protocol.get("horizons", ())
     )
-    snapshot = load_snapshot(database, as_of=as_of)
+    snapshot = load_snapshot(database, as_of=as_of, universe=universe)
     input_fingerprint = sha256(
         canonical_bytes(
             {
                 "as_of": as_of.isoformat(),
                 "policy_hash": snapshot.policy_record["policy_hash"],
                 "protocol_hash": protocol_hash,
+                "research_universe": snapshot.research_universe,
                 "candles": [item.record() for item in snapshot.candles],
             }
         )
@@ -113,6 +120,7 @@ def run_stage1(*, database: Path, as_of: datetime, output: Path) -> dict[str, An
             "as_of": as_of.isoformat(),
             "protocol_hash": protocol_hash,
             "policy_hash": snapshot.policy_record["policy_hash"],
+            "research_universe": snapshot.research_universe,
             "environment": environment_info(),
             "qlib_capability": capability,
             "source_manifest": input_manifest["source_manifest"],
@@ -123,6 +131,7 @@ def run_stage1(*, database: Path, as_of: datetime, output: Path) -> dict[str, An
             "as_of": as_of.isoformat(),
             "protocol_hash": protocol_hash,
             "policy_hash": snapshot.policy_record["policy_hash"],
+            "research_universe": snapshot.research_universe,
             "qlib_capability": capability,
             "regime_signal_verdict": verdict["verdict"],
             "regime_signal_reason": verdict["reason"],

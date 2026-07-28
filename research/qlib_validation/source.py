@@ -27,6 +27,7 @@ REQUIRED_BENCHMARKS = {
     "US/SPY": ("stock", "US", "SPY"),
 }
 FACTOR_LOOKBACK_SESSIONS = 20
+UNIVERSE_MODES = frozenset({"active-policy", "current-holdings"})
 
 
 class SourceError(RuntimeError):
@@ -230,6 +231,67 @@ def _specs(
     return benchmark_specs, policy_specs
 
 
+def _current_holdings_universe(
+    conn: sqlite3.Connection,
+    policy_specs: tuple[SeriesSpec, ...],
+    *,
+    as_of: datetime,
+) -> tuple[tuple[SeriesSpec, ...], dict[str, Any]]:
+    """Select active-policy instruments held in the current complete Toss snapshot."""
+    snapshot = conn.execute(
+        """
+        SELECT id, synced_at, state
+        FROM broker_account_snapshots
+        WHERE account_alias = 'toss-brokerage'
+          AND datetime(synced_at) <= datetime(?)
+        ORDER BY synced_at DESC, id DESC
+        LIMIT 1
+        """,
+        (as_of.isoformat(),),
+    ).fetchone()
+    if snapshot is None:
+        raise SourceError("Toss snapshot is unavailable at the research as_of time")
+    if str(snapshot["state"]) != "complete":
+        raise SourceError("latest Toss snapshot at research as_of is not complete")
+    rows = conn.execute(
+        """
+        SELECT market_country, symbol
+        FROM broker_holdings
+        WHERE snapshot_id = ? AND quantity > 0
+        ORDER BY market_country, symbol, id
+        """,
+        (int(snapshot["id"]),),
+    ).fetchall()
+    holding_identities = {
+        (
+            _text(row["market_country"], label="holding market_country").upper(),
+            _text(row["symbol"], label="holding symbol").upper(),
+        )
+        for row in rows
+    }
+    if not holding_identities:
+        raise SourceError("current complete Toss snapshot has no positive holdings")
+    selected = tuple(
+        item
+        for item in policy_specs
+        if (item.market_country, item.symbol) in holding_identities
+    )
+    if not selected:
+        raise SourceError(
+            "current Toss holdings do not match active policy instruments"
+        )
+    selected_keys = [item.key for item in selected]
+    return selected, {
+        "mode": "current-holdings",
+        "account_snapshot_id": int(snapshot["id"]),
+        "account_snapshot_synced_at": str(snapshot["synced_at"]),
+        "selected_policy_instruments": selected_keys,
+        "excluded_policy_instruments": [
+            item.key for item in policy_specs if item.key not in set(selected_keys)
+        ],
+    }
+
+
 def _candle_at(value: Any) -> datetime:
     if not isinstance(value, str):
         raise SourceError("stored candle timestamp must be a string")
@@ -290,20 +352,32 @@ def _load_series(
     conn: sqlite3.Connection, spec: SeriesSpec, *, as_of: datetime
 ) -> tuple[Candle, ...]:
     adjusted_filter = (
-        " AND adjusted = 1 AND adjusted_supported = 1"
+        " AND current.adjusted = 1 AND current.adjusted_supported = 1"
         if spec.source_kind == "stock"
         else ""
     )
     rows = conn.execute(
         """
-        SELECT source_kind, market_country, symbol, candle_at, currency,
-               open_price, high_price, low_price, close_price, volume,
-               adjusted, adjusted_supported
-        FROM toss_market_candles
-        WHERE source_kind = ? AND market_country = ? AND symbol = ? AND interval = '1d'
+        SELECT current.source_kind, current.market_country, current.symbol,
+               current.candle_at, current.currency, current.open_price,
+               current.high_price, current.low_price, current.close_price,
+               current.volume, current.adjusted, current.adjusted_supported
+        FROM toss_market_candles AS current
+        WHERE current.source_kind = ? AND current.market_country = ?
+          AND current.symbol = ? AND current.interval = '1d'
+          AND current.id = (
+              SELECT MAX(revision.id)
+              FROM toss_market_candles AS revision
+              WHERE revision.source_kind = current.source_kind
+                AND revision.market_country = current.market_country
+                AND revision.symbol = current.symbol
+                AND revision.interval = current.interval
+                AND revision.candle_at = current.candle_at
+                AND revision.adjusted = current.adjusted
+          )
         """
         + adjusted_filter
-        + " ORDER BY datetime(candle_at), id",
+        + " ORDER BY datetime(current.candle_at), current.id",
         (spec.source_kind, spec.market_country, spec.symbol),
     ).fetchall()
     result: list[Candle] = []
@@ -353,12 +427,24 @@ def _with_trailing_factors(candles: tuple[Candle, ...]) -> tuple[Candle, ...]:
     return tuple(result)
 
 
-def load_snapshot(path: Path, *, as_of: datetime) -> SourceSnapshot:
+def load_snapshot(
+    path: Path,
+    *,
+    as_of: datetime,
+    universe: Literal["active-policy", "current-holdings"] = "active-policy",
+) -> SourceSnapshot:
     """Load one point-in-time, immutable research input snapshot."""
     as_of_utc = _require_aware(as_of, label="as_of")
+    if universe not in UNIVERSE_MODES:
+        raise SourceError(f"unsupported research universe: {universe}")
     with open_readonly(path) as conn:
         policy_record = _active_policy(conn)
         benchmark_specs, policy_specs = _specs(policy_record["policy"])
+        research_universe: dict[str, Any] = {"mode": "active-policy"}
+        if universe == "current-holdings":
+            policy_specs, research_universe = _current_holdings_universe(
+                conn, policy_specs, as_of=as_of_utc
+            )
         maximum_gap_days = _maximum_gap_days(policy_record["policy"])
         unique_specs: dict[str, SeriesSpec] = {}
         for spec in (*benchmark_specs, *policy_specs):
@@ -383,4 +469,5 @@ def load_snapshot(path: Path, *, as_of: datetime) -> SourceSnapshot:
         benchmark_specs=benchmark_specs,
         policy_specs=policy_specs,
         candles=candles,
+        research_universe=research_universe,
     )

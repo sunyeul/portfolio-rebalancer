@@ -5,10 +5,27 @@ import pytest
 
 from research.qlib_validation.artifacts import (
     ArtifactError,
+    _first_party_python_files,
     canonical_bytes,
     staged_run,
     write_inputs,
 )
+
+
+def test_source_manifest_excludes_research_virtual_environment(tmp_path):
+    research = tmp_path / "research" / "qlib_validation"
+    first_party = research / "forecast.py"
+    environment_package = (
+        research / ".venv" / "lib" / "site-packages" / "qlib" / "model.py"
+    )
+    first_party.parent.mkdir(parents=True)
+    environment_package.parent.mkdir(parents=True)
+    first_party.write_text("first_party = True\n")
+    environment_package.write_text("third_party = True\n")
+
+    files = _first_party_python_files(tmp_path)
+
+    assert files == {first_party}
 
 
 def test_write_inputs_is_canonical_hashed_and_never_overwrites(
@@ -21,7 +38,15 @@ def test_write_inputs_is_canonical_hashed_and_never_overwrites(
     manifest = json.loads((tmp_path / "run" / "input-manifest.json").read_text())
 
     assert policy == canonical_bytes(snapshot.policy_record["policy"])
+    assert (
+        tmp_path / "run" / "research-universe.json"
+    ).read_bytes() == canonical_bytes(snapshot.research_universe)
     assert manifest["policy_hash"] == snapshot.policy_record["policy_hash"]
+    assert manifest["research_universe"] == snapshot.research_universe
+    assert (
+        manifest["files"]["research-universe.json"]["sha256"]
+        == result["research_universe_sha256"]
+    )
     assert manifest["files"]["candles.jsonl"]["sha256"] == result["candles_sha256"]
     assert manifest["series"][snapshot.benchmark_specs[0].key]["rows"] == 1
     source = json.loads((tmp_path / "run" / "source-manifest.json").read_text())

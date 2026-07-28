@@ -66,6 +66,7 @@ def test_stage1_summary_never_claims_stage2_or_emits_execution_fields(
     }
     assert summary["target_policy_verdict"] == "inconclusive"
     assert summary["target_policy_reason"] == "stage2_not_run"
+    assert summary["research_universe"] == {"mode": "active-policy"}
     assert (tmp_path / "artifacts" / summary["run_id"] / "manifest.json").is_file()
 
     forbidden = {"buy", "sell", "execute", "order_size", "status"}

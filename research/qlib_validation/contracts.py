@@ -1,4 +1,4 @@
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from typing import Any, Literal
 
@@ -52,6 +52,9 @@ class SourceSnapshot:
     benchmark_specs: tuple[SeriesSpec, ...]
     policy_specs: tuple[SeriesSpec, ...]
     candles: tuple[Candle, ...]
+    research_universe: dict[str, Any] = field(
+        default_factory=lambda: {"mode": "active-policy"}
+    )
 
     def candles_for(self, key: str) -> tuple[Candle, ...]:
         return tuple(item for item in self.candles if item.key == key)

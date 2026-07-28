@@ -1,4 +1,5 @@
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 import sqlite3
 from zoneinfo import ZoneInfo
@@ -6,6 +7,8 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from services.dynamic_allocation import allocation_benchmarks, build_neutral_policy
+from integrations.toss.observation import NormalizedHolding
+from storage.account_observation_store import insert_snapshot
 from storage.database import initialize_database
 from storage.market_store import insert_candles
 from storage.policy_store import (
@@ -14,6 +17,7 @@ from storage.policy_store import (
     get_active_policy,
     policy_hash,
 )
+from tests.test_account_observation_store import _snapshot
 
 
 def _dynamic_policy():
@@ -74,6 +78,26 @@ def _weekday_sessions(start: date, count: int) -> list[date]:
             sessions.append(cursor)
         cursor += timedelta(days=1)
     return sessions
+
+
+def _holding(symbol: str, market_country: str) -> NormalizedHolding:
+    return NormalizedHolding(
+        symbol=symbol,
+        name=symbol,
+        market_country=market_country,
+        currency="KRW" if market_country == "KR" else "USD",
+        quantity=1.0,
+        last_price=100.0,
+        average_purchase_price=100.0,
+        market_value_native=100.0,
+        market_value_krw=100000.0,
+        cost_native=100.0,
+        cost_krw=100000.0,
+        profit_loss_native=0.0,
+        profit_loss_krw=0.0,
+        daily_profit_loss_native=0.0,
+        daily_profit_loss_krw=0.0,
+    )
 
 
 def _seed_factor_history(policy, *, sessions: list[date]) -> set[str]:
@@ -184,6 +208,137 @@ def test_snapshot_derives_trailing_factor_without_future_candles(tmp_path, monke
     )
 
     assert before_final_candle.candles == ()
+
+
+def test_current_holdings_universe_uses_only_latest_complete_toss_holdings(
+    tmp_path, monkeypatch
+):
+    from research.qlib_validation.source import load_snapshot
+
+    database = tmp_path / "portfolio.sqlite3"
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(database))
+    initialize_database()
+    policy = _seed_dynamic_policy(database)
+    sessions = _weekday_sessions(date(2026, 1, 2), 21)
+    _seed_factor_history(policy, sessions=sessions)
+    account_snapshot = insert_snapshot(
+        replace(
+            _snapshot(
+                fingerprint="current-holdings", synced_at="2026-02-01T00:00:00+00:00"
+            ),
+            holdings=(_holding("SPY", "US"), _holding("QQQ", "US")),
+        )
+    )
+    before = database.read_bytes()
+
+    snapshot = load_snapshot(
+        database,
+        as_of=datetime(2026, 2, 2, tzinfo=UTC),
+        universe="current-holdings",
+    )
+
+    assert {item.key for item in snapshot.policy_specs} == {"US/SPY", "US/QQQ"}
+    assert snapshot.research_universe == {
+        "mode": "current-holdings",
+        "account_snapshot_id": account_snapshot["id"],
+        "account_snapshot_synced_at": "2026-02-01T00:00:00+00:00",
+        "selected_policy_instruments": ["US/QQQ", "US/SPY"],
+        "excluded_policy_instruments": ["US/GLD", "US/TQQQ"],
+    }
+    assert {item.key for item in snapshot.candles} == {
+        "KR/KOSDAQ",
+        "KR/KOSPI",
+        "US/QQQ",
+        "US/SPY",
+    }
+    assert database.read_bytes() == before
+
+
+def test_current_holdings_universe_rejects_a_snapshot_after_research_as_of(
+    tmp_path, monkeypatch
+):
+    from research.qlib_validation.source import SourceError, load_snapshot
+
+    database = tmp_path / "portfolio.sqlite3"
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(database))
+    initialize_database()
+    policy = _seed_dynamic_policy(database)
+    _seed_factor_history(policy, sessions=_weekday_sessions(date(2026, 1, 2), 21))
+    insert_snapshot(
+        replace(
+            _snapshot(
+                fingerprint="future-holdings", synced_at="2026-02-02T00:00:00+00:00"
+            ),
+            holdings=(_holding("SPY", "US"),),
+        )
+    )
+
+    with pytest.raises(SourceError, match="unavailable at the research as_of"):
+        load_snapshot(
+            database,
+            as_of=datetime(2026, 2, 1, tzinfo=UTC),
+            universe="current-holdings",
+        )
+
+
+def test_current_holdings_universe_replays_the_latest_snapshot_available_at_as_of(
+    tmp_path, monkeypatch
+):
+    from research.qlib_validation.source import load_snapshot
+
+    database = tmp_path / "portfolio.sqlite3"
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(database))
+    initialize_database()
+    policy = _seed_dynamic_policy(database)
+    _seed_factor_history(policy, sessions=_weekday_sessions(date(2026, 1, 2), 21))
+    earlier = insert_snapshot(
+        replace(
+            _snapshot(fingerprint="earlier", synced_at="2026-02-01T00:00:00+00:00"),
+            holdings=(_holding("SPY", "US"),),
+        )
+    )
+    insert_snapshot(
+        replace(
+            _snapshot(fingerprint="later", synced_at="2026-02-02T00:00:00+00:00"),
+            holdings=(_holding("QQQ", "US"),),
+        )
+    )
+
+    snapshot = load_snapshot(
+        database,
+        as_of=datetime(2026, 2, 1, 12, tzinfo=UTC),
+        universe="current-holdings",
+    )
+
+    assert {item.key for item in snapshot.policy_specs} == {"US/SPY"}
+    assert snapshot.research_universe["account_snapshot_id"] == earlier["id"]
+
+
+def test_snapshot_uses_latest_candle_revision_once(tmp_path, monkeypatch):
+    from research.qlib_validation.source import load_snapshot
+
+    database = tmp_path / "portfolio.sqlite3"
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(database))
+    initialize_database()
+    policy = _seed_dynamic_policy(database)
+    sessions = _weekday_sessions(date(2026, 1, 2), 21)
+    _seed_factor_history(policy, sessions=sessions)
+    spy = next(
+        item
+        for item in allocation_benchmarks(policy)
+        if item["market_country"] == "US" and item["symbol"] == "SPY"
+    )
+    revised_at = datetime.combine(
+        sessions[-1], time(9, 30), ZoneInfo("America/New_York")
+    ).isoformat()
+    insert_candles([_candle(spy, revised_at, price=130.0)])
+
+    snapshot = load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
+    spy_candles = [item for item in snapshot.candles if item.key == "US/SPY"]
+
+    assert len(spy_candles) == 1
+    assert spy_candles[0].close_price == 130.0
+    assert spy_candles[0].factor == pytest.approx(0.3)
 
 
 def test_readonly_transaction_keeps_one_snapshot_during_concurrent_commit(
@@ -310,29 +465,6 @@ def test_snapshot_rejects_invalid_or_gapped_candles(tmp_path, monkeypatch):
     )
 
     with pytest.raises(SourceError, match="history gap"):
-        load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
-
-    with sqlite3.connect(database) as conn:
-        conn.execute("DELETE FROM toss_market_candles")
-        for fingerprint in ("duplicate-a", "duplicate-b"):
-            conn.execute(
-                """
-                INSERT INTO toss_market_candles (
-                    source_kind, market_country, symbol, interval, candle_at,
-                    currency, open_price, high_price, low_price, close_price,
-                    volume, adjusted, adjusted_supported, source_fingerprint
-                ) VALUES (?, ?, ?, '1d', ?, 'USD', 100, 101, 99, 100, 1000, 1, 1, ?)
-                """,
-                (
-                    spec["source_kind"],
-                    spec["market_country"],
-                    spec["symbol"],
-                    "2026-01-02T09:30:00-05:00",
-                    fingerprint,
-                ),
-            )
-
-    with pytest.raises(SourceError, match="duplicate session"):
         load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
 
 
