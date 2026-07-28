@@ -22,10 +22,12 @@ purchases, or exceptional intervention.
   evaluation. Run it only when the user explicitly asks to create or refresh
   an evaluation.
 
-`toss-snapshots`, `inspection preview`, and `inspection show` initialize the
-local database before reading. If schema migration, database creation, or
-default-policy seeding is not authorized, explain that no state-free CLI read
-surface exists and request permission instead.
+`toss-snapshots`, `inspection preview`, and `inspection show` can initialize,
+migrate, or seed the local database before reading. Treat those commands as
+potentially stateful: if database creation, migration, or default-policy
+seeding is not authorized, do not invoke them and explain that no state-free
+CLI read surface exists. Reading an already available saved artifact does not
+authorize a refresh or persistence operation.
 
 ## Read the contract
 
@@ -45,17 +47,34 @@ Use these result fields as separate axes:
 Each `review_queue` item contains `priority`, `priority_label`, `queue_class`,
 `kind`, `identity`, `status`, `triggers`, `suggestion`, `meaning`,
 `verification_task`, and `evidence_refs`. Blocking items have null
-priority and suggestion. Do not infer allocation metrics or a trade from a
-queue item; inspect the linked cash, layer, or instrument record when needed.
+priority and suggestion. Preserve those persisted fields and do not infer a
+new status, priority, allocation metric, or trade from a queue item. Inspect
+the linked cash, layer, or instrument record when needed.
+
+Keep three input classes separate in the brief:
+
+- saved account and evaluation facts from the normalized Toss snapshot and
+  persisted result;
+- explicit user roles, targets, constraints, or objectives for this response;
+- clearly labeled conditional assumptions or candidate research.
+
+The second and third classes can support a per-holding direction, alternative
+comparison, or new-instrument scenario, but they cannot replace saved facts,
+change the active policy, or be presented as current account weights.
 
 ## Response shape
 
 1. State `run_id`, `snapshot_id`, and whether the contract is supported.
 2. Summarize the four status counts and material allocation state.
 3. For non-`OK` findings, give the raw trigger, plain Korean meaning, the
-   adjustment direction, and the verification task.
-4. End with verification or future regular-purchase-policy review—not a buy,
-   sell, quantity, price, or execution instruction.
+   adjustment direction, and the verification task. When the user supplied a
+   role or target, label it as a response-scoped analysis input and show any
+   policy difference.
+4. If the source is partial, stale, failed, or unreconciled, do not assert
+   current weights or gaps. State the unavailable fact, then provide a
+   clearly labeled conditional scenario or alternative comparison when useful.
+5. End with verification or future regular-purchase-policy review—not a buy,
+   sell, quantity, price, timing, or execution instruction.
 
 Missing, stale, unreconciled, or incomplete source data is a blocking
 verification item. `Action` means inspect a possible exceptional intervention;
