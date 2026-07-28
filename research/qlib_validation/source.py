@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, time
 from functools import cache
 import json
@@ -25,6 +26,7 @@ REQUIRED_BENCHMARKS = {
     "US/QQQ": ("stock", "US", "QQQ"),
     "US/SPY": ("stock", "US", "SPY"),
 }
+FACTOR_LOOKBACK_SESSIONS = 20
 
 
 class SourceError(RuntimeError):
@@ -334,6 +336,23 @@ def _load_series(
     return tuple(result)
 
 
+def _with_trailing_factors(candles: tuple[Candle, ...]) -> tuple[Candle, ...]:
+    """Attach a factor using only each row's prior observed closes."""
+    if len(candles) <= FACTOR_LOOKBACK_SESSIONS:
+        return ()
+    result: list[Candle] = []
+    for index in range(FACTOR_LOOKBACK_SESSIONS, len(candles)):
+        baseline = candles[index - FACTOR_LOOKBACK_SESSIONS]
+        current = candles[index]
+        result.append(
+            replace(
+                current,
+                factor=current.close_price / baseline.close_price - 1.0,
+            )
+        )
+    return tuple(result)
+
+
 def load_snapshot(path: Path, *, as_of: datetime) -> SourceSnapshot:
     """Load one point-in-time, immutable research input snapshot."""
     as_of_utc = _require_aware(as_of, label="as_of")
@@ -357,7 +376,7 @@ def load_snapshot(path: Path, *, as_of: datetime) -> SourceSnapshot:
         for spec in sorted(unique_specs.values(), key=lambda item: item.key):
             series = _load_series(conn, spec, as_of=as_of_utc)
             _validate_series(spec, series, maximum_gap_days=maximum_gap_days)
-            loaded.extend(series)
+            loaded.extend(_with_trailing_factors(series))
         candles = tuple(loaded)
     return SourceSnapshot(
         policy_record=policy_record,

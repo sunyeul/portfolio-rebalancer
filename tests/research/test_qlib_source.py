@@ -1,6 +1,7 @@
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
 import sqlite3
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -65,6 +66,52 @@ def _candle(spec, candle_at, *, price=100.0):
     }
 
 
+def _weekday_sessions(start: date, count: int) -> list[date]:
+    sessions: list[date] = []
+    cursor = start
+    while len(sessions) < count:
+        if cursor.weekday() < 5:
+            sessions.append(cursor)
+        cursor += timedelta(days=1)
+    return sessions
+
+
+def _seed_factor_history(policy, *, sessions: list[date]) -> set[str]:
+    specs = [
+        *allocation_benchmarks(policy),
+        *[
+            {
+                "source_kind": "stock",
+                "market_country": item["market_country"],
+                "symbol": item["symbol"],
+            }
+            for item in policy["instruments"]
+        ],
+    ]
+    unique = {
+        (item["source_kind"], item["market_country"], item["symbol"]): item
+        for item in specs
+    }
+    for spec in unique.values():
+        timezone = ZoneInfo(
+            "Asia/Seoul" if spec["market_country"] == "KR" else "America/New_York"
+        )
+        market_time = time(9) if spec["market_country"] == "KR" else time(9, 30)
+        insert_candles(
+            [
+                _candle(
+                    spec,
+                    datetime.combine(session, market_time, timezone).isoformat(),
+                    price=100.0 + index,
+                )
+                for index, session in enumerate(sessions)
+            ]
+        )
+    return {
+        f"{item['market_country']}/{item['symbol']}" for item in unique.values()
+    }
+
+
 def test_snapshot_reads_active_policy_and_never_opens_database_for_write(
     tmp_path, monkeypatch
 ):
@@ -116,6 +163,29 @@ def test_snapshot_reads_active_policy_and_never_opens_database_for_write(
         assert conn.in_transaction is True
         with pytest.raises(sqlite3.OperationalError, match="readonly"):
             conn.execute("CREATE TABLE forbidden_write (id INTEGER)")
+
+
+def test_snapshot_derives_trailing_factor_without_future_candles(tmp_path, monkeypatch):
+    from research.qlib_validation.source import load_snapshot
+
+    database = tmp_path / "portfolio.sqlite3"
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(database))
+    initialize_database()
+    policy = _seed_dynamic_policy(database)
+    sessions = _weekday_sessions(date(2026, 1, 2), 21)
+    keys = _seed_factor_history(policy, sessions=sessions)
+
+    complete = load_snapshot(database, as_of=datetime(2026, 2, 1, tzinfo=UTC))
+
+    assert {item.key for item in complete.candles} == keys
+    assert len(complete.candles) == len(keys)
+    assert all(item.factor == pytest.approx(0.2) for item in complete.candles)
+
+    before_final_candle = load_snapshot(
+        database, as_of=datetime(2026, 1, 29, 23, tzinfo=UTC)
+    )
+
+    assert before_final_candle.candles == ()
 
 
 def test_readonly_transaction_keeps_one_snapshot_during_concurrent_commit(

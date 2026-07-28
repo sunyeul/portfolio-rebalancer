@@ -125,6 +125,8 @@ def test_real_cli_keeps_fixture_database_bytes_unchanged(monkeypatch, capsys, tm
     )
     result = json.loads(capsys.readouterr().out)
     assert code == 0
+    assert result["qlib_capability"]["data_adapter_suitable"] is True
+    assert result["qlib_capability"]["reasons"] == []
     assert result["regime_signal_verdict"] == "inconclusive"
     assert result["target_policy_verdict"] == "inconclusive"
     run_dir = output / result["run_id"]
