@@ -22,6 +22,20 @@ export type InspectionSuggestion = {
   label?: string;
 };
 
+export type InspectionRedTeam = {
+  counterargument?: string;
+  evidence_needed?: string;
+};
+
+export type EvaluationCurrentness = {
+  is_current: boolean;
+  reasons: string[];
+  evaluation_snapshot_id: number | null;
+  current_snapshot_id: number | null;
+  evaluation_policy_version_id: number | null;
+  active_policy_version_id: number | null;
+};
+
 export type InspectionItem = JsonObject & {
   priority?: "P1" | "P2" | "P3" | "P4" | null;
   priority_label?: string | null;
@@ -36,6 +50,34 @@ export type InspectionItem = JsonObject & {
   maximum?: number | null;
   gap?: number | null;
   denominator?: string | null;
+  red_team?: InspectionRedTeam;
+};
+
+export type PolicyPreflightQuestion = {
+  id: string;
+  title: string;
+  prompt: string;
+  required: boolean;
+};
+
+export type PolicyPreflight = {
+  state?: string;
+  policy_version_id?: number | null;
+  evaluation?: { run_id?: number; snapshot_id?: number } | null;
+  questions?: PolicyPreflightQuestion[];
+};
+
+export type ChangeBriefItem = InspectionItem & {
+  change?: "new" | "changed" | "resolved" | string;
+};
+
+export type ChangeBrief = {
+  state?: "no_evaluation" | "baseline" | "changes" | "stale_evaluation" | string;
+  current?: { run_id?: number; snapshot_id?: number } | null;
+  previous?: { run_id?: number; snapshot_id?: number } | null;
+  changes?: ChangeBriefItem[];
+  source_alert?: { state?: string; message?: string } | null;
+  currentness?: EvaluationCurrentness;
 };
 
 export type InspectionResult = {
@@ -57,6 +99,7 @@ export type InspectionResult = {
 export type InspectionData = {
   evaluation: Evaluation | null;
   contract_supported: boolean;
+  currentness: EvaluationCurrentness;
 };
 
 export type Evaluation = {
@@ -71,6 +114,13 @@ export type Evaluation = {
   market_evidence?: JsonObject;
   snapshot_id?: number;
 };
+
+export function currentEvaluationResult(
+  evaluation: Evaluation | null,
+  currentness: EvaluationCurrentness | null,
+) {
+  return currentness?.is_current === true ? evaluation?.result : undefined;
+}
 
 export async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(path, { credentials: "same-origin" });

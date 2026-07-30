@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { evidenceValue, formatAccountReturn, formatAllocationReason, formatKrw, formatQueuePriority, formatSignedKrw, supportedRate } from "../src/lib/presentation";
+import { currentEvaluationResult } from "../src/lib/api";
+import { evidenceValue, formatAccountReturn, formatAllocationReason, formatEvaluationCurrentness, formatKrw, formatQueuePriority, formatSignedKrw, supportedRate } from "../src/lib/presentation";
 
 test("KRW formatting removes fractional won", () => {
   expect(formatKrw(120802745.17802304)).toBe("120,802,745 KRW");
@@ -42,4 +43,33 @@ test("allocation blocking reasons remain human-readable without inventing a deci
 test("blocking queue items keep their priority label even without a priority code", () => {
   expect(formatQueuePriority(null, "평가 차단")).toBe("평가 차단");
   expect(formatQueuePriority("P1", "다음 정기매수 전")).toBe("P1 · 다음 정기매수 전");
+});
+
+test("evaluation currentness explains stale snapshot and policy IDs", () => {
+  expect(formatEvaluationCurrentness({
+    is_current: false,
+    reasons: ["snapshot_mismatch", "policy_version_mismatch"],
+    evaluation_snapshot_id: 7,
+    current_snapshot_id: 8,
+    evaluation_policy_version_id: 3,
+    active_policy_version_id: 4,
+  })).toBe(
+    "저장 평가 스냅샷 #7 · 현재 스냅샷 #8 · 저장 평가 정책 #3 · 활성 정책 #4. 최신 Toss 스냅샷과 활성 정책으로 inspection run을 명시적으로 실행한 뒤 다시 불러오세요.",
+  );
+});
+
+test("stale evaluation result is not available to workbench panels", () => {
+  const evaluation = { result: { review_queue: [{ identity: "US/AAA" }] } };
+  const currentness = {
+    is_current: false,
+    reasons: ["snapshot_mismatch"],
+    evaluation_snapshot_id: 7,
+    current_snapshot_id: 8,
+    evaluation_policy_version_id: 4,
+    active_policy_version_id: 4,
+  };
+
+  expect(currentEvaluationResult(evaluation, currentness)).toBeUndefined();
+  expect(currentEvaluationResult(evaluation, { ...currentness, is_current: true }))
+    .toBe(evaluation.result);
 });

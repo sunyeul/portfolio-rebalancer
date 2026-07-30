@@ -1,3 +1,5 @@
+import type { EvaluationCurrentness } from "./api";
+
 const wholeWon = new Intl.NumberFormat("ko-KR", {
   maximumFractionDigits: 0,
   minimumFractionDigits: 0,
@@ -62,4 +64,18 @@ export function formatQueuePriority(priority: unknown, label: unknown) {
   const readablePriority = typeof priority === "string" && priority.length ? priority : null;
   if (readableLabel) return readablePriority ? `${readablePriority} · ${readableLabel}` : readableLabel;
   return readablePriority ?? "검토 시점 미상";
+}
+
+function currentnessId(label: string, value: number | null) {
+  return `${label} ${value === null ? "없음" : `#${value}`}`;
+}
+
+export function formatEvaluationCurrentness(value: EvaluationCurrentness) {
+  return [
+    currentnessId("저장 평가 스냅샷", value.evaluation_snapshot_id),
+    currentnessId("현재 스냅샷", value.current_snapshot_id),
+    currentnessId("저장 평가 정책", value.evaluation_policy_version_id),
+    currentnessId("활성 정책", value.active_policy_version_id),
+  ].join(" · ")
+    + ". 최신 Toss 스냅샷과 활성 정책으로 inspection run을 명시적으로 실행한 뒤 다시 불러오세요.";
 }

@@ -1,21 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, BarChart3, CircleAlert, CircleCheck, ChevronDown, ChevronUp, Layers3, ListFilter, PanelLeftClose, PanelLeftOpen, RefreshCw, RotateCcw, Search, ShieldCheck, type LucideIcon } from "lucide-react";
-import { Evaluation, getJson, type InspectionData, type InspectionItem, type JsonObject, type PerformanceRun } from "./lib/api";
-import { evidenceValue, finiteNumber, formatAccountReturn, formatAllocationReason, formatKrw as money, formatPercent as percent, formatQueuePriority, formatSignedKrw as signedMoney, supportedRate } from "./lib/presentation";
+import { currentEvaluationResult, Evaluation, getJson, type ChangeBrief, type EvaluationCurrentness, type InspectionData, type InspectionItem, type JsonObject, type PerformanceRun, type PolicyPreflight } from "./lib/api";
+import { evidenceValue, finiteNumber, formatAccountReturn, formatAllocationReason, formatEvaluationCurrentness, formatKrw as money, formatPercent as percent, formatQueuePriority, formatSignedKrw as signedMoney, supportedRate } from "./lib/presentation";
 import { filterAndSortRows, toggleSort, uniqueFilterValues, type SortState } from "./lib/tableControls";
 
 const statusLabel: Record<string, string> = { OK: "OK", Watch: "Watch", Review: "Review", Action: "Action" };
 const sidebarStorageKey = "ips-pilot.sidebar-collapsed";
-type TabKey = "overview" | "performance" | "allocation" | "review";
+type TabKey = "overview" | "performance" | "allocation" | "review" | "preflight" | "brief";
 type PerformanceView = "ytd" | "trailing_12m" | "cumulative" | "holding";
 type NavItem = [LucideIcon, string, TabKey];
 
-const navItems: NavItem[] = [[Activity, "Overview", "overview"], [BarChart3, "Performance", "performance"], [Layers3, "Allocation", "allocation"], [CircleAlert, "Review Queue", "review"]];
+const navItems: NavItem[] = [[Activity, "Overview", "overview"], [BarChart3, "Performance", "performance"], [Layers3, "Allocation", "allocation"], [CircleAlert, "Review Queue", "review"], [ShieldCheck, "Policy preflight", "preflight"], [Activity, "Change brief", "brief"]];
 const panelCopy: Record<TabKey, { eyebrow: string; title: string; description: string }> = {
   overview: { eyebrow: "MONTHLY IPS INSPECTION", title: "이번 달 계좌 운용 점검", description: "현재 상황, 목표 비중, 수익률과 다음 확인 항목을 한 화면에서 확인합니다." },
   performance: { eyebrow: "PERFORMANCE HISTORY", title: "성과 이력", description: "YTD·최근 1년·누적 TWR과 원금·평가금 추이를 확인하는 화면입니다." },
   allocation: { eyebrow: "ALLOCATION REVIEW", title: "비중 점검", description: "현금과 core·satellite·experiment 레이어의 목표 갭을 확인하는 화면입니다." },
   review: { eyebrow: "REVIEW QUEUE", title: "확인할 항목", description: "백엔드 평가 순서를 유지한 전체 읽기 전용 점검 목록입니다." },
+  preflight: { eyebrow: "POLICY PREFLIGHT", title: "정책 변경 전 질문", description: "정책 초안을 만들기 전에 빠진 목적·근거·되돌림 조건을 확인합니다." },
+  brief: { eyebrow: "CHANGE BRIEF", title: "변화분 브리프", description: "최신 평가에서 새로 생기거나 바뀐 점검 항목과 원천 이상만 확인합니다." },
 };
 
 function initialSidebarCollapsed() {
@@ -163,8 +165,41 @@ function ReviewQueue({ items }: { items: InspectionItem[] }) {
   return <section className="review-queue-section full">
     <div className="queue-heading"><div><p className="eyebrow">REVIEW QUEUE</p><h2>전체 확인 항목</h2></div><span className="queue-count">{items.length}</span></div>
     {items.length === 0 && <div className="queue-empty"><CircleCheck size={18} />현재 확인 항목 없음</div>}
-    <div className="review-queue-list">{items.map((item, index) => <article className="queue-item" key={`${String(item.kind)}-${String(item.identity)}-${index}`}><div className="queue-top"><div className="queue-axis"><Status value={item.status} />{(item.priority || item.priority_label) && <span className="priority-label">{formatQueuePriority(item.priority, item.priority_label)}</span>}</div><small>{queueKindLabel[String(item.kind)] ?? String(item.kind ?? "근거")}</small></div><strong>{String(item.identity ?? "—")}</strong>{item.suggestion?.label && <p className="queue-suggestion">조정 방향 · {String(item.suggestion.label)}</p>}<p>{String(item.meaning ?? "점검 의미 근거가 필요합니다.")}</p><span>{String(item.verification_task ?? "확인 과제 근거가 필요합니다.")}</span>{item.evidence_refs !== undefined && <details className="evidence-detail"><summary>근거 연결</summary><pre>{String(JSON.stringify(item.evidence_refs as JsonObject, null, 2) ?? "")}</pre></details>}</article>)}</div>
+    <div className="review-queue-list">{items.map((item, index) => {
+      const counterargument = typeof item.red_team?.counterargument === "string" ? item.red_team.counterargument : null;
+      const evidenceNeeded = typeof item.red_team?.evidence_needed === "string" ? item.red_team.evidence_needed : null;
+      return <article className="queue-item" key={`${String(item.kind)}-${String(item.identity)}-${index}`}><div className="queue-top"><div className="queue-axis"><Status value={item.status} />{(item.priority || item.priority_label) && <span className="priority-label">{formatQueuePriority(item.priority, item.priority_label)}</span>}</div><small>{queueKindLabel[String(item.kind)] ?? String(item.kind ?? "근거")}</small></div><strong>{String(item.identity ?? "—")}</strong>{item.suggestion?.label && <p className="queue-suggestion">조정 방향 · {String(item.suggestion.label)}</p>}<p>{String(item.meaning ?? "점검 의미 근거가 필요합니다.")}</p><span>{String(item.verification_task ?? "확인 과제 근거가 필요합니다.")}</span>{(counterargument || evidenceNeeded) && <aside className="red-team-card" aria-label="반대 관점"><strong>반대 관점</strong>{counterargument && <p>{counterargument}</p>}{evidenceNeeded && <span>추가 확인 · {evidenceNeeded}</span>}</aside>}{item.evidence_refs !== undefined && <details className="evidence-detail"><summary>근거 연결</summary><pre>{String(JSON.stringify(item.evidence_refs as JsonObject, null, 2) ?? "")}</pre></details>}</article>;
+    })}</div>
     <div className="queue-footer">이 목록은 읽기 전용 검사 신호이며, 상태와 순서는 백엔드 평가를 그대로 따릅니다.</div>
+  </section>;
+}
+
+function PolicyPreflightPanel({ preflight }: { preflight: PolicyPreflight | null }) {
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const questions = preflight?.questions ?? [];
+  useEffect(() => { setAnswers({}); }, [preflight?.policy_version_id, preflight?.evaluation?.run_id]);
+  if (!preflight) return <div className="stage-panel"><h2>사전 질문을 불러오는 중입니다.</h2><p>활성 정책과 최신 평가를 읽어 질문을 준비합니다.</p></div>;
+  return <section className="preflight-panel">
+    <div className="read-only-notice"><ShieldCheck size={17} /><div><strong>답변은 이 브라우저에만 남습니다.</strong><span>작성한 내용은 저장·정책 반영·평가 변경에 사용되지 않습니다.</span></div></div>
+    {preflight.state === "source_verification_required" && <div className="banner warning"><CircleAlert size={17} />원천 검증이 끝나기 전에는 비중 판단을 정책 변경 근거로 사용하지 마세요.</div>}
+    {preflight.state === "policy_missing" && <div className="empty">활성 정책을 찾을 수 없어 변경 전 질문을 시작할 수 없습니다.</div>}
+    {questions.length > 0 && <div className="preflight-list">{questions.map((question, index) => <label className="preflight-question" key={question.id}><span>{index + 1}</span><strong>{question.title}</strong><p>{question.prompt}</p><textarea value={answers[question.id] ?? ""} onChange={event => setAnswers(current => ({ ...current, [question.id]: event.target.value }))} placeholder="답변을 적어 보세요" aria-label={`${question.title} 답변`} /></label>)}</div>}
+  </section>;
+}
+
+const briefChangeLabel: Record<string, string> = { new: "새 항목", changed: "변경", resolved: "해결" };
+
+function ChangeBriefPanel({ brief }: { brief: ChangeBrief | null }) {
+  if (!brief) return <div className="stage-panel"><h2>변화분을 불러오는 중입니다.</h2><p>최신 평가와 직전 평가를 비교합니다.</p></div>;
+  const changes = brief.changes ?? [];
+  if (brief.state === "no_evaluation") return <div className="stage-panel"><h2>비교할 평가가 없습니다.</h2><p>저장된 Toss 평가가 생기면 변화분만 표시합니다.</p></div>;
+  if (brief.state === "stale_evaluation") return <div className="stage-panel"><h2>현재 변화분을 표시할 수 없습니다.</h2><p>저장된 평가와 현재 Toss 스냅샷·활성 정책의 일치 여부를 먼저 확인하세요.</p></div>;
+  return <section className="brief-panel">
+    <div className="read-only-notice"><ShieldCheck size={17} /><div><strong>변화분만 표시합니다.</strong><span>상태와 우선순위는 저장된 백엔드 평가를 그대로 사용하며, 거래 지시는 만들지 않습니다.</span></div></div>
+    {brief.source_alert && <div className="banner warning"><CircleAlert size={17} />{brief.source_alert.message ?? "최신 원천 상태를 확인하세요."}</div>}
+    {brief.state === "baseline" && <div className="brief-empty">첫 저장 평가입니다. 다음 평가부터 변화분을 비교합니다.</div>}
+    {brief.state === "changes" && changes.length === 0 && <div className="brief-empty">새로 생기거나 바뀐 점검 항목이 없습니다.</div>}
+    {changes.length > 0 && <div className="brief-list">{changes.map((item, index) => <article className="brief-item" key={`${String(item.change)}-${String(item.kind)}-${String(item.identity)}-${index}`}><div className="brief-item-top"><span className={`brief-change ${String(item.change ?? "")}`}>{briefChangeLabel[String(item.change)] ?? "변화"}</span><Status value={item.status} /></div><strong>{String(item.identity ?? "—")}</strong><p>{String(item.verification_task ?? "확인 과제를 검토합니다.")}</p>{(item.priority || item.priority_label) && <small>{formatQueuePriority(item.priority, item.priority_label)}</small>}</article>)}</div>}
   </section>;
 }
 
@@ -268,8 +303,11 @@ function AllocationPanel({ cash, layers, instruments, layerByIdentity }: { cash?
 
 export default function App() {
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
+  const [currentness, setCurrentness] = useState<EvaluationCurrentness | null>(null);
   const [contractSupported, setContractSupported] = useState(false);
   const [performanceRun, setPerformanceRun] = useState<PerformanceRun | null>(null);
+  const [policyPreflight, setPolicyPreflight] = useState<PolicyPreflight | null>(null);
+  const [changeBrief, setChangeBrief] = useState<ChangeBrief | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -277,14 +315,16 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(initialSidebarCollapsed);
 
   async function reload() {
-    setLoading(true); setError(null); setWarnings([]);
+    setLoading(true); setError(null); setWarnings([]); setPolicyPreflight(null); setChangeBrief(null); setCurrentness(null);
     try {
       const inspectionData = await getJson<InspectionData>("/api/inspection");
       const currentEvaluation = inspectionData.evaluation;
       setEvaluation(currentEvaluation);
+      setCurrentness(inspectionData.currentness);
       setContractSupported(inspectionData.contract_supported === true);
       const warningMessages: string[] = [];
-      const performancePath = currentEvaluation?.performance_run_id
+      const evaluationUsable = inspectionData.contract_supported === true && inspectionData.currentness.is_current;
+      const performancePath = evaluationUsable && currentEvaluation?.performance_run_id
         ? `/api/performance?run_id=${currentEvaluation.performance_run_id}`
         : "";
       if (!performancePath) {
@@ -298,6 +338,17 @@ export default function App() {
           warningMessages.push("성과 자료를 불러오지 못했습니다.");
         }
       }
+      const briefRequest = evaluationUsable
+        ? getJson<ChangeBrief>("/api/change-brief")
+        : Promise.resolve<ChangeBrief | null>(null);
+      const [preflightResult, briefResult] = await Promise.allSettled([
+        getJson<PolicyPreflight>("/api/policy-preflight"),
+        briefRequest,
+      ]);
+      if (preflightResult.status === "fulfilled") setPolicyPreflight(preflightResult.value);
+      else warningMessages.push("정책 사전 질문을 불러오지 못했습니다.");
+      if (briefResult.status === "fulfilled") setChangeBrief(briefResult.value);
+      else warningMessages.push("변화분 브리프를 불러오지 못했습니다.");
       setWarnings(warningMessages);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "화면을 불러오지 못했습니다."); }
     finally { setLoading(false); }
@@ -308,7 +359,9 @@ export default function App() {
     catch { /* Browser storage can be unavailable without affecting the dashboard. */ }
   }, [sidebarCollapsed]);
 
-  const result = evaluation?.result;
+  const evaluationCurrent = currentness?.is_current === true;
+  const evaluationUsable = contractSupported && evaluationCurrent;
+  const result = evaluationUsable ? currentEvaluationResult(evaluation, currentness) : undefined;
   const queue = result?.review_queue ?? [];
   const adjustmentSuggestions = result?.adjustment_suggestions ?? [];
   const layers = result?.layers ?? [];
@@ -344,10 +397,15 @@ export default function App() {
       {activeTab === "overview" && <div className="read-only-notice"><ShieldCheck size={17} /><div><strong>읽기 전용 IPS 점검</strong><span>검사 신호만 표시하며 상태와 우선순위는 저장된 백엔드 평가를 그대로 사용합니다.</span></div></div>}
       {error && <div className="banner error"><CircleAlert size={17} />{error}</div>}
       {warnings.map(warning => <div className="banner warning" key={warning}><CircleAlert size={17} />{warning}</div>)}
+      {!loading && evaluation && currentness && !evaluationCurrent && <div className="banner warning"><CircleAlert size={17} /><span><strong>저장된 평가가 현재 계좌·정책과 일치하지 않습니다.</strong><br />{formatEvaluationCurrentness(currentness)}</span></div>}
       {result && sourceState !== "complete" && <div className="banner warning"><CircleAlert size={17} />원천 상태가 {sourceState}입니다. 원천 동기화 근거를 확인하세요.</div>}
       {loading && <div className="empty">평가 결과를 불러오는 중입니다.</div>}
-      {!loading && !evaluation && <div className="empty"><CircleAlert size={18} />아직 저장된 Toss 평가가 없습니다. CLI에서 inspection run을 먼저 실행하세요.</div>}
-      {!loading && result && <>
+      {!loading && !evaluation && activeTab !== "preflight" && activeTab !== "brief" && <div className="empty"><CircleAlert size={18} />아직 저장된 Toss 평가가 없습니다. CLI에서 inspection run을 먼저 실행하세요.</div>}
+      {!loading && evaluation && !contractSupported && <div className="banner warning"><CircleAlert size={17} /><span><strong>저장된 평가가 현재 v2 계약이 아닙니다.</strong><br />새 Toss 평가를 저장한 뒤 결과 패널을 확인하세요.</span></div>}
+      {!loading && activeTab === "preflight" && <PolicyPreflightPanel preflight={policyPreflight} />}
+      {!loading && activeTab === "brief" && evaluationUsable && <ChangeBriefPanel brief={changeBrief} />}
+      {!loading && activeTab === "brief" && !evaluationUsable && <div className="empty">현재 v2 평가 계약과 최신성 검증이 끝나야 변화분을 표시할 수 있습니다.</div>}
+      {!loading && result && activeTab !== "preflight" && activeTab !== "brief" && <>
         {activeTab === "overview" ? <>
           <section className="facts-grid overview-context">
             <article className="fact-card"><span>투자 원금(매입원가)</span><strong>{money(investmentPrincipal)}</strong><small>현재 보유 종목의 Toss 매입원가</small></article>

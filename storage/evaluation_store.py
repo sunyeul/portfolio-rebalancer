@@ -109,3 +109,18 @@ def latest_evaluation_run(
             (account_alias,),
         ).fetchone()
         return _decode(row) if row is not None else None
+
+
+def list_evaluation_runs(
+    *, limit: int = 20, account_alias: str = "toss-brokerage"
+) -> list[dict[str, Any]]:
+    """List immutable evaluation runs from newest to oldest."""
+    if limit < 1:
+        return []
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM ips_evaluation_runs WHERE account_alias = ? "
+            "ORDER BY created_at DESC, id DESC LIMIT ?",
+            (account_alias, limit),
+        ).fetchall()
+        return [_decode(row) for row in rows]

@@ -1,5 +1,9 @@
 from storage.database import connect, initialize_database
-from storage.evaluation_store import insert_evaluation_run, latest_evaluation_run
+from storage.evaluation_store import (
+    insert_evaluation_run,
+    latest_evaluation_run,
+    list_evaluation_runs,
+)
 from storage.policy_store import get_active_policy
 
 
@@ -75,3 +79,32 @@ def test_market_evidence_is_part_of_evaluation_identity(monkeypatch, tmp_path):
 
     assert persisted["id"] != first_persisted["id"]
     assert persisted["market_evidence_fingerprint"] == "market-v2"
+
+
+def test_evaluation_history_returns_newest_runs_first(monkeypatch, tmp_path):
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "history.sqlite3"))
+    initialize_database()
+    with connect() as conn:
+        snapshot_id = int(
+            conn.execute(
+                "INSERT INTO broker_account_snapshots (account_alias, sync_started_at, synced_at, state, is_current_evaluable, source_fingerprint, source_timestamps_json, data_quality_json, reconciliation_json) VALUES ('toss-brokerage','a','b','failed',0,'source','{}','{}','{}')"
+            ).lastrowid
+        )
+    active = get_active_policy()
+    first = _evaluation()
+    first.update(
+        snapshot_id=snapshot_id,
+        policy_version_id=active["id"],
+        policy_hash=active["policy_hash"],
+        evaluation_fingerprint="history-a",
+    )
+    second = dict(first)
+    second["evaluation_fingerprint"] = "history-b"
+
+    first_persisted = insert_evaluation_run(first)
+    second_persisted = insert_evaluation_run(second)
+
+    assert [item["id"] for item in list_evaluation_runs(limit=2)] == [
+        second_persisted["id"],
+        first_persisted["id"],
+    ]

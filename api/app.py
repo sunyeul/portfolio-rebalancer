@@ -17,16 +17,19 @@ from services.account_projection import (
     build_account_projection,
     layer_map_from_policy,
 )
+from services.change_brief import build_change_brief
 from services.dynamic_allocation import (
     allocation_benchmarks,
     evaluate_dynamic_allocation,
 )
+from services.policy_preflight import build_policy_preflight
 from storage.account_observation_store import (
+    latest_complete,
     latest_verified_complete,
     list_snapshots,
 )
 from storage.database import initialize_database
-from storage.evaluation_store import latest_evaluation_run
+from storage.evaluation_store import list_evaluation_runs, latest_evaluation_run
 from storage.market_store import latest_policy_candidate, list_candles
 from storage.performance_store import get_performance_run, latest_performance_run
 from storage.policy_store import get_active_policy, get_policy_version
@@ -45,6 +48,53 @@ def _contract_supported(evaluation: dict[str, Any] | None) -> bool:
     if not isinstance(evaluation, dict):
         return False
     return evaluation.get("engine_version") == SUPPORTED_INSPECTION_ENGINE_VERSION
+
+
+def _evaluation_currentness(
+    evaluation: dict[str, Any] | None,
+    current_snapshot: dict[str, Any] | None,
+    active_policy: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Compare one immutable evaluation with the current source contracts."""
+    evaluation_snapshot_id = (
+        evaluation.get("snapshot_id") if evaluation is not None else None
+    )
+    current_snapshot_id = (
+        current_snapshot.get("id") if current_snapshot is not None else None
+    )
+    evaluation_policy_version_id = (
+        evaluation.get("policy_version_id") if evaluation is not None else None
+    )
+    active_policy_version_id = (
+        active_policy.get("id") if active_policy is not None else None
+    )
+    reasons: list[str] = []
+    if evaluation is None:
+        reasons.append("evaluation_missing")
+    if current_snapshot is None:
+        reasons.append("current_snapshot_missing")
+    if active_policy is None:
+        reasons.append("active_policy_missing")
+    if (
+        evaluation is not None
+        and current_snapshot is not None
+        and evaluation_snapshot_id != current_snapshot_id
+    ):
+        reasons.append("snapshot_mismatch")
+    if (
+        evaluation is not None
+        and active_policy is not None
+        and evaluation_policy_version_id != active_policy_version_id
+    ):
+        reasons.append("policy_version_mismatch")
+    return {
+        "is_current": not reasons,
+        "reasons": reasons,
+        "evaluation_snapshot_id": evaluation_snapshot_id,
+        "current_snapshot_id": current_snapshot_id,
+        "evaluation_policy_version_id": evaluation_policy_version_id,
+        "active_policy_version_id": active_policy_version_id,
+    }
 
 
 def _error(message: str, status_code: int = 200) -> JSONResponse:
@@ -267,11 +317,17 @@ def create_app() -> FastAPI:
     @app.get("/api/inspection", response_model=ApiEnvelope)
     async def inspection() -> dict[str, Any]:
         evaluation = _evaluation_view(latest_evaluation_run())
+        currentness = _evaluation_currentness(
+            evaluation,
+            latest_complete(),
+            get_active_policy(),
+        )
         return {
             "ok": True,
             "data": {
                 "evaluation": evaluation,
                 "contract_supported": _contract_supported(evaluation),
+                "currentness": currentness,
             },
             "error": None,
         }
@@ -280,17 +336,77 @@ def create_app() -> FastAPI:
     async def review_queue() -> dict[str, Any]:
         evaluation = latest_evaluation_run()
         contract_supported = _contract_supported(evaluation)
+        currentness = _evaluation_currentness(
+            evaluation,
+            latest_complete(),
+            get_active_policy(),
+        )
         result = (evaluation or {}).get("result", {})
         data: dict[str, Any] = {
-            "items": result.get("review_queue", []),
+            "items": result.get("review_queue", [])
+            if currentness["is_current"]
+            else [],
             "run_id": evaluation["id"] if evaluation else None,
             "contract_supported": contract_supported,
+            "currentness": currentness,
         }
         if contract_supported:
-            data["adjustment_suggestions"] = result.get("adjustment_suggestions", [])
+            data["adjustment_suggestions"] = (
+                result.get("adjustment_suggestions", [])
+                if currentness["is_current"]
+                else []
+            )
         return {
             "ok": True,
             "data": data,
+            "error": None,
+        }
+
+    @app.get("/api/policy-preflight", response_model=ApiEnvelope)
+    async def policy_preflight() -> dict[str, Any]:
+        active = get_active_policy()
+        evaluation = latest_evaluation_run()
+        currentness = _evaluation_currentness(
+            evaluation,
+            latest_complete(),
+            active,
+        )
+        return {
+            "ok": True,
+            "data": build_policy_preflight(
+                active,
+                evaluation,
+                evaluation_is_current=bool(currentness["is_current"]),
+            ),
+            "error": None,
+        }
+
+    @app.get("/api/change-brief", response_model=ApiEnvelope)
+    async def change_brief() -> dict[str, Any]:
+        evaluations = list_evaluation_runs(limit=2)
+        current = evaluations[0] if evaluations else latest_evaluation_run()
+        previous = evaluations[1] if len(evaluations) > 1 else None
+        currentness = _evaluation_currentness(
+            current,
+            latest_complete(),
+            get_active_policy(),
+        )
+        brief = build_change_brief(current, previous)
+        brief["currentness"] = currentness
+        if current is not None and not currentness["is_current"]:
+            brief.update(
+                {
+                    "state": "stale_evaluation",
+                    "changes": [],
+                    "source_alert": {
+                        "state": "stale_evaluation",
+                        "message": "저장된 평가가 현재 Toss 스냅샷·활성 정책과 일치하지 않습니다.",
+                    },
+                }
+            )
+        return {
+            "ok": True,
+            "data": brief,
             "error": None,
         }
 

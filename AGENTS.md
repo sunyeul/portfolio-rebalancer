@@ -11,7 +11,7 @@ IPS Pilot is an IPS inspection workbench, not a trading recommender. Keep change
 - Interpret `Action` as "inspect possible exceptional intervention", not permission to trade.
 - Prefer regular-purchase policy changes over immediate trades when describing IPS behavior.
 - When data is missing, stale, or ambiguous, prefer observe, review, or data-verification language.
-- Apply stricter thesis, overlap, burden, and ETF-substitution checks to `satellite` and `experiment` exposure.
+- Apply stricter role, allocation-range, and drawdown checks to `satellite` and `experiment` exposure; do not invent retired manual thesis, overlap, burden, or ETF-substitution metadata.
 - Keep core/satellite/experiment layers first-class; do not collapse them into ticker-only logic.
 - Treat normalized Toss account snapshots as the only source of holdings, cash, cost, price, order, and execution facts; never reintroduce manual portfolio, yfinance, generic broker, or Japan-account fallback paths.
 
@@ -26,7 +26,7 @@ IPS Pilot is an IPS inspection workbench, not a trading recommender. Keep change
 - Treat the CLI as an agent-facing interface; preserve one JSON object on stdout.
 - Keep CLI errors machine-readable instead of falling back to prose tracebacks.
 - Do not add `buy`, `sell`, `execute`, or order-sized fields to v2 inspection outputs.
-- For `latest` snapshot requests, list snapshots first and choose the newest `created_at`; if timestamps are missing or tied, use the largest `id`. Always state the actual `snapshot_id`.
+- For `latest` snapshot requests, list snapshots first and choose the newest `synced_at`; if timestamps are missing or tied, use the largest `id`. Always state the actual `snapshot_id`.
 
 ## Working Rules
 

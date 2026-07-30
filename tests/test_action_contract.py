@@ -2,6 +2,7 @@ from services.action_contract import (
     PRIORITY_LABELS,
     SUGGESTION_LABELS,
     priority_rank,
+    queue_class,
     suggestion,
     unit_suggestion,
 )
@@ -56,3 +57,30 @@ def test_cash_and_allocation_precedence_use_policy_review_language():
         triggers=["instrument_out_of_range"],
         eligible_for_increase=True,
     ) == ("P3", suggestion("review_increase_regular_purchase_allocation"))
+
+
+def test_evidence_only_review_uses_monthly_observation_semantics():
+    priority, selected = unit_suggestion(
+        kind="instrument",
+        status="Review",
+        current=0.20,
+        minimum=0.10,
+        maximum=0.30,
+        triggers=["strict_layer_drawdown_review_threshold"],
+    )
+
+    assert (priority, selected) == ("P2", suggestion("hold_and_observe"))
+    assert (
+        queue_class(
+            priority,
+            suggestion_code=selected["code"],
+        )
+        == "observation"
+    )
+    assert (
+        queue_class(
+            "P2",
+            suggestion_code="review_overweight_normalization",
+        )
+        == "adjustment"
+    )

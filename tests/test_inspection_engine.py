@@ -209,6 +209,54 @@ def test_metadata_does_not_create_action_without_allocation_or_risk_breach():
     assert "buy" not in encoded and "sell" not in encoded and "execute" not in encoded
 
 
+def test_review_queue_adds_red_team_without_changing_allocation_decision():
+    result = evaluate_inspection(
+        _projection(cash=0.15, aaa=0.95, bbb=0.05),
+        {"state": "complete", "input_fingerprint": "red-team", "points": []},
+        _policy(),
+        _layer_map(),
+    )
+
+    item = next(item for item in result["review_queue"] if item["identity"] == "US/AAA")
+
+    assert item["status"] == "Review"
+    assert item["priority"] == "P2"
+    assert item["queue_class"] == "adjustment"
+    assert item["suggestion"] == {
+        "code": "review_overweight_normalization",
+        "label": "초과비중 완화: 향후 정기매수 축소·중단 검토",
+    }
+    assert item["red_team"] == {
+        "counterargument": "비중 범위 이탈만으로 거래나 예외 개입을 확정할 수 없습니다.",
+        "evidence_needed": item["verification_task"],
+    }
+
+
+def test_review_queue_red_team_explains_blocking_source_and_performance_limits():
+    incomplete_projection = _projection()
+    incomplete_projection["positions"][0]["layer"] = None
+    blocked = evaluate_inspection(incomplete_projection, None, _policy(), {})
+    blocking_item = blocked["review_queue"][0]
+
+    assert blocking_item["queue_class"] == "blocking"
+    assert blocking_item["red_team"] == {
+        "counterargument": "현재 Toss 원천과 정책 커버리지가 평가 가능한 상태인지 확인하기 전에는 비중 판단을 확정할 수 없습니다.",
+        "evidence_needed": blocking_item["verification_task"],
+    }
+
+    performance = evaluate_inspection(_projection(), None, _policy(), _layer_map())
+    performance_item = next(
+        item for item in performance["review_queue"] if item["kind"] == "performance"
+    )
+
+    assert performance_item["status"] == "Watch"
+    assert performance_item["priority"] == "P4"
+    assert performance_item["red_team"] == {
+        "counterargument": "수익률·손익·drawdown만으로 비중 조정이나 예외 개입을 확정할 수 없습니다.",
+        "evidence_needed": performance_item["verification_task"],
+    }
+
+
 def test_missing_policy_layer_is_review_and_cash_uses_gross_denominator():
     projection = _projection(cash=0.05)
     projection["positions"][0]["layer"] = None
@@ -292,6 +340,35 @@ def test_ytd_return_compounds_from_the_calendar_year_anchor():
     assert result["performance"]["measurement"] == "ytd_twr"
 
 
+def test_annual_return_target_is_descriptive_not_a_status_trigger():
+    points = [
+        {
+            "point_at": "2025-12-31T00:00:00Z",
+            "evaluation_state": "evaluable",
+            "interval_twr": 0.03,
+        },
+        {
+            "point_at": "2026-01-01T00:00:00Z",
+            "evaluation_state": "evaluable",
+            "interval_twr": 0.02,
+        },
+        {
+            "point_at": "2026-07-22T00:00:00Z",
+            "evaluation_state": "evaluable",
+            "interval_twr": 0.05,
+        },
+    ]
+
+    result = evaluate_inspection(
+        _projection(), {"state": "complete", "points": points}, _policy(), _layer_map()
+    )
+
+    assert result["performance"]["annual_twr"] == pytest.approx(0.05)
+    assert result["performance"]["annual_target"] == pytest.approx(0.10)
+    assert result["performance"]["status"] == "OK"
+    assert result["performance"]["triggers"] == []
+
+
 def test_account_and_core_drawdown_are_reviewed_without_action():
     result = evaluate_inspection(
         _projection(),
@@ -332,6 +409,15 @@ def test_satellite_drawdown_is_review():
         item for item in result["review_queue"] if item["identity"] == "US/BBB"
     ]
     assert len(queue_items) == 1
+    assert queue_items[0]["priority"] == "P2"
+    assert queue_items[0]["suggestion"] == {
+        "code": "hold_and_observe",
+        "label": "관찰 유지",
+    }
+    assert queue_items[0]["queue_class"] == "observation"
+    assert all(
+        item["identity"] != "US/BBB" for item in result["adjustment_suggestions"]
+    )
 
 
 def test_overweight_never_creates_action_without_explicit_backend_status():

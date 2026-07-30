@@ -219,6 +219,89 @@ def test_inspection_show_marks_v1_contract_unsupported(monkeypatch):
     assert _payload(result)["contract_supported"] is False
 
 
+def test_inspection_brief_emits_one_read_only_json_object(monkeypatch):
+    evaluations = [
+        {
+            "id": 11,
+            "snapshot_id": 7,
+            "policy_version_id": 3,
+            "engine_version": "phase5-v2",
+            "result": {
+                "source": {"state": "complete"},
+                "allocation_state": "complete",
+                "review_queue": [],
+            },
+        }
+    ]
+    monkeypatch.setattr("cli.initialize_database", lambda: None)
+    monkeypatch.setattr(
+        "cli.list_evaluation_runs", lambda limit=2: evaluations, raising=False
+    )
+    monkeypatch.setattr(
+        "cli.latest_complete",
+        lambda: {"id": 7, "state": "complete"},
+    )
+    monkeypatch.setattr(
+        "cli.get_active_policy",
+        lambda: {"id": 3},
+    )
+
+    result = runner.invoke(app, ["inspection", "brief"])
+
+    assert result.exit_code == 0
+    assert _payload(result) == {
+        "ok": True,
+        "command": "inspection brief",
+        "current_run_id": 11,
+        "previous_run_id": None,
+        "brief": {
+            "state": "baseline",
+            "current": {"run_id": 11, "snapshot_id": 7},
+            "previous": None,
+            "changes": [],
+            "source_alert": None,
+            "currentness": {
+                "is_current": True,
+                "reasons": [],
+                "evaluation_snapshot_id": 7,
+                "current_snapshot_id": 7,
+                "evaluation_policy_version_id": 3,
+                "active_policy_version_id": 3,
+            },
+        },
+        "contract_supported": True,
+        "error": None,
+    }
+
+
+def test_inspection_brief_hides_stale_evaluation(monkeypatch):
+    evaluations = [
+        {
+            "id": 11,
+            "snapshot_id": 7,
+            "policy_version_id": 3,
+            "engine_version": "phase5-v2",
+            "result": {
+                "source": {"state": "complete"},
+                "allocation_state": "complete",
+                "review_queue": [{"kind": "cash", "identity": "cash"}],
+            },
+        }
+    ]
+    monkeypatch.setattr("cli.initialize_database", lambda: None)
+    monkeypatch.setattr("cli.list_evaluation_runs", lambda limit=2: evaluations)
+    monkeypatch.setattr("cli.latest_complete", lambda: {"id": 8})
+    monkeypatch.setattr("cli.get_active_policy", lambda: {"id": 3})
+
+    result = runner.invoke(app, ["inspection", "brief"])
+
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["brief"]["state"] == "stale_evaluation"
+    assert payload["brief"]["changes"] == []
+    assert payload["brief"]["currentness"]["reasons"] == ["snapshot_mismatch"]
+
+
 def test_inspection_preview_rejects_missing_policy_file():
     result = runner.invoke(
         app,

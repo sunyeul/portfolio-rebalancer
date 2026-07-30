@@ -98,6 +98,7 @@ def test_toss_snapshots_latest_reads_local_store_only(monkeypatch):
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
+    assert payload["snapshot_id"] == 9
     assert payload["snapshots"]["id"] == 9
     assert payload["snapshots"]["state"] == "partial"
 

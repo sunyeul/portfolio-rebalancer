@@ -69,6 +69,8 @@ def unit_suggestion(
         and eligible_for_increase
     ):
         return "P3", suggestion("review_increase_regular_purchase_allocation")
+    if status == "Review":
+        return "P2", suggestion("hold_and_observe")
     return "P4", suggestion("hold_and_observe")
 
 
@@ -94,9 +96,16 @@ def attach_decision(
     return values
 
 
-def queue_class(priority: str | None, *, blocking: bool = False) -> str:
+def queue_class(
+    priority: str | None,
+    *,
+    blocking: bool = False,
+    suggestion_code: str | None = None,
+) -> str:
     if blocking:
         return "blocking"
+    if suggestion_code == "hold_and_observe":
+        return "observation"
     return "adjustment" if priority in {"P1", "P2", "P3"} else "observation"
 
 

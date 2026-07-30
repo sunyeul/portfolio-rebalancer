@@ -213,6 +213,30 @@ def _raise_status(current: str, candidate: str) -> str:
     return candidate if SEVERITY[candidate] > SEVERITY[current] else current
 
 
+def _red_team(item: Mapping[str, Any], *, blocking: bool) -> dict[str, str]:
+    """Return a deterministic counterargument without changing IPS judgment."""
+    kind = str(item.get("kind") or "")
+    if blocking:
+        counterargument = (
+            "현재 Toss 원천과 정책 커버리지가 평가 가능한 상태인지 확인하기 전에는 "
+            "비중 판단을 확정할 수 없습니다."
+        )
+    elif kind in {"cash", "layer", "instrument"}:
+        counterargument = "비중 범위 이탈만으로 거래나 예외 개입을 확정할 수 없습니다."
+    elif kind in {"performance", "account_risk"}:
+        counterargument = (
+            "수익률·손익·drawdown만으로 비중 조정이나 예외 개입을 확정할 수 없습니다."
+        )
+    else:
+        counterargument = "현재 검사 신호만으로 결론을 확정할 수 없습니다."
+    return {
+        "counterargument": counterargument,
+        "evidence_needed": str(
+            item.get("verification_task") or "근거와 확인 과제를 검토합니다."
+        ),
+    }
+
+
 def evaluate_inspection(
     projection: Mapping[str, Any] | None,
     performance_run: Mapping[str, Any] | None,
@@ -328,9 +352,6 @@ def evaluate_inspection(
             if measurement == "ytd_twr"
             else "annual_return_points_insufficient"
         )
-    elif annual_target is not None and annual < float(annual_target):
-        performance_status = "Watch"
-        performance_triggers.append("annual_return_below_target")
     result["performance"] = {
         "status": performance_status,
         "cumulative_twr": cumulative,
@@ -655,22 +676,30 @@ def evaluate_inspection(
         priority = (
             priority_override if priority_override is not None else item.get("priority")
         )
+        selected_suggestion = (
+            None
+            if blocking
+            else suggestion_override
+            or item.get("suggestion")
+            or suggestion("hold_and_observe")
+        )
         queue.append(
             {
                 "priority": None if blocking else priority,
                 "priority_label": "평가 차단" if blocking else priority_label(priority),
-                "queue_class": queue_class(priority, blocking=blocking),
+                "queue_class": queue_class(
+                    priority,
+                    blocking=blocking,
+                    suggestion_code=(selected_suggestion or {}).get("code"),
+                ),
                 "kind": item.get("kind"),
                 "identity": item.get("identity"),
                 "status": item.get("status", "Review"),
                 "triggers": list(item.get("triggers") or []),
-                "suggestion": None
-                if blocking
-                else suggestion_override
-                or item.get("suggestion")
-                or suggestion("hold_and_observe"),
+                "suggestion": selected_suggestion,
                 "meaning": item.get("meaning"),
                 "verification_task": item.get("verification_task"),
+                "red_team": _red_team(item, blocking=blocking),
                 "evidence_refs": {
                     **dict(evidence_refs),
                     **(
@@ -780,6 +809,7 @@ def evaluate_inspection(
         )
         if item.get("status") != "OK"
         and item.get("priority") in {"P1", "P2", "P3"}
+        and (item.get("suggestion") or {}).get("code") != "hold_and_observe"
         and result["allocation_state"] in {"complete", "partial"}
     ]
     return result
