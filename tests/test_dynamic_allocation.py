@@ -338,6 +338,96 @@ def test_infeasible_ranges_return_no_policy():
     assert result["proposed_policy"] is None
 
 
+def test_complete_instrument_ranges_create_review_candidate():
+    policy = build_neutral_policy(_active_policy())
+    benchmarks = _series_map([100.0] * 220)
+    instruments = _instrument_series(policy, [100.0] * 220)
+    instruments["KR/069500"] = _candles([220 - index * 0.7 for index in range(220)])
+
+    result = evaluate_dynamic_allocation(
+        benchmarks,
+        instrument_series_by_identity=instruments,
+        active_policy=policy,
+        last_change_at="2026-05-01T00:00:00+00:00",
+        now=NOW,
+    )
+
+    assert result["status"] == "Review"
+    assert result["candidate_state"] == "candidate"
+    assert result["reason"] == "instrument_target_range_change"
+    assert result["proposed_policy"] is not None
+    assert result["instrument_target_reviews"]
+    encoded = json.dumps(result).lower()
+    for forbidden in ("buy", "sell", "execute", "quantity", "price"):
+        assert forbidden not in encoded
+
+
+def test_incomplete_instrument_evidence_prevents_policy_candidate():
+    policy = build_neutral_policy(_active_policy())
+    instruments = _instrument_series(policy, [100.0] * 220)
+    instruments["KR/069500"] = []
+
+    result = evaluate_dynamic_allocation(
+        _series_map([100.0] * 220),
+        instrument_series_by_identity=instruments,
+        active_policy=policy,
+        now=NOW,
+    )
+
+    assert result["status"] == "Watch"
+    assert result["candidate_state"] == "observe"
+    assert result["reason"] == "instrument_evidence_incomplete"
+    assert result["proposed_targets"] == REGIME_TARGETS["neutral"]
+    assert result["proposed_policy"] is None
+    kode = next(
+        item
+        for item in result["instrument_target_reviews"]
+        if item["identity"] == "KR/069500"
+    )
+    assert kode["analysis_range"] is None
+
+
+def test_infeasible_instrument_ranges_require_review_without_policy():
+    policy = build_neutral_policy(_active_policy())
+    instruments = _instrument_series(policy, [100.0] * 220)
+    severe = _candles([220 - index * 0.7 for index in range(220)])
+    for item in policy["instruments"]:
+        if item["layer"] == "core":
+            instruments[f"{item['market_country']}/{item['symbol']}"] = severe
+
+    result = evaluate_dynamic_allocation(
+        _series_map([100.0] * 220),
+        instrument_series_by_identity=instruments,
+        active_policy=policy,
+        now=NOW,
+    )
+
+    assert result["status"] == "Review"
+    assert result["candidate_state"] == "observe"
+    assert result["reason"] == "instrument_target_ranges_infeasible"
+    assert result["proposed_policy"] is None
+
+
+def test_cooldown_applies_when_only_instrument_ranges_change():
+    policy = build_neutral_policy(_active_policy())
+    instruments = _instrument_series(policy, [100.0] * 220)
+    instruments["KR/069500"] = _candles([220 - index * 0.7 for index in range(220)])
+
+    result = evaluate_dynamic_allocation(
+        _series_map([100.0] * 220),
+        instrument_series_by_identity=instruments,
+        active_policy=policy,
+        last_change_at="2026-07-10T00:00:00+00:00",
+        now=NOW,
+    )
+
+    assert result["cooling"] is True
+    assert result["status"] == "Watch"
+    assert result["candidate_state"] == "observe"
+    assert result["reason"] == "allocation_review_cooling_period"
+    assert result["proposed_policy"] is not None
+
+
 def test_broad_positive_trend_proposes_risk_on_without_execution_fields():
     policy = build_neutral_policy(_active_policy())
     values = [100 + index * 0.5 for index in range(220)]

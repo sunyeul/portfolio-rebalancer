@@ -635,10 +635,30 @@ def _same_targets(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
     )
 
 
+def _same_policy_targets(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    if not _same_targets(target_summary(left), target_summary(right)):
+        return False
+    left_items = {_instrument_key(item): item for item in left.get("instruments", [])}
+    right_items = {_instrument_key(item): item for item in right.get("instruments", [])}
+    if set(left_items) != set(right_items):
+        return False
+    return all(
+        math.isclose(
+            float(left_items[identity][bound]),
+            float(right_items[identity][bound]),
+            abs_tol=1e-9,
+        )
+        for identity in left_items
+        for bound in ("minimum", "target", "maximum")
+    )
+
+
 def evaluate_dynamic_allocation(
     series_by_key: Mapping[str, Sequence[Mapping[str, Any]]],
     *,
     active_policy: Mapping[str, Any],
+    instrument_series_by_identity: Mapping[str, Sequence[Mapping[str, Any]]]
+    | None = None,
     last_change_at: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -655,6 +675,7 @@ def evaluate_dynamic_allocation(
             "current_targets": target_summary(active_policy),
             "proposed_targets": None,
             "proposed_policy": None,
+            "instrument_target_reviews": [],
             "verification_task": "활성 정책의 동적 목표 비중 검토 설정을 확인합니다.",
         }
     raw_now = now or datetime.now(timezone.utc)
@@ -687,6 +708,7 @@ def evaluate_dynamic_allocation(
             "current_targets": current_targets,
             "proposed_targets": None,
             "proposed_policy": None,
+            "instrument_target_reviews": [],
             "cooling": False,
             "verification_task": first["verification_task"],
         }
@@ -707,11 +729,70 @@ def evaluate_dynamic_allocation(
         regime = "risk_on"
     else:
         regime = "neutral"
-    proposed_policy = scale_policy_to_regime(active_policy, regime)
-    identities = [_identity(item) for item in proposed_policy["instruments"]]
-    proposed_policy = validate_policy(proposed_policy, identities)
-    proposed_targets = target_summary(proposed_policy)
-    targets_changed = not _same_targets(current_targets, proposed_targets)
+    regime_policy = scale_policy_to_regime(active_policy, regime)
+    identities = [_identity(item) for item in regime_policy["instruments"]]
+    regime_policy = validate_policy(regime_policy, identities)
+    proposed_targets = target_summary(regime_policy)
+    instrument_target_reviews: list[dict[str, Any]] = []
+    instrument_review_reason: str | None = None
+    if instrument_series_by_identity is None:
+        proposed_policy = regime_policy
+    else:
+        instrument_review = build_instrument_target_reviews(
+            instrument_series_by_identity,
+            active_policy=active_policy,
+            regime_policy=regime_policy,
+            now=now_value,
+        )
+        instrument_target_reviews = instrument_review["reviews"]
+        instrument_review_reason = str(instrument_review["reason"])
+        proposed_policy = instrument_review["proposed_policy"]
+        if instrument_review["state"] == "incomplete":
+            return {
+                "status": "Watch",
+                "candidate_state": "observe",
+                "reason": "instrument_evidence_incomplete",
+                "regime": regime,
+                "weighted_trend": weighted_trend,
+                "severe_risk_weight": severe_risk_weight,
+                "benchmarks": evidence,
+                "failed_benchmarks": [],
+                "current_targets": current_targets,
+                "proposed_targets": proposed_targets,
+                "proposed_policy": None,
+                "instrument_target_reviews": instrument_target_reviews,
+                "cooling": False,
+                "cooldown_days": int(config["cooldown_days"]),
+                "verification_task": (
+                    "검증되지 않은 종목 일봉과 수정주가 지원 여부를 확인합니다."
+                ),
+            }
+        if instrument_review["state"] == "infeasible":
+            return {
+                "status": "Review",
+                "candidate_state": "observe",
+                "reason": "instrument_target_ranges_infeasible",
+                "regime": regime,
+                "weighted_trend": weighted_trend,
+                "severe_risk_weight": severe_risk_weight,
+                "benchmarks": evidence,
+                "failed_benchmarks": [],
+                "current_targets": current_targets,
+                "proposed_targets": proposed_targets,
+                "proposed_policy": None,
+                "instrument_target_reviews": instrument_target_reviews,
+                "cooling": False,
+                "cooldown_days": int(config["cooldown_days"]),
+                "verification_task": (
+                    "레이어 목표와 종목 역할이 제시된 레인지 안에서 양립하는지 확인합니다."
+                ),
+            }
+
+    targets_changed = (
+        not _same_targets(current_targets, proposed_targets)
+        if instrument_series_by_identity is None
+        else not _same_policy_targets(active_policy, proposed_policy)
+    )
     last_change = _timestamp(last_change_at)
     cooling = bool(
         last_change is not None
@@ -730,7 +811,11 @@ def evaluate_dynamic_allocation(
     else:
         status = "Review"
         candidate_state = "candidate"
-        reason = "regime_target_change"
+        reason = (
+            "regime_target_change"
+            if not _same_targets(current_targets, proposed_targets)
+            else "instrument_target_range_change"
+        )
     return {
         "status": status,
         "candidate_state": candidate_state,
@@ -743,6 +828,8 @@ def evaluate_dynamic_allocation(
         "current_targets": current_targets,
         "proposed_targets": proposed_targets,
         "proposed_policy": proposed_policy,
+        "instrument_target_reviews": instrument_target_reviews,
+        "instrument_review_reason": instrument_review_reason,
         "cooling": cooling,
         "cooldown_days": int(config["cooldown_days"]),
         "verification_task": "목표 비중 후보의 시장 근거와 정책 범위를 승인 전에 확인합니다.",
