@@ -335,11 +335,17 @@ def test_market_context_persists_composite_candidate_without_activation(monkeypa
         "policy": {
             "cash_reserve": {"target": 0.05},
             "allocation_review": DEFAULT_ALLOCATION_REVIEW,
+            "risk_review": {"lookback_sessions": 252},
+            "instruments": [
+                {"market_country": "KR", "symbol": "069500", "layer": "core"},
+                {"market_country": "US", "symbol": "VOO", "layer": "core"},
+            ],
         },
     }
     monkeypatch.setattr("cli.initialize_database", lambda: None)
     monkeypatch.setattr("cli.get_active_policy", lambda: active)
     monkeypatch.setattr("cli.list_candles", lambda **kwargs: [kwargs])
+    monkeypatch.setattr("cli.list_adjusted_stock_candles", lambda **kwargs: [kwargs])
 
     def evaluate(series, **kwargs):
         captured["series"] = series
@@ -371,6 +377,10 @@ def test_market_context_persists_composite_candidate_without_activation(monkeypa
         "US/QQQ",
         "KR/KOSPI",
         "KR/KOSDAQ",
+    }
+    assert set(captured["instrument_series_by_identity"]) == {
+        "KR/069500",
+        "US/VOO",
     }
     assert captured["active_policy"] is active["policy"]
     assert captured["last_change_at"] == active["created_at"]

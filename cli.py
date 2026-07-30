@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime, timezone
 import json
 import math
 import sys
@@ -46,6 +47,7 @@ from storage.market_store import (
     insert_candles,
     insert_policy_candidate,
     latest_policy_candidate,
+    list_adjusted_stock_candles,
     list_candles,
 )
 from storage.performance_store import (
@@ -230,6 +232,25 @@ def _stored_allocation_series(
             symbol=item["symbol"],
         )
         for item in allocation_benchmarks(policy)
+    }
+
+
+def _stored_instrument_series(
+    policy: Mapping[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    through_at = datetime.now(timezone.utc).isoformat()
+    risk_review = policy.get("risk_review") or {}
+    limit = int(risk_review.get("lookback_sessions", 252))
+    return {
+        f"{str(item['market_country']).upper()}/{str(item['symbol']).upper()}": (
+            list_adjusted_stock_candles(
+                market_country=str(item["market_country"]),
+                symbol=str(item["symbol"]),
+                through_at=through_at,
+                limit=limit,
+            )
+        )
+        for item in policy.get("instruments", [])
     }
 
 
@@ -653,6 +674,7 @@ def market_sync_command(
             context = evaluate_dynamic_allocation(
                 _stored_allocation_series(policy),
                 active_policy=policy,
+                instrument_series_by_identity=_stored_instrument_series(policy),
                 last_change_at=active.get("created_at"),
             )
             if context.get("candidate_state") == "candidate":
@@ -698,6 +720,7 @@ def market_context_command() -> None:
         context = evaluate_dynamic_allocation(
             _stored_allocation_series(policy),
             active_policy=policy,
+            instrument_series_by_identity=_stored_instrument_series(policy),
             last_change_at=active.get("created_at"),
         )
         candidate = None

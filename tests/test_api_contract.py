@@ -86,11 +86,19 @@ def test_market_context_passes_composite_series_and_policy_timestamp(
         "policy": {
             "cash_reserve": {"target": 0.05},
             "allocation_review": DEFAULT_ALLOCATION_REVIEW,
+            "risk_review": {"lookback_sessions": 252},
+            "instruments": [
+                {"market_country": "KR", "symbol": "069500", "layer": "core"},
+                {"market_country": "US", "symbol": "VOO", "layer": "core"},
+            ],
         },
     }
     captured = {}
     monkeypatch.setattr("api.app.get_active_policy", lambda: active)
     monkeypatch.setattr("api.app.list_candles", lambda **_: [])
+    monkeypatch.setattr(
+        "api.app.list_adjusted_stock_candles", lambda **kwargs: [kwargs]
+    )
 
     def fake_evaluate(series, **kwargs):
         captured["series"] = series
@@ -114,6 +122,10 @@ def test_market_context_passes_composite_series_and_policy_timestamp(
         "US/QQQ",
         "KR/KOSPI",
         "KR/KOSDAQ",
+    }
+    assert set(captured["instrument_series_by_identity"]) == {
+        "KR/069500",
+        "US/VOO",
     }
     assert captured["active_policy"] is active["policy"]
     assert captured["last_change_at"] == active["created_at"]

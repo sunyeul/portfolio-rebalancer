@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +31,11 @@ from storage.account_observation_store import (
 )
 from storage.database import initialize_database
 from storage.evaluation_store import list_evaluation_runs, latest_evaluation_run
-from storage.market_store import latest_policy_candidate, list_candles
+from storage.market_store import (
+    latest_policy_candidate,
+    list_adjusted_stock_candles,
+    list_candles,
+)
 from storage.performance_store import get_performance_run, latest_performance_run
 from storage.policy_store import get_active_policy, get_policy_version
 
@@ -114,6 +119,25 @@ def _stored_allocation_series(
             symbol=item["symbol"],
         )
         for item in allocation_benchmarks(policy)
+    }
+
+
+def _stored_instrument_series(
+    policy: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    through_at = datetime.now(timezone.utc).isoformat()
+    risk_review = policy.get("risk_review") or {}
+    limit = int(risk_review.get("lookback_sessions", 252))
+    return {
+        f"{str(item['market_country']).upper()}/{str(item['symbol']).upper()}": (
+            list_adjusted_stock_candles(
+                market_country=str(item["market_country"]),
+                symbol=str(item["symbol"]),
+                through_at=through_at,
+                limit=limit,
+            )
+        )
+        for item in policy.get("instruments", [])
     }
 
 
@@ -420,6 +444,7 @@ def create_app() -> FastAPI:
             context = evaluate_dynamic_allocation(
                 _stored_allocation_series(policy),
                 active_policy=policy,
+                instrument_series_by_identity=_stored_instrument_series(policy),
                 last_change_at=active.get("created_at"),
             )
             return {
