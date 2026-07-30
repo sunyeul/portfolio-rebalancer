@@ -7,6 +7,7 @@ from services.dynamic_allocation import (
     REGIME_TARGETS,
     DynamicAllocationError,
     build_neutral_policy,
+    build_instrument_target_reviews,
     evaluate_dynamic_allocation,
     scale_policy_to_regime,
 )
@@ -158,12 +159,14 @@ def test_build_neutral_policy_requires_each_source_layer():
         build_neutral_policy(policy)
 
 
-def _candles(values, *, end=NOW):
+def _candles(values, *, end=NOW, adjusted=True):
     start = end - timedelta(days=len(values) - 1)
     return [
         {
             "candle_at": (start + timedelta(days=index)).isoformat(),
             "close_price": value,
+            "adjusted": adjusted,
+            "adjusted_supported": adjusted,
         }
         for index, value in enumerate(values)
     ]
@@ -173,6 +176,166 @@ def _series_map(values):
     return {
         key: _candles(values) for key in ("US/SPY", "US/QQQ", "KR/KOSPI", "KR/KOSDAQ")
     }
+
+
+def _instrument_series(policy, values):
+    return {
+        f"{item['market_country']}/{item['symbol']}": _candles(values)
+        for item in policy["instruments"]
+    }
+
+
+def _review_by_identity(result, identity):
+    return next(item for item in result["reviews"] if item["identity"] == identity)
+
+
+def test_instrument_signals_map_to_policy_anchored_ranges():
+    policy = build_neutral_policy(_active_policy())
+    regime_policy = scale_policy_to_regime(policy, "neutral")
+    series = _instrument_series(policy, [100.0] * 220)
+    series["US/VOO"] = _candles([100 + index * 0.1 for index in range(220)])
+    series["US/SCHD"] = _candles([120 - index * 0.05 for index in range(220)])
+    series["KR/069500"] = _candles([220 - index * 0.7 for index in range(220)])
+
+    result = build_instrument_target_reviews(
+        series,
+        active_policy=policy,
+        regime_policy=regime_policy,
+        now=NOW,
+    )
+
+    voo = _review_by_identity(result, "US/VOO")
+    schd = _review_by_identity(result, "US/SCHD")
+    kode = _review_by_identity(result, "KR/069500")
+    spy = _review_by_identity(result, "US/SPY")
+    assert voo["signal"] == "supportive"
+    assert voo["analysis_range"] == {
+        "minimum": pytest.approx(voo["regime_anchor"]),
+        "maximum": pytest.approx(voo["policy_anchor"]["maximum"]),
+    }
+    assert schd["signal"] == "adverse"
+    assert schd["analysis_range"] == {
+        "minimum": pytest.approx(schd["policy_anchor"]["minimum"]),
+        "maximum": pytest.approx(schd["regime_anchor"]),
+    }
+    assert spy["signal"] == "neutral"
+    assert spy["analysis_range"] == {
+        "minimum": pytest.approx(spy["policy_anchor"]["minimum"]),
+        "maximum": pytest.approx(spy["policy_anchor"]["maximum"]),
+    }
+    assert kode["signal"] == "severe"
+    assert kode["analysis_range"] == {
+        "minimum": 0.0,
+        "maximum": pytest.approx(kode["policy_anchor"]["minimum"]),
+    }
+    assert kode["role_review_required"] is True
+
+
+def test_severe_volatility_precedes_trend_signal():
+    policy = build_neutral_policy(_active_policy())
+    regime_policy = scale_policy_to_regime(policy, "neutral")
+    series = _instrument_series(policy, [100.0] * 220)
+    series["US/VOO"] = _candles(
+        [100.0 if index % 2 == 0 else 140.0 for index in range(220)]
+    )
+
+    result = build_instrument_target_reviews(
+        series,
+        active_policy=policy,
+        regime_policy=regime_policy,
+        now=NOW,
+    )
+
+    voo = _review_by_identity(result, "US/VOO")
+    assert voo["signal"] == "severe"
+    assert voo["evidence"]["realized_volatility"] >= 0.30
+
+
+def test_role_specific_drawdown_thresholds_are_applied():
+    policy = build_neutral_policy(_active_policy())
+    regime_policy = scale_policy_to_regime(policy, "neutral")
+    series = _instrument_series(policy, [100.0] * 220)
+    declining = _candles([100 - index * 0.1 for index in range(220)])
+    series["US/VOO"] = declining
+    series["US/GOOGL"] = declining
+
+    result = build_instrument_target_reviews(
+        series,
+        active_policy=policy,
+        regime_policy=regime_policy,
+        now=NOW,
+    )
+
+    assert _review_by_identity(result, "US/VOO")["signal"] == "adverse"
+    assert _review_by_identity(result, "US/GOOGL")["signal"] == "severe"
+
+
+def test_unadjusted_instrument_evidence_blocks_policy_candidate():
+    policy = build_neutral_policy(_active_policy())
+    regime_policy = scale_policy_to_regime(policy, "neutral")
+    series = _instrument_series(policy, [100.0] * 220)
+    series["US/VOO"] = _candles([100.0] * 220, adjusted=False)
+
+    result = build_instrument_target_reviews(
+        series,
+        active_policy=policy,
+        regime_policy=regime_policy,
+        now=NOW,
+    )
+
+    voo = _review_by_identity(result, "US/VOO")
+    assert result["state"] == "incomplete"
+    assert result["proposed_policy"] is None
+    assert voo["evidence_state"] == "market_adjustment_unsupported"
+    assert voo["analysis_range"] is None
+    assert voo["normalization_reference"] is None
+
+
+def test_complete_ranges_fit_each_layer_target_inside_published_bounds():
+    policy = build_neutral_policy(_active_policy())
+    regime_policy = scale_policy_to_regime(policy, "neutral")
+    series = _instrument_series(policy, [100.0] * 220)
+    series["KR/069500"] = _candles([220 - index * 0.7 for index in range(220)])
+
+    result = build_instrument_target_reviews(
+        series,
+        active_policy=policy,
+        regime_policy=regime_policy,
+        now=NOW,
+    )
+
+    assert result["state"] == "complete"
+    proposed = result["proposed_policy"]
+    assert proposed is not None
+    for layer in ("core", "satellite", "experiment"):
+        assert _layer_total(proposed, layer) == pytest.approx(
+            proposed["layers"][layer]["target"]
+        )
+    for review in result["reviews"]:
+        reference = review["normalization_reference"]
+        assert review["analysis_range"]["minimum"] <= reference
+        assert reference <= review["analysis_range"]["maximum"]
+
+
+def test_infeasible_ranges_return_no_policy():
+    policy = build_neutral_policy(_active_policy())
+    regime_policy = scale_policy_to_regime(policy, "neutral")
+    series = _instrument_series(policy, [100.0] * 220)
+    severe = _candles([220 - index * 0.7 for index in range(220)])
+    for item in policy["instruments"]:
+        if item["layer"] == "core":
+            series[f"{item['market_country']}/{item['symbol']}"] = severe
+
+    result = build_instrument_target_reviews(
+        series,
+        active_policy=policy,
+        regime_policy=regime_policy,
+        now=NOW,
+    )
+
+    assert result["state"] == "infeasible"
+    assert result["reason"] == "instrument_target_ranges_infeasible"
+    assert result["proposed_policy"] is None
 
 
 def test_broad_positive_trend_proposes_risk_on_without_execution_fields():

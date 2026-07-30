@@ -402,6 +402,224 @@ def _series_evidence(
     }
 
 
+def _instrument_key(item: Mapping[str, Any]) -> str:
+    return "/".join(_identity(item))
+
+
+def _instrument_signal(evidence: Mapping[str, Any]) -> str:
+    if evidence["severe_risk"]:
+        return "severe"
+    if evidence["trend_direction"] < 0:
+        return "adverse"
+    if evidence["trend_direction"] > 0:
+        return "supportive"
+    return "neutral"
+
+
+def _analysis_range(
+    signal: str,
+    policy_item: Mapping[str, Any],
+    regime_item: Mapping[str, Any],
+) -> dict[str, float]:
+    minimum = float(policy_item["minimum"])
+    target = float(regime_item["target"])
+    maximum = float(policy_item["maximum"])
+    lower, upper = {
+        "supportive": (target, maximum),
+        "neutral": (minimum, maximum),
+        "adverse": (minimum, target),
+        "severe": (0.0, minimum),
+    }[signal]
+    return {"minimum": lower, "maximum": upper}
+
+
+def _fit_layer_references(
+    reviews: Sequence[dict[str, Any]], layer_target: float
+) -> dict[str, float] | None:
+    ordered = sorted(reviews, key=lambda item: item["identity"])
+    lower_total = sum(float(item["analysis_range"]["minimum"]) for item in ordered)
+    upper_total = sum(float(item["analysis_range"]["maximum"]) for item in ordered)
+    if lower_total > layer_target + 1e-9 or upper_total < layer_target - 1e-9:
+        return None
+
+    values = {
+        item["identity"]: min(
+            max(
+                float(item["regime_anchor"]),
+                float(item["analysis_range"]["minimum"]),
+            ),
+            float(item["analysis_range"]["maximum"]),
+        )
+        for item in ordered
+    }
+    difference = layer_target - sum(values.values())
+    if abs(difference) > 1e-12:
+        increasing = difference > 0
+        capacities = {
+            item["identity"]: (
+                float(item["analysis_range"]["maximum"]) - values[item["identity"]]
+                if increasing
+                else values[item["identity"]] - float(item["analysis_range"]["minimum"])
+            )
+            for item in ordered
+        }
+        total_capacity = sum(capacities.values())
+        if total_capacity + 1e-9 < abs(difference):
+            return None
+        for item in ordered:
+            identity = item["identity"]
+            share = capacities[identity] / total_capacity if total_capacity else 0.0
+            values[identity] += difference * share
+
+    rounded = {identity: round(value, 12) for identity, value in values.items()}
+    residual = round(layer_target - sum(rounded.values()), 12)
+    if residual:
+        for item in reversed(ordered):
+            identity = item["identity"]
+            candidate = rounded[identity] + residual
+            lower = float(item["analysis_range"]["minimum"])
+            upper = float(item["analysis_range"]["maximum"])
+            if lower - 1e-12 <= candidate <= upper + 1e-12:
+                rounded[identity] = round(candidate, 12)
+                break
+        else:
+            return None
+    return rounded
+
+
+def build_instrument_target_reviews(
+    series_by_identity: Mapping[str, Sequence[Mapping[str, Any]]],
+    *,
+    active_policy: Mapping[str, Any],
+    regime_policy: Mapping[str, Any],
+    now: datetime,
+) -> dict[str, Any]:
+    """Build evidence-backed review ranges without activating a policy."""
+    policy_items = {
+        _instrument_key(item): item for item in active_policy.get("instruments", [])
+    }
+    regime_items = {
+        _instrument_key(item): item for item in regime_policy.get("instruments", [])
+    }
+    allocation_config = active_policy.get("allocation_review")
+    risk_config = active_policy.get("risk_review")
+    if not isinstance(allocation_config, Mapping) or not isinstance(
+        risk_config, Mapping
+    ):
+        raise DynamicAllocationError(
+            "allocation_review and risk_review policy configuration are required"
+        )
+    drawdown_thresholds = risk_config.get("instrument_drawdown_review")
+    if not isinstance(drawdown_thresholds, Mapping):
+        raise DynamicAllocationError("instrument drawdown thresholds are required")
+
+    reviews: list[dict[str, Any]] = []
+    incomplete = False
+    for identity in sorted(policy_items):
+        policy_item = policy_items[identity]
+        regime_item = regime_items.get(identity)
+        if regime_item is None:
+            raise DynamicAllocationError(
+                f"regime policy instrument missing: {identity}"
+            )
+        candles = list(series_by_identity.get(identity, []))
+        if candles and any(
+            not bool(candle.get("adjusted"))
+            or not bool(candle.get("adjusted_supported"))
+            for candle in candles
+        ):
+            evidence = _quality_failure(
+                "market_adjustment_unsupported",
+                history_points=len(candles),
+                verification_task=("Toss 종목 일봉의 수정주가 지원 여부를 확인합니다."),
+            )
+        else:
+            layer = str(policy_item["layer"])
+            evidence_config = {
+                "minimum_history_points": risk_config["minimum_history_points"],
+                "max_data_age_days": risk_config["max_data_age_days"],
+                "max_gap_days": risk_config["max_gap_days"],
+                "drawdown_review": drawdown_thresholds[layer],
+                "volatility_review": allocation_config["volatility_review"],
+            }
+            evidence = _series_evidence(candles, now=now, config=evidence_config)
+
+        policy_anchor = {
+            bound: float(policy_item[bound])
+            for bound in ("minimum", "target", "maximum")
+        }
+        signal = _instrument_signal(evidence) if evidence["valid"] else None
+        analysis_range = (
+            _analysis_range(signal, policy_item, regime_item) if signal else None
+        )
+        incomplete = incomplete or not evidence["valid"]
+        reviews.append(
+            {
+                "identity": identity,
+                "layer": str(policy_item["layer"]),
+                "policy_anchor": policy_anchor,
+                "regime_anchor": float(regime_item["target"]),
+                "evidence_state": "complete"
+                if evidence["valid"]
+                else evidence["reason"],
+                "evidence": evidence,
+                "signal": signal,
+                "reasons": [
+                    f"instrument_signal_{signal}" if signal else evidence["reason"]
+                ],
+                "analysis_range": analysis_range,
+                "normalization_reference": None,
+                "role_review_required": bool(
+                    signal == "severe" and policy_item["layer"] == "core"
+                ),
+                "confidence": "supported" if evidence["valid"] else "unavailable",
+                "verification_task": evidence["verification_task"],
+            }
+        )
+
+    if incomplete:
+        return {
+            "state": "incomplete",
+            "reason": "instrument_evidence_incomplete",
+            "reviews": reviews,
+            "proposed_policy": None,
+        }
+
+    references: dict[str, float] = {}
+    for layer in LAYERS:
+        layer_reviews = [item for item in reviews if item["layer"] == layer]
+        fitted = _fit_layer_references(
+            layer_reviews, float(regime_policy["layers"][layer]["target"])
+        )
+        if fitted is None:
+            return {
+                "state": "infeasible",
+                "reason": "instrument_target_ranges_infeasible",
+                "reviews": reviews,
+                "proposed_policy": None,
+            }
+        references.update(fitted)
+
+    proposed_policy = deepcopy(dict(regime_policy))
+    review_by_identity = {item["identity"]: item for item in reviews}
+    for item in proposed_policy["instruments"]:
+        identity = _instrument_key(item)
+        review = review_by_identity[identity]
+        reference = references[identity]
+        review["normalization_reference"] = reference
+        item["minimum"] = float(review["analysis_range"]["minimum"])
+        item["target"] = reference
+        item["maximum"] = float(review["analysis_range"]["maximum"])
+    identities = [_identity(item) for item in proposed_policy["instruments"]]
+    proposed_policy = validate_policy(proposed_policy, identities)
+    return {
+        "state": "complete",
+        "reason": "instrument_target_ranges_complete",
+        "reviews": reviews,
+        "proposed_policy": proposed_policy,
+    }
+
+
 def _same_targets(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
     return math.isclose(
         float(left["cash_target"]),
