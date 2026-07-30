@@ -735,6 +735,11 @@ def market_context_command() -> None:
                     },
                 }
             )
+        candidate_evaluation = (
+            preview_inspection(context["proposed_policy"])
+            if isinstance(context.get("proposed_policy"), dict)
+            else None
+        )
         _emit_json(
             {
                 "ok": True,
@@ -743,6 +748,7 @@ def market_context_command() -> None:
                 "policy_version_id": active["id"],
                 "context": context,
                 "candidate": candidate,
+                "candidate_evaluation": candidate_evaluation,
                 "latest_candidate": latest_policy_candidate(
                     active["account_alias"], active["id"]
                 ),

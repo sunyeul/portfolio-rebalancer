@@ -327,6 +327,7 @@ def test_web_rejects_non_loopback_binding():
 
 def test_market_context_persists_composite_candidate_without_activation(monkeypatch):
     candidate_calls = []
+    preview_calls = []
     captured = {}
     active = {
         "id": 8,
@@ -355,6 +356,7 @@ def test_market_context_persists_composite_candidate_without_activation(monkeypa
             "candidate_state": "candidate",
             "regime": "risk_on",
             "verification_task": "verify",
+            "proposed_policy": {"risk_review": {"lookback_sessions": 252}},
         }
 
     monkeypatch.setattr("cli.evaluate_dynamic_allocation", evaluate)
@@ -365,12 +367,27 @@ def test_market_context_persists_composite_candidate_without_activation(monkeypa
 
     monkeypatch.setattr("cli.insert_policy_candidate", persist)
     monkeypatch.setattr("cli.latest_policy_candidate", lambda *args: {"id": 3})
+    monkeypatch.setattr(
+        "cli.preview_inspection",
+        lambda policy: preview_calls.append(policy)
+        or {
+            "persisted": False,
+            "snapshot_id": 10,
+            "evaluation": {"allocation_state": "complete"},
+        },
+    )
 
     result = runner.invoke(app, ["market", "context"])
 
     assert result.exit_code == 0
     payload = _payload(result)
     assert payload["candidate"]["id"] == 3
+    assert payload["candidate_evaluation"] == {
+        "persisted": False,
+        "snapshot_id": 10,
+        "evaluation": {"allocation_state": "complete"},
+    }
+    assert preview_calls == [{"risk_review": {"lookback_sessions": 252}}]
     assert candidate_calls[0]["base_policy_version_id"] == 8
     assert set(captured["series"]) == {
         "US/SPY",
@@ -385,6 +402,42 @@ def test_market_context_persists_composite_candidate_without_activation(monkeypa
     assert captured["active_policy"] is active["policy"]
     assert captured["last_change_at"] == active["created_at"]
     assert payload["activation"] == "human approval required; active policy unchanged"
+
+
+def test_market_context_returns_null_preview_without_proposed_policy(monkeypatch):
+    active = {
+        "id": 8,
+        "account_alias": "toss-brokerage",
+        "created_at": "2026-07-01T00:00:00+00:00",
+        "policy": {
+            "allocation_review": DEFAULT_ALLOCATION_REVIEW,
+            "risk_review": {"lookback_sessions": 252},
+            "instruments": [],
+        },
+    }
+    monkeypatch.setattr("cli.initialize_database", lambda: None)
+    monkeypatch.setattr("cli.get_active_policy", lambda: active)
+    monkeypatch.setattr("cli.list_candles", lambda **kwargs: [kwargs])
+    monkeypatch.setattr("cli.list_adjusted_stock_candles", lambda **kwargs: [])
+    monkeypatch.setattr(
+        "cli.evaluate_dynamic_allocation",
+        lambda *args, **kwargs: {
+            "status": "Watch",
+            "candidate_state": "observe",
+            "proposed_policy": None,
+            "verification_task": "verify",
+        },
+    )
+    monkeypatch.setattr("cli.latest_policy_candidate", lambda *args: None)
+    monkeypatch.setattr(
+        "cli.preview_inspection",
+        lambda _: (_ for _ in ()).throw(AssertionError("preview must not run")),
+    )
+
+    result = runner.invoke(app, ["market", "context"])
+
+    assert result.exit_code == 0
+    assert _payload(result)["candidate_evaluation"] is None
 
 
 def test_market_sync_deduplicates_required_stocks_and_collects_both_indicators(

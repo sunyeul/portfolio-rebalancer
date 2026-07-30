@@ -23,6 +23,7 @@ from services.dynamic_allocation import (
     allocation_benchmarks,
     evaluate_dynamic_allocation,
 )
+from services.inspection_service import preview_inspection
 from services.policy_preflight import build_policy_preflight
 from storage.account_observation_store import (
     latest_complete,
@@ -447,6 +448,11 @@ def create_app() -> FastAPI:
                 instrument_series_by_identity=_stored_instrument_series(policy),
                 last_change_at=active.get("created_at"),
             )
+            candidate_evaluation = (
+                preview_inspection(context["proposed_policy"])
+                if isinstance(context.get("proposed_policy"), dict)
+                else None
+            )
             return {
                 "ok": True,
                 "data": {
@@ -455,6 +461,7 @@ def create_app() -> FastAPI:
                     ],
                     "policy_version_id": active["id"],
                     "context": context,
+                    "candidate_evaluation": candidate_evaluation,
                     "latest_candidate": latest_policy_candidate(
                         active["account_alias"], active["id"]
                     ),

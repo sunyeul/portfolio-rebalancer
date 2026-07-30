@@ -429,12 +429,16 @@ def _analysis_range(
     minimum = float(policy_item["minimum"])
     target = float(regime_item["target"])
     maximum = float(policy_item["maximum"])
-    lower, upper = {
-        "supportive": (target, maximum),
-        "neutral": (minimum, maximum),
-        "adverse": (minimum, target),
-        "severe": (0.0, minimum),
-    }[signal]
+    if signal == "severe":
+        lower, upper = (
+            (minimum, target) if str(policy_item["layer"]) == "core" else (0.0, minimum)
+        )
+    else:
+        lower, upper = {
+            "supportive": (target, maximum),
+            "neutral": (minimum, maximum),
+            "adverse": (minimum, target),
+        }[signal]
     return {"minimum": lower, "maximum": upper}
 
 

@@ -237,8 +237,8 @@ def test_instrument_signals_map_to_policy_anchored_ranges():
     }
     assert kode["signal"] == "severe"
     assert kode["analysis_range"] == {
-        "minimum": 0.0,
-        "maximum": pytest.approx(kode["policy_anchor"]["minimum"]),
+        "minimum": pytest.approx(kode["policy_anchor"]["minimum"]),
+        "maximum": pytest.approx(kode["regime_anchor"]),
     }
     assert kode["role_review_required"] is True
 
@@ -337,6 +337,7 @@ def test_role_specific_drawdown_thresholds_are_applied():
     declining = _candles([100 - index * 0.1 for index in range(220)])
     series["US/VOO"] = declining
     series["US/GOOGL"] = declining
+    series["US/SOXL"] = declining
 
     result = build_instrument_target_reviews(
         series,
@@ -346,7 +347,18 @@ def test_role_specific_drawdown_thresholds_are_applied():
     )
 
     assert _review_by_identity(result, "US/VOO")["signal"] == "adverse"
-    assert _review_by_identity(result, "US/GOOGL")["signal"] == "severe"
+    googl = _review_by_identity(result, "US/GOOGL")
+    soxl = _review_by_identity(result, "US/SOXL")
+    assert googl["signal"] == "severe"
+    assert googl["analysis_range"] == {
+        "minimum": 0.0,
+        "maximum": pytest.approx(googl["policy_anchor"]["minimum"]),
+    }
+    assert soxl["signal"] == "severe"
+    assert soxl["analysis_range"] == {
+        "minimum": 0.0,
+        "maximum": pytest.approx(soxl["policy_anchor"]["minimum"]),
+    }
 
 
 def test_unadjusted_instrument_evidence_blocks_policy_candidate():
@@ -402,7 +414,7 @@ def test_infeasible_ranges_return_no_policy():
     series = _instrument_series(policy, [100.0] * 220)
     severe = _candles([220 - index * 0.7 for index in range(220)])
     for item in policy["instruments"]:
-        if item["layer"] == "core":
+        if item["layer"] == "satellite":
             series[f"{item['market_country']}/{item['symbol']}"] = severe
 
     result = build_instrument_target_reviews(
@@ -471,7 +483,7 @@ def test_infeasible_instrument_ranges_require_review_without_policy():
     instruments = _instrument_series(policy, [100.0] * 220)
     severe = _candles([220 - index * 0.7 for index in range(220)])
     for item in policy["instruments"]:
-        if item["layer"] == "core":
+        if item["layer"] == "satellite":
             instruments[f"{item['market_country']}/{item['symbol']}"] = severe
 
     result = evaluate_dynamic_allocation(

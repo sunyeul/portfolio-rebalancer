@@ -117,6 +117,7 @@ def test_market_context_passes_composite_series_and_policy_timestamp(
     response = client.get("/api/market-context")
 
     assert response.status_code == 200
+    assert response.json()["data"]["candidate_evaluation"] is None
     assert set(captured["series"]) == {
         "US/SPY",
         "US/QQQ",
@@ -129,6 +130,54 @@ def test_market_context_passes_composite_series_and_policy_timestamp(
     }
     assert captured["active_policy"] is active["policy"]
     assert captured["last_change_at"] == active["created_at"]
+
+
+def test_market_context_returns_nonpersisted_candidate_preview(monkeypatch, tmp_path):
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "api.sqlite3"))
+    active = {
+        "id": 4,
+        "account_alias": "toss-brokerage",
+        "created_at": "2026-07-20T00:00:00+00:00",
+        "policy": {
+            "cash_reserve": {"target": 0.05},
+            "allocation_review": DEFAULT_ALLOCATION_REVIEW,
+            "risk_review": {"lookback_sessions": 252},
+            "instruments": [],
+        },
+    }
+    preview_calls = []
+    monkeypatch.setattr("api.app.get_active_policy", lambda: active)
+    monkeypatch.setattr("api.app.list_candles", lambda **_: [])
+    monkeypatch.setattr("api.app.list_adjusted_stock_candles", lambda **_: [])
+    monkeypatch.setattr(
+        "api.app.evaluate_dynamic_allocation",
+        lambda *args, **kwargs: {
+            "status": "Review",
+            "candidate_state": "candidate",
+            "proposed_policy": {"risk_review": {"lookback_sessions": 252}},
+        },
+    )
+    monkeypatch.setattr(
+        "api.app.preview_inspection",
+        lambda policy: preview_calls.append(policy)
+        or {
+            "persisted": False,
+            "snapshot_id": 10,
+            "evaluation": {"allocation_state": "complete"},
+        },
+    )
+    monkeypatch.setattr("api.app.latest_policy_candidate", lambda *args: None)
+    client = TestClient(create_app())
+
+    response = client.get("/api/market-context")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["candidate_evaluation"] == {
+        "persisted": False,
+        "snapshot_id": 10,
+        "evaluation": {"allocation_state": "complete"},
+    }
+    assert preview_calls == [{"risk_review": {"lookback_sessions": 252}}]
 
 
 def test_api_returns_persisted_phase5_evidence_without_reclassification(
