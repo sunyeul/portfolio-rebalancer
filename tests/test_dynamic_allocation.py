@@ -164,6 +164,8 @@ def _candles(values, *, end=NOW, adjusted=True):
     return [
         {
             "candle_at": (start + timedelta(days=index)).isoformat(),
+            "high_price": value + 1.0,
+            "low_price": max(0.01, value - 1.0),
             "close_price": value,
             "adjusted": adjusted,
             "adjusted_supported": adjusted,
@@ -187,6 +189,16 @@ def _instrument_series(policy, values):
 
 def _review_by_identity(result, identity):
     return next(item for item in result["reviews"] if item["identity"] == identity)
+
+
+def _technical(direction, extension="inside"):
+    return {
+        "state": "complete",
+        "reason": "technical_evidence_complete",
+        "history_points": 220,
+        "ichimoku": {"direction": direction},
+        "bollinger": {"extension": extension},
+    }
 
 
 def test_instrument_signals_map_to_policy_anchored_ranges():
@@ -229,6 +241,73 @@ def test_instrument_signals_map_to_policy_anchored_ranges():
         "maximum": pytest.approx(kode["policy_anchor"]["minimum"]),
     }
     assert kode["role_review_required"] is True
+
+
+def test_moving_trend_and_ichimoku_must_agree(monkeypatch):
+    policy = build_neutral_policy(_active_policy())
+    series = _instrument_series(policy, [100 + index * 0.1 for index in range(220)])
+    monkeypatch.setattr(
+        "services.dynamic_allocation.build_technical_evidence",
+        lambda _: _technical(-1),
+    )
+
+    result = build_instrument_target_reviews(
+        series,
+        active_policy=policy,
+        regime_policy=scale_policy_to_regime(policy, "neutral"),
+        now=NOW,
+    )
+
+    voo = _review_by_identity(result, "US/VOO")
+    assert voo["signal"] == "neutral"
+    assert "technical_trend_conflict" in voo["reasons"]
+
+
+def test_bollinger_extension_changes_confidence_not_direction(monkeypatch):
+    policy = build_neutral_policy(_active_policy())
+    series = _instrument_series(policy, [100 + index * 0.1 for index in range(220)])
+    monkeypatch.setattr(
+        "services.dynamic_allocation.build_technical_evidence",
+        lambda _: _technical(1, "above"),
+    )
+
+    result = build_instrument_target_reviews(
+        series,
+        active_policy=policy,
+        regime_policy=scale_policy_to_regime(policy, "neutral"),
+        now=NOW,
+    )
+
+    voo = _review_by_identity(result, "US/VOO")
+    assert voo["signal"] == "supportive"
+    assert voo["confidence"] == "caution"
+    assert "bollinger_extension_above" in voo["reasons"]
+
+
+def test_unavailable_technical_evidence_blocks_policy_candidate(monkeypatch):
+    policy = build_neutral_policy(_active_policy())
+    series = _instrument_series(policy, [100.0] * 220)
+    monkeypatch.setattr(
+        "services.dynamic_allocation.build_technical_evidence",
+        lambda _: {
+            "state": "unavailable",
+            "reason": "technical_data_invalid",
+            "history_points": 220,
+        },
+    )
+
+    result = build_instrument_target_reviews(
+        series,
+        active_policy=policy,
+        regime_policy=scale_policy_to_regime(policy, "neutral"),
+        now=NOW,
+    )
+
+    assert result["state"] == "incomplete"
+    assert result["proposed_policy"] is None
+    assert _review_by_identity(result, "US/VOO")["evidence_state"] == (
+        "technical_data_invalid"
+    )
 
 
 def test_severe_volatility_precedes_trend_signal():

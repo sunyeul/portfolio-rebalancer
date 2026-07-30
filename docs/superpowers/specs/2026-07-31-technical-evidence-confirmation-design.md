@@ -128,7 +128,7 @@ Each valid instrument review adds:
     "state": "complete",
     "ichimoku": {
       "direction": 0,
-      "price_position": "inside",
+      "cloud_position": "inside",
       "line_alignment": "mixed"
     },
     "bollinger": {

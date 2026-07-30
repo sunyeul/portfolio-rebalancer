@@ -13,6 +13,7 @@ from statistics import mean, pstdev
 from typing import Any, Mapping, Sequence
 
 from services.policy_validation import LAYERS, validate_policy
+from services.technical_evidence import build_technical_evidence
 
 
 REGIME_TARGETS: dict[str, dict[str, Any]] = {
@@ -406,12 +407,16 @@ def _instrument_key(item: Mapping[str, Any]) -> str:
     return "/".join(_identity(item))
 
 
-def _instrument_signal(evidence: Mapping[str, Any]) -> str:
+def _instrument_signal(
+    evidence: Mapping[str, Any], technical: Mapping[str, Any]
+) -> str:
     if evidence["severe_risk"]:
         return "severe"
-    if evidence["trend_direction"] < 0:
+    moving = int(evidence["trend_direction"])
+    ichimoku = int(technical["ichimoku"]["direction"])
+    if moving == ichimoku == -1:
         return "adverse"
-    if evidence["trend_direction"] > 0:
+    if moving == ichimoku == 1:
         return "supportive"
     return "neutral"
 
@@ -544,14 +549,50 @@ def build_instrument_target_reviews(
             }
             evidence = _series_evidence(candles, now=now, config=evidence_config)
 
+        technical_evidence: dict[str, Any]
+        if evidence["valid"]:
+            technical_evidence = build_technical_evidence(candles)
+            if technical_evidence["state"] != "complete":
+                evidence = {
+                    **evidence,
+                    "valid": False,
+                    "reason": technical_evidence["reason"],
+                    "verification_task": (
+                        "Toss 종목 일봉의 고가·저가·종가와 기술지표 이력을 확인합니다."
+                    ),
+                }
+        else:
+            technical_evidence = {
+                "state": "unavailable",
+                "reason": evidence["reason"],
+                "history_points": int(evidence.get("history_points", 0)),
+            }
+        evidence = {**evidence, "technical_evidence": technical_evidence}
+
         policy_anchor = {
             bound: float(policy_item[bound])
             for bound in ("minimum", "target", "maximum")
         }
-        signal = _instrument_signal(evidence) if evidence["valid"] else None
+        signal = (
+            _instrument_signal(evidence, technical_evidence)
+            if evidence["valid"]
+            else None
+        )
         analysis_range = (
             _analysis_range(signal, policy_item, regime_item) if signal else None
         )
+        reasons = [f"instrument_signal_{signal}"] if signal else [evidence["reason"]]
+        extension = (
+            str(technical_evidence["bollinger"]["extension"])
+            if evidence["valid"]
+            else None
+        )
+        if evidence["valid"] and int(evidence["trend_direction"]) != int(
+            technical_evidence["ichimoku"]["direction"]
+        ):
+            reasons.append("technical_trend_conflict")
+        if extension and extension != "inside":
+            reasons.append(f"bollinger_extension_{extension}")
         incomplete = incomplete or not evidence["valid"]
         reviews.append(
             {
@@ -563,16 +604,21 @@ def build_instrument_target_reviews(
                 if evidence["valid"]
                 else evidence["reason"],
                 "evidence": evidence,
+                "technical_evidence": technical_evidence,
                 "signal": signal,
-                "reasons": [
-                    f"instrument_signal_{signal}" if signal else evidence["reason"]
-                ],
+                "reasons": reasons,
                 "analysis_range": analysis_range,
                 "normalization_reference": None,
                 "role_review_required": bool(
                     signal == "severe" and policy_item["layer"] == "core"
                 ),
-                "confidence": "supported" if evidence["valid"] else "unavailable",
+                "confidence": (
+                    "caution"
+                    if evidence["valid"] and extension != "inside"
+                    else "supported"
+                    if evidence["valid"]
+                    else "unavailable"
+                ),
                 "verification_task": evidence["verification_task"],
             }
         )

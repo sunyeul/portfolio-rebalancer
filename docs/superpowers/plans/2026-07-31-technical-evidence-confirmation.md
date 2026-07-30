@@ -48,7 +48,7 @@ def test_positive_ichimoku_and_bollinger_values_are_standard():
     deviation = pstdev(latest)
     assert result["state"] == "complete"
     assert result["ichimoku"]["direction"] == 1
-    assert result["ichimoku"]["price_position"] == "above"
+    assert result["ichimoku"]["cloud_position"] == "above"
     assert result["ichimoku"]["line_alignment"] == "positive"
     assert result["bollinger"]["middle"] == pytest.approx(middle)
     assert result["bollinger"]["upper"] == pytest.approx(middle + 2 * deviation)
@@ -58,7 +58,7 @@ def test_positive_ichimoku_and_bollinger_values_are_standard():
 def test_negative_ichimoku_direction_is_exposed():
     result = build_technical_evidence(_candles([200.0 - index for index in range(78)]))
     assert result["ichimoku"]["direction"] == -1
-    assert result["ichimoku"]["price_position"] == "below"
+    assert result["ichimoku"]["cloud_position"] == "below"
     assert result["ichimoku"]["line_alignment"] == "negative"
 
 
@@ -161,7 +161,7 @@ def build_technical_evidence(
     cloud_top = max(span_a, span_b)
     cloud_bottom = min(span_a, span_b)
     latest = close_values[-1]
-    price_position = (
+    cloud_position = (
         "above" if latest > cloud_top else "below" if latest < cloud_bottom else "inside"
     )
     line_alignment = (
@@ -169,9 +169,9 @@ def build_technical_evidence(
     )
     direction = (
         1
-        if price_position == "above" and line_alignment == "positive"
+        if cloud_position == "above" and line_alignment == "positive"
         else -1
-        if price_position == "below" and line_alignment == "negative"
+        if cloud_position == "below" and line_alignment == "negative"
         else 0
     )
 
@@ -194,7 +194,7 @@ def build_technical_evidence(
             "span_b": span_b,
             "cloud_top": cloud_top,
             "cloud_bottom": cloud_bottom,
-            "price_position": price_position,
+            "cloud_position": cloud_position,
             "line_alignment": line_alignment,
             "direction": direction,
         },

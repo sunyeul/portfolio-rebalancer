@@ -25,7 +25,7 @@ def test_positive_ichimoku_and_bollinger_values_are_standard():
     deviation = pstdev(latest)
     assert result["state"] == "complete"
     assert result["ichimoku"]["direction"] == 1
-    assert result["ichimoku"]["price_position"] == "above"
+    assert result["ichimoku"]["cloud_position"] == "above"
     assert result["ichimoku"]["line_alignment"] == "positive"
     assert result["bollinger"]["middle"] == pytest.approx(middle)
     assert result["bollinger"]["upper"] == pytest.approx(middle + 2 * deviation)
@@ -36,7 +36,7 @@ def test_negative_ichimoku_direction_is_exposed():
     result = build_technical_evidence(_candles([200.0 - index for index in range(78)]))
 
     assert result["ichimoku"]["direction"] == -1
-    assert result["ichimoku"]["price_position"] == "below"
+    assert result["ichimoku"]["cloud_position"] == "below"
     assert result["ichimoku"]["line_alignment"] == "negative"
 
 
