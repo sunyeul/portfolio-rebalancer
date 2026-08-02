@@ -29,10 +29,8 @@ uv sync
 task toss-health
 task toss-sync
 uv run ips-pilot toss-snapshots --latest
-uv run ips-pilot account-view --snapshot-id 4
 uv run ips-pilot policy show --active
 uv run ips-pilot inspection run
-uv run ips-pilot inspection show --latest
 bun install --cwd frontend
 bun run --cwd frontend build
 task toss-dashboard-api
@@ -42,7 +40,7 @@ task toss-dashboard-api
 
 ## 계좌 관찰과 정책 레이어
 
-`account-view`는 특정 완료 스냅샷을 현금 비중, 투자자산 비중, 계층별 비중, 분류 커버리지로 투영합니다. 종목의 `core`·`satellite`·`experiment` 레이어는 활성 IPS 정책의 `instruments[].layer`에서만 읽으며, 정책에 없는 종목에 임의의 계층이나 상태를 추론하지 않습니다.
+검사는 활성 IPS 정책의 `instruments[].layer`만 읽어 `core`·`satellite`·`experiment` 비중을 평가합니다. 정책에 없는 종목에는 임의의 계층이나 상태를 추론하지 않습니다.
 
 ```bash
 uv run ips-pilot policy template > toss-policy-template.json
@@ -62,7 +60,6 @@ CONFIRMED_PRINCIPAL_KRW=...
 uv run ips-pilot performance baseline-confirm --snapshot-id 4 --expected-principal-krw "$CONFIRMED_PRINCIPAL_KRW"
 uv run ips-pilot performance refresh
 uv run ips-pilot performance candidates
-uv run ips-pilot performance history --latest
 ```
 
 설명되지 않은 현금 이동은 후보로 남으며 자동으로 입금·출금으로 확정하지 않습니다. 불완전·오래된·실패 스냅샷은 성과 포인트가 되지 않습니다.
@@ -90,16 +87,13 @@ Bun으로 의존성을 고정 설치하고 `frontend/dist`를 다시 생성합�
 
 정책 파일은 앱이 관리하는 목표·범위·레이어만 담습니다. Toss에서 관찰하지 않은 종목, 현재 보유 종목의 미분류 상태, 목표 합계 오류는 활성화할 수 없습니다. `inspection` 결과는 `OK`, `Watch`, `Review`, `Action`만 사용하며, `Action`도 예외 개입 가능성을 사람이 점검하라는 뜻입니다. 주문 수량이나 실행 플래그는 제공하지 않습니다.
 
-### 시장 국면별 목표 비중 검토
+### 종목 drawdown 근거
 
-`market sync`는 Toss에서 `US/SPY`, `US/QQQ`, `KR/KOSPI`, `KR/KOSDAQ` 일봉을 수집합니다. `market context`는 60·200일 추세, 252일 고점 대비 낙폭, 20일 실현 변동성을 합성해 `risk_on`, `neutral`, `risk_off` 중 하나를 관찰합니다.
+`market sync`는 활성 정책 종목(또는 `--symbols`로 지정한 종목)의 Toss 조정 일봉만 저장합니다. 이 데이터는 종목별 drawdown 검사에만 사용하며 시장 국면·기술지표·정책 후보를 만들지 않습니다.
 
 ```bash
 uv run ips-pilot market sync
-uv run ips-pilot market context
 ```
-
-국면별 현금/Core/Satellite/Experiment 목표는 각각 `3/52/44/4`, `5/60/38/2`, `10/70/29/1`입니다. 현금은 총계좌 기준이고 세 레이어는 투자금 기준입니다. 데이터가 부족·오래됨·불완전하면 `Watch`로 닫고 후보를 만들지 않으며, 정책 변경 후 30일 동안은 새 국면을 보여주더라도 후보를 만들지 않습니다. 유효한 후보도 불변 검토 기록일 뿐 활성 정책을 바꾸지 않습니다. 활성화는 별도의 정책 검증·미리보기·사용자 승인 절차를 거쳐야 합니다.
 
 ### Phase 5-v2 결과 계약
 
@@ -142,7 +136,6 @@ Preview는 정책을 활성화하거나 평가 행을 저장하지 않습니다.
 uv run ruff format --check .
 uv run ruff check .
 uv run pytest -q tests --ignore=tests/research
-uv run --project research/qlib_validation pytest -q tests/research
 ```
 
 현재 구현은 Phase 0–4의 Toss 전용 관찰·대시보드와 Phase 5의 손익·drawdown·예외 검토 및 `phase5-v2` 결과-first 비중 조정 계약까지 포함합니다. 인증된 의도 편집과 사람의 결정 기록은 아직 구현하지 않습니다. 승인된 Pattern B 정책은 [`docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md`](docs/superpowers/specs/2026-07-23-pattern-b-policy-draft.md)에 기록되어 있습니다.

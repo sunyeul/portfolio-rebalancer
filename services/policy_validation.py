@@ -446,10 +446,6 @@ def validate_policy(
         if not math.isclose(total, 1.0, abs_tol=SUM_TOLERANCE):
             errors.append("layers target values must sum to 1")
 
-    allocation_review = _allocation_review(
-        policy.get("allocation_review"), cash, layers, errors
-    )
-
     observed = {
         (str(country).strip().upper(), str(symbol).strip().upper())
         for country, symbol in observed_identities
@@ -530,8 +526,6 @@ def validate_policy(
             instruments, key=lambda item: (item["market_country"], item["symbol"])
         ),
     }
-    if allocation_review is not None:
-        normalized["allocation_review"] = allocation_review
     return normalized
 
 

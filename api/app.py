@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import secrets
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,18 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.schemas import ApiEnvelope
-from services.account_projection import (
-    AccountProjectionError,
-    build_account_projection,
-    layer_map_from_policy,
-)
 from services.change_brief import build_change_brief
-from services.dynamic_allocation import (
-    allocation_benchmarks,
-    evaluate_dynamic_allocation,
-)
-from services.inspection_service import preview_inspection
-from services.policy_preflight import build_policy_preflight
 from storage.account_observation_store import (
     latest_complete,
     latest_verified_complete,
@@ -32,13 +20,8 @@ from storage.account_observation_store import (
 )
 from storage.database import initialize_database
 from storage.evaluation_store import list_evaluation_runs, latest_evaluation_run
-from storage.market_store import (
-    latest_policy_candidate,
-    list_adjusted_stock_candles,
-    list_candles,
-)
 from storage.performance_store import get_performance_run, latest_performance_run
-from storage.policy_store import get_active_policy, get_policy_version
+from storage.policy_store import get_active_policy
 
 
 SUPPORTED_INSPECTION_ENGINE_VERSION = "phase5-v2"
@@ -110,38 +93,6 @@ def _error(message: str, status_code: int = 200) -> JSONResponse:
     )
 
 
-def _stored_allocation_series(
-    policy: dict[str, Any],
-) -> dict[str, list[dict[str, Any]]]:
-    return {
-        item["key"]: list_candles(
-            source_kind=item["source_kind"],
-            market_country=item["market_country"],
-            symbol=item["symbol"],
-        )
-        for item in allocation_benchmarks(policy)
-    }
-
-
-def _stored_instrument_series(
-    policy: dict[str, Any],
-) -> dict[str, list[dict[str, Any]]]:
-    through_at = datetime.now(timezone.utc).isoformat()
-    risk_review = policy.get("risk_review") or {}
-    limit = int(risk_review.get("lookback_sessions", 252))
-    return {
-        f"{str(item['market_country']).upper()}/{str(item['symbol']).upper()}": (
-            list_adjusted_stock_candles(
-                market_country=str(item["market_country"]),
-                symbol=str(item["symbol"]),
-                through_at=through_at,
-                limit=limit,
-            )
-        )
-        for item in policy.get("instruments", [])
-    }
-
-
 def _snapshot_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Expose source health without browser-visible order or execution facts."""
     return {
@@ -161,16 +112,6 @@ def _snapshot_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
         "holding_count": len(snapshot["holdings"]),
         "cash_currency_count": len(snapshot["cash"]),
     }
-
-
-def _projection_view(projection: dict[str, Any]) -> dict[str, Any]:
-    """Keep account facts useful to the dashboard without holding-size fields."""
-    visible = dict(projection)
-    visible["positions"] = [
-        {key: value for key, value in position.items() if key != "quantity"}
-        for position in projection.get("positions", [])
-    ]
-    return visible
 
 
 _ACCOUNT_SUMMARY_KEYS = (
@@ -290,37 +231,6 @@ def create_app() -> FastAPI:
         except Exception as exc:
             return {"ok": False, "data": None, "error": {"message": str(exc)}}
 
-    @app.get("/api/snapshots", response_model=ApiEnvelope)
-    async def snapshots(limit: int = 20) -> dict[str, Any]:
-        return {
-            "ok": True,
-            "data": {
-                "snapshots": [_snapshot_summary(item) for item in list_snapshots(limit)]
-            },
-            "error": None,
-        }
-
-    @app.get("/api/account", response_model=ApiEnvelope)
-    async def account(snapshot_id: int | None = None) -> Any:
-        try:
-            active = get_active_policy()
-            return {
-                "ok": True,
-                "data": {
-                    "projection": _projection_view(
-                        build_account_projection(
-                            snapshot_id=snapshot_id,
-                            layer_map=layer_map_from_policy(
-                                active["policy"] if active else None
-                            ),
-                        )
-                    )
-                },
-                "error": None,
-            }
-        except AccountProjectionError as exc:
-            return _error(str(exc))
-
     @app.get("/api/performance", response_model=ApiEnvelope)
     async def performance(run_id: int | None = None) -> dict[str, Any]:
         run = (
@@ -329,15 +239,6 @@ def create_app() -> FastAPI:
             else latest_performance_run()
         )
         return {"ok": True, "data": {"run": run}, "error": None}
-
-    @app.get("/api/policy", response_model=ApiEnvelope)
-    async def policy(version_id: int | None = None) -> dict[str, Any]:
-        selected = (
-            get_policy_version(version_id)
-            if version_id is not None
-            else get_active_policy()
-        )
-        return {"ok": True, "data": {"policy": selected}, "error": None}
 
     @app.get("/api/inspection", response_model=ApiEnvelope)
     async def inspection() -> dict[str, Any]:
@@ -354,55 +255,6 @@ def create_app() -> FastAPI:
                 "contract_supported": _contract_supported(evaluation),
                 "currentness": currentness,
             },
-            "error": None,
-        }
-
-    @app.get("/api/review-queue", response_model=ApiEnvelope)
-    async def review_queue() -> dict[str, Any]:
-        evaluation = latest_evaluation_run()
-        contract_supported = _contract_supported(evaluation)
-        currentness = _evaluation_currentness(
-            evaluation,
-            latest_complete(),
-            get_active_policy(),
-        )
-        result = (evaluation or {}).get("result", {})
-        data: dict[str, Any] = {
-            "items": result.get("review_queue", [])
-            if currentness["is_current"]
-            else [],
-            "run_id": evaluation["id"] if evaluation else None,
-            "contract_supported": contract_supported,
-            "currentness": currentness,
-        }
-        if contract_supported:
-            data["adjustment_suggestions"] = (
-                result.get("adjustment_suggestions", [])
-                if currentness["is_current"]
-                else []
-            )
-        return {
-            "ok": True,
-            "data": data,
-            "error": None,
-        }
-
-    @app.get("/api/policy-preflight", response_model=ApiEnvelope)
-    async def policy_preflight() -> dict[str, Any]:
-        active = get_active_policy()
-        evaluation = latest_evaluation_run()
-        currentness = _evaluation_currentness(
-            evaluation,
-            latest_complete(),
-            active,
-        )
-        return {
-            "ok": True,
-            "data": build_policy_preflight(
-                active,
-                evaluation,
-                evaluation_is_current=bool(currentness["is_current"]),
-            ),
             "error": None,
         }
 
@@ -434,43 +286,6 @@ def create_app() -> FastAPI:
             "data": brief,
             "error": None,
         }
-
-    @app.get("/api/market-context", response_model=ApiEnvelope)
-    async def market_context() -> dict[str, Any]:
-        try:
-            active = get_active_policy()
-            if active is None:
-                return _error("활성 정책을 찾을 수 없습니다.")
-            policy = active["policy"]
-            context = evaluate_dynamic_allocation(
-                _stored_allocation_series(policy),
-                active_policy=policy,
-                instrument_series_by_identity=_stored_instrument_series(policy),
-                last_change_at=active.get("created_at"),
-            )
-            candidate_evaluation = (
-                preview_inspection(context["proposed_policy"])
-                if isinstance(context.get("proposed_policy"), dict)
-                else None
-            )
-            return {
-                "ok": True,
-                "data": {
-                    "benchmarks": [
-                        item["key"] for item in allocation_benchmarks(policy)
-                    ],
-                    "policy_version_id": active["id"],
-                    "context": context,
-                    "candidate_evaluation": candidate_evaluation,
-                    "latest_candidate": latest_policy_candidate(
-                        active["account_alias"], active["id"]
-                    ),
-                    "activation": "human approval required; active policy unchanged",
-                },
-                "error": None,
-            }
-        except Exception as exc:
-            return _error(str(exc))
 
     frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
     if frontend_dist.exists():

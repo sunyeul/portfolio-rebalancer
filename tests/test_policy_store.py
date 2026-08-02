@@ -1,6 +1,4 @@
 import sqlite3
-from copy import deepcopy
-
 import pytest
 
 from storage.database import initialize_database
@@ -138,7 +136,7 @@ def _dynamic_policy():
     }
 
 
-def test_policy_validation_preserves_allocation_review():
+def test_policy_validation_ignores_legacy_allocation_review():
     from services.policy_validation import validate_policy
 
     policy = _dynamic_policy()
@@ -148,45 +146,7 @@ def test_policy_validation_preserves_allocation_review():
         [("US", "SPY"), ("US", "QQQ"), ("US", "GLD")],
     )
 
-    assert normalized["allocation_review"] == _allocation_review()
-
-
-@pytest.mark.parametrize(
-    ("mutator", "message"),
-    [
-        (
-            lambda value: value["benchmarks"].append(deepcopy(value["benchmarks"][0])),
-            "duplicate",
-        ),
-        (
-            lambda value: value["benchmarks"][0].update(weight=0.10),
-            "weights must sum to 1",
-        ),
-        (
-            lambda value: value["regimes"].pop("risk_off"),
-            "exactly risk_on, neutral, risk_off",
-        ),
-        (
-            lambda value: value["regimes"]["neutral"]["layers"].update(core=0.61),
-            "layer targets must sum to 1",
-        ),
-        (
-            lambda value: value["regimes"]["risk_on"].update(cash_target=0.02),
-            "cash target must be within cash_reserve range",
-        ),
-    ],
-)
-def test_policy_validation_rejects_invalid_allocation_review(mutator, message):
-    from services.policy_validation import PolicyValidationError, validate_policy
-
-    policy = _dynamic_policy()
-    mutator(policy["allocation_review"])
-
-    with pytest.raises(PolicyValidationError, match=message):
-        validate_policy(
-            policy,
-            [("US", "SPY"), ("US", "QQQ"), ("US", "GLD")],
-        )
+    assert "allocation_review" not in normalized
 
 
 def test_default_policy_is_seeded_once_and_is_replayable(monkeypatch, tmp_path):

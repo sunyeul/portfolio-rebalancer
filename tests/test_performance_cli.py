@@ -73,18 +73,14 @@ def test_baseline_confirm_emits_baseline(monkeypatch):
     assert payload["baseline"]["baseline_snapshot_id"] == 4
 
 
-def test_refresh_and_history_emit_run(monkeypatch):
+def test_refresh_emits_run(monkeypatch):
     monkeypatch.setattr("cli.initialize_database", lambda: None)
     monkeypatch.setattr("cli.refresh_performance", _run)
-    monkeypatch.setattr("cli.latest_performance_run", _run)
 
     refreshed = runner.invoke(app, ["performance", "refresh"])
-    history = runner.invoke(app, ["performance", "history", "--latest"])
 
     assert refreshed.exit_code == 0
-    assert history.exit_code == 0
     assert json.loads(refreshed.stdout)["run_id"] == 3
-    assert json.loads(history.stdout)["run"]["state"] == "complete"
 
 
 def test_candidates_and_decision_emit_safe_json(monkeypatch):
@@ -119,18 +115,3 @@ def test_candidates_and_decision_emit_safe_json(monkeypatch):
     assert decision.exit_code == 0
     assert json.loads(candidates.stdout)["candidates"] == [{"id": 9}]
     assert json.loads(decision.stdout)["decision"]["classification"] == "internal_fx"
-
-
-def test_history_rejects_latest_and_run_id_together(monkeypatch):
-    monkeypatch.setattr("cli.initialize_database", lambda: None)
-
-    result = runner.invoke(
-        app,
-        ["performance", "history", "--latest", "--run-id", "3"],
-    )
-
-    assert result.exit_code == 1
-    payload = json.loads(result.stdout)
-    assert payload["ok"] is False
-    assert payload["error"]["stage"] == "input"
-    assert "access-token" not in result.stdout

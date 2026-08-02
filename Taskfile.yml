@@ -25,16 +25,6 @@ tasks:
     cmds:
       - uv run ips-pilot performance refresh
 
-  toss-performance-history:
-    desc: Show the latest local Toss account performance history
-    cmds:
-      - uv run ips-pilot performance history --latest
-
-  toss-account-view:
-    desc: Show the latest complete Toss account projection
-    cmds:
-      - uv run ips-pilot account-view
-
   toss-policy-template:
     desc: Build a Toss-observed IPS target policy template
     cmds:
@@ -46,24 +36,14 @@ tasks:
       - uv run ips-pilot policy show --active
 
   toss-market-sync:
-    desc: Sync required Toss market benchmarks and evaluate allocation context
+    desc: Sync adjusted daily candles for active-policy instruments
     cmds:
-      - .venv/bin/python -m cli market sync --symbols US/SPY,US/QQQ --max-pages 5
-
-  toss-market-context:
-    desc: Evaluate stored US and Korea allocation context
-    cmds:
-      - .venv/bin/python -m cli market context
+      - uv run ips-pilot market sync
 
   toss-inspection-run:
     desc: Run the deterministic Toss IPS inspection
     cmds:
       - uv run ips-pilot inspection run
-
-  toss-inspection-latest:
-    desc: Show the latest Toss IPS inspection result
-    cmds:
-      - uv run ips-pilot inspection show --latest
 
   toss-dashboard-api:
     desc: Serve the read-only Toss dashboard API on loopback

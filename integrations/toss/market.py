@@ -15,20 +15,6 @@ class MarketObservationError(RuntimeError):
     """Raised when an official Toss market response cannot be normalized."""
 
 
-MARKET_INDICATOR_SYMBOLS = frozenset(
-    {
-        "KOSPI",
-        "KOSDAQ",
-        "KR_BOND_2Y",
-        "KR_BOND_3Y",
-        "KR_BOND_5Y",
-        "KR_BOND_10Y",
-        "KR_BOND_20Y",
-        "KR_BOND_30Y",
-    }
-)
-
-
 @dataclass(frozen=True)
 class NormalizedCandle:
     source_kind: str
@@ -82,7 +68,6 @@ class TossMarketDataService:
         self,
         *,
         symbol: str,
-        source_kind: str = "stock",
         market_country: str = "",
         interval: str = "1d",
         count: int = 200,
@@ -94,25 +79,14 @@ class TossMarketDataService:
             raise MarketObservationError("symbol is required")
         if interval != "1d":
             raise MarketObservationError("only daily candles are supported")
-        if source_kind not in {"stock", "market_indicator"}:
-            raise MarketObservationError("invalid market source kind")
-        if (
-            source_kind == "market_indicator"
-            and normalized_symbol not in MARKET_INDICATOR_SYMBOLS
-        ):
-            raise MarketObservationError("unsupported market indicator symbol")
         bounded_count = max(1, min(int(count), 200))
-        if source_kind == "market_indicator":
-            path = f"/api/v1/market-indicators/{normalized_symbol}/candles"
-        else:
-            path = "/api/v1/candles"
+        path = "/api/v1/candles"
         params: dict[str, str | int] = {
             "interval": interval,
             "count": bounded_count,
         }
-        if source_kind == "stock":
-            params["symbol"] = normalized_symbol
-            params["adjusted"] = "true" if adjusted else "false"
+        params["symbol"] = normalized_symbol
+        params["adjusted"] = "true" if adjusted else "false"
         if before is not None:
             params["before"] = before
         payload = self._reader.get_json(
@@ -137,11 +111,11 @@ class TossMarketDataService:
             ):
                 raise MarketObservationError("candle OHLC invariant failed")
             raw_currency = raw.get("currency")
-            if source_kind == "stock" and not isinstance(raw_currency, str):
+            if not isinstance(raw_currency, str):
                 raise MarketObservationError("missing candle currency")
             normalized.append(
                 NormalizedCandle(
-                    source_kind=source_kind,
+                    source_kind="stock",
                     market_country=market_country.upper(),
                     symbol=normalized_symbol,
                     interval=interval,
@@ -152,8 +126,8 @@ class TossMarketDataService:
                     low_price=low_price,
                     close_price=close_price,
                     volume=_number(raw.get("volume"), "volume", nonnegative=True),
-                    adjusted=adjusted if source_kind == "stock" else False,
-                    adjusted_supported=source_kind == "stock",
+                    adjusted=adjusted,
+                    adjusted_supported=True,
                 )
             )
         next_before = result.get("nextBefore")
@@ -165,7 +139,6 @@ class TossMarketDataService:
         self,
         *,
         symbol: str,
-        source_kind: str = "stock",
         market_country: str = "",
         count: int = 200,
         max_pages: int = 5,
@@ -182,7 +155,6 @@ class TossMarketDataService:
         for _ in range(max_pages):
             page, next_before = self.read_page(
                 symbol=symbol,
-                source_kind=source_kind,
                 market_country=market_country,
                 count=count,
                 before=before,

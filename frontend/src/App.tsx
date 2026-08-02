@@ -1,22 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, BarChart3, CircleAlert, CircleCheck, ChevronDown, ChevronUp, Layers3, ListFilter, PanelLeftClose, PanelLeftOpen, RefreshCw, RotateCcw, Search, ShieldCheck, type LucideIcon } from "lucide-react";
-import { currentEvaluationResult, Evaluation, getJson, type ChangeBrief, type EvaluationCurrentness, type InspectionData, type InspectionItem, type JsonObject, type PerformanceRun, type PolicyPreflight } from "./lib/api";
+import { currentEvaluationResult, Evaluation, getJson, type ChangeBrief, type EvaluationCurrentness, type InspectionData, type InspectionItem, type JsonObject, type PerformanceRun } from "./lib/api";
 import { evidenceValue, finiteNumber, formatAccountReturn, formatAllocationReason, formatEvaluationCurrentness, formatKrw as money, formatPercent as percent, formatQueuePriority, formatSignedKrw as signedMoney, supportedRate } from "./lib/presentation";
 import { filterAndSortRows, toggleSort, uniqueFilterValues, type SortState } from "./lib/tableControls";
 
 const statusLabel: Record<string, string> = { OK: "OK", Watch: "Watch", Review: "Review", Action: "Action" };
 const sidebarStorageKey = "ips-pilot.sidebar-collapsed";
-type TabKey = "overview" | "performance" | "allocation" | "review" | "preflight" | "brief";
+type TabKey = "overview" | "performance" | "allocation" | "review" | "brief";
 type PerformanceView = "ytd" | "trailing_12m" | "cumulative" | "holding";
 type NavItem = [LucideIcon, string, TabKey];
 
-const navItems: NavItem[] = [[Activity, "Overview", "overview"], [BarChart3, "Performance", "performance"], [Layers3, "Allocation", "allocation"], [CircleAlert, "Review Queue", "review"], [ShieldCheck, "Policy preflight", "preflight"], [Activity, "Change brief", "brief"]];
+const navItems: NavItem[] = [[Activity, "Overview", "overview"], [BarChart3, "Performance", "performance"], [Layers3, "Allocation", "allocation"], [CircleAlert, "Review Queue", "review"], [Activity, "Change brief", "brief"]];
 const panelCopy: Record<TabKey, { eyebrow: string; title: string; description: string }> = {
   overview: { eyebrow: "MONTHLY IPS INSPECTION", title: "이번 달 계좌 운용 점검", description: "현재 상황, 목표 비중, 수익률과 다음 확인 항목을 한 화면에서 확인합니다." },
   performance: { eyebrow: "PERFORMANCE HISTORY", title: "성과 이력", description: "YTD·최근 1년·누적 TWR과 원금·평가금 추이를 확인하는 화면입니다." },
   allocation: { eyebrow: "ALLOCATION REVIEW", title: "비중 점검", description: "현금과 core·satellite·experiment 레이어의 목표 갭을 확인하는 화면입니다." },
   review: { eyebrow: "REVIEW QUEUE", title: "확인할 항목", description: "백엔드 평가 순서를 유지한 전체 읽기 전용 점검 목록입니다." },
-  preflight: { eyebrow: "POLICY PREFLIGHT", title: "정책 변경 전 질문", description: "정책 초안을 만들기 전에 빠진 목적·근거·되돌림 조건을 확인합니다." },
   brief: { eyebrow: "CHANGE BRIEF", title: "변화분 브리프", description: "최신 평가에서 새로 생기거나 바뀐 점검 항목과 원천 이상만 확인합니다." },
 };
 
@@ -174,19 +173,6 @@ function ReviewQueue({ items }: { items: InspectionItem[] }) {
   </section>;
 }
 
-function PolicyPreflightPanel({ preflight }: { preflight: PolicyPreflight | null }) {
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const questions = preflight?.questions ?? [];
-  useEffect(() => { setAnswers({}); }, [preflight?.policy_version_id, preflight?.evaluation?.run_id]);
-  if (!preflight) return <div className="stage-panel"><h2>사전 질문을 불러오는 중입니다.</h2><p>활성 정책과 최신 평가를 읽어 질문을 준비합니다.</p></div>;
-  return <section className="preflight-panel">
-    <div className="read-only-notice"><ShieldCheck size={17} /><div><strong>답변은 이 브라우저에만 남습니다.</strong><span>작성한 내용은 저장·정책 반영·평가 변경에 사용되지 않습니다.</span></div></div>
-    {preflight.state === "source_verification_required" && <div className="banner warning"><CircleAlert size={17} />원천 검증이 끝나기 전에는 비중 판단을 정책 변경 근거로 사용하지 마세요.</div>}
-    {preflight.state === "policy_missing" && <div className="empty">활성 정책을 찾을 수 없어 변경 전 질문을 시작할 수 없습니다.</div>}
-    {questions.length > 0 && <div className="preflight-list">{questions.map((question, index) => <label className="preflight-question" key={question.id}><span>{index + 1}</span><strong>{question.title}</strong><p>{question.prompt}</p><textarea value={answers[question.id] ?? ""} onChange={event => setAnswers(current => ({ ...current, [question.id]: event.target.value }))} placeholder="답변을 적어 보세요" aria-label={`${question.title} 답변`} /></label>)}</div>}
-  </section>;
-}
-
 const briefChangeLabel: Record<string, string> = { new: "새 항목", changed: "변경", resolved: "해결" };
 
 function ChangeBriefPanel({ brief }: { brief: ChangeBrief | null }) {
@@ -306,7 +292,6 @@ export default function App() {
   const [currentness, setCurrentness] = useState<EvaluationCurrentness | null>(null);
   const [contractSupported, setContractSupported] = useState(false);
   const [performanceRun, setPerformanceRun] = useState<PerformanceRun | null>(null);
-  const [policyPreflight, setPolicyPreflight] = useState<PolicyPreflight | null>(null);
   const [changeBrief, setChangeBrief] = useState<ChangeBrief | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -315,7 +300,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(initialSidebarCollapsed);
 
   async function reload() {
-    setLoading(true); setError(null); setWarnings([]); setPolicyPreflight(null); setChangeBrief(null); setCurrentness(null);
+    setLoading(true); setError(null); setWarnings([]); setChangeBrief(null); setCurrentness(null);
     try {
       const inspectionData = await getJson<InspectionData>("/api/inspection");
       const currentEvaluation = inspectionData.evaluation;
@@ -341,12 +326,7 @@ export default function App() {
       const briefRequest = evaluationUsable
         ? getJson<ChangeBrief>("/api/change-brief")
         : Promise.resolve<ChangeBrief | null>(null);
-      const [preflightResult, briefResult] = await Promise.allSettled([
-        getJson<PolicyPreflight>("/api/policy-preflight"),
-        briefRequest,
-      ]);
-      if (preflightResult.status === "fulfilled") setPolicyPreflight(preflightResult.value);
-      else warningMessages.push("정책 사전 질문을 불러오지 못했습니다.");
+      const [briefResult] = await Promise.allSettled([briefRequest]);
       if (briefResult.status === "fulfilled") setChangeBrief(briefResult.value);
       else warningMessages.push("변화분 브리프를 불러오지 못했습니다.");
       setWarnings(warningMessages);
@@ -400,12 +380,11 @@ export default function App() {
       {!loading && evaluation && currentness && !evaluationCurrent && <div className="banner warning"><CircleAlert size={17} /><span><strong>저장된 평가가 현재 계좌·정책과 일치하지 않습니다.</strong><br />{formatEvaluationCurrentness(currentness)}</span></div>}
       {result && sourceState !== "complete" && <div className="banner warning"><CircleAlert size={17} />원천 상태가 {sourceState}입니다. 원천 동기화 근거를 확인하세요.</div>}
       {loading && <div className="empty">평가 결과를 불러오는 중입니다.</div>}
-      {!loading && !evaluation && activeTab !== "preflight" && activeTab !== "brief" && <div className="empty"><CircleAlert size={18} />아직 저장된 Toss 평가가 없습니다. CLI에서 inspection run을 먼저 실행하세요.</div>}
+      {!loading && !evaluation && activeTab !== "brief" && <div className="empty"><CircleAlert size={18} />아직 저장된 Toss 평가가 없습니다. CLI에서 inspection run을 먼저 실행하세요.</div>}
       {!loading && evaluation && !contractSupported && <div className="banner warning"><CircleAlert size={17} /><span><strong>저장된 평가가 현재 v2 계약이 아닙니다.</strong><br />새 Toss 평가를 저장한 뒤 결과 패널을 확인하세요.</span></div>}
-      {!loading && activeTab === "preflight" && <PolicyPreflightPanel preflight={policyPreflight} />}
       {!loading && activeTab === "brief" && evaluationUsable && <ChangeBriefPanel brief={changeBrief} />}
       {!loading && activeTab === "brief" && !evaluationUsable && <div className="empty">현재 v2 평가 계약과 최신성 검증이 끝나야 변화분을 표시할 수 있습니다.</div>}
-      {!loading && result && activeTab !== "preflight" && activeTab !== "brief" && <>
+      {!loading && result && activeTab !== "brief" && <>
         {activeTab === "overview" ? <>
           <section className="facts-grid overview-context">
             <article className="fact-card"><span>투자 원금(매입원가)</span><strong>{money(investmentPrincipal)}</strong><small>현재 보유 종목의 Toss 매입원가</small></article>

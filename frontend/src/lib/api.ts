@@ -53,20 +53,6 @@ export type InspectionItem = JsonObject & {
   red_team?: InspectionRedTeam;
 };
 
-export type PolicyPreflightQuestion = {
-  id: string;
-  title: string;
-  prompt: string;
-  required: boolean;
-};
-
-export type PolicyPreflight = {
-  state?: string;
-  policy_version_id?: number | null;
-  evaluation?: { run_id?: number; snapshot_id?: number } | null;
-  questions?: PolicyPreflightQuestion[];
-};
-
 export type ChangeBriefItem = InspectionItem & {
   change?: "new" | "changed" | "resolved" | string;
 };

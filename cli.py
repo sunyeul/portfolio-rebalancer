@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime, timezone
 import json
 import math
 import sys
 from pathlib import Path
-from typing import Annotated, Any, Mapping
+from typing import Annotated, Any
 
 import typer
 from typer import _click
@@ -19,24 +18,12 @@ from integrations.toss.config import TossApiConfig
 from integrations.toss.observation import TossObservationService
 from integrations.toss.market import TossMarketDataService
 from integrations.toss.transport import TossTransport
-from services.account_projection import build_account_projection, layer_map_from_policy
-from services.change_brief import build_change_brief
-from services.dynamic_allocation import (
-    allocation_benchmarks,
-    evaluate_dynamic_allocation,
-)
 from services.inspection_service import preview_inspection, run_inspection
 from storage.account_observation_store import (
     get_snapshot as get_account_snapshot,
-    latest_complete,
     list_snapshots as list_account_snapshots,
 )
 from storage.database import initialize_database
-from storage.evaluation_store import (
-    get_evaluation_run,
-    latest_evaluation_run,
-    list_evaluation_runs,
-)
 from storage.policy_store import (
     activate_policy,
     get_active_policy,
@@ -45,10 +32,6 @@ from storage.policy_store import (
 )
 from storage.market_store import (
     insert_candles,
-    insert_policy_candidate,
-    latest_policy_candidate,
-    list_adjusted_stock_candles,
-    list_candles,
 )
 from storage.performance_store import (
     append_cash_flow_decision,
@@ -222,38 +205,6 @@ def _build_toss_market_service() -> tuple[TossMarketDataService, TossTransport]:
     return TossMarketDataService(reader), transport
 
 
-def _stored_allocation_series(
-    policy: Mapping[str, Any],
-) -> dict[str, list[dict[str, Any]]]:
-    return {
-        item["key"]: list_candles(
-            source_kind=item["source_kind"],
-            market_country=item["market_country"],
-            symbol=item["symbol"],
-        )
-        for item in allocation_benchmarks(policy)
-    }
-
-
-def _stored_instrument_series(
-    policy: Mapping[str, Any],
-) -> dict[str, list[dict[str, Any]]]:
-    through_at = datetime.now(timezone.utc).isoformat()
-    risk_review = policy.get("risk_review") or {}
-    limit = int(risk_review.get("lookback_sessions", 252))
-    return {
-        f"{str(item['market_country']).upper()}/{str(item['symbol']).upper()}": (
-            list_adjusted_stock_candles(
-                market_country=str(item["market_country"]),
-                symbol=str(item["symbol"]),
-                through_at=through_at,
-                limit=limit,
-            )
-        )
-        for item in policy.get("instruments", [])
-    }
-
-
 def _stable_identities(identities: list[str]) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
@@ -351,30 +302,6 @@ def toss_snapshots(
         )
     except Exception as exc:
         _exit_with_command_error("toss-snapshots", exc)
-
-
-@app.command("account-view")
-def account_view(
-    snapshot_id: Annotated[int | None, typer.Option("--snapshot-id")] = None,
-) -> None:
-    """Project the latest or explicit complete Toss account snapshot."""
-    try:
-        initialize_database()
-        active = get_active_policy()
-        projection = build_account_projection(
-            snapshot_id=snapshot_id,
-            layer_map=layer_map_from_policy(active["policy"] if active else None),
-        )
-        _emit_json(
-            {
-                "ok": True,
-                "command": "account-view",
-                "projection": projection,
-                "error": None,
-            }
-        )
-    except Exception as exc:
-        _exit_with_command_error("account-view", exc)
 
 
 @policy_app.command("show")
@@ -531,87 +458,13 @@ def inspection_run_command(
         _exit_with_command_error("inspection run", exc)
 
 
-@inspection_app.command("show")
-def inspection_show_command(
-    run_id: Annotated[int | None, typer.Option("--run-id")] = None,
-    latest: Annotated[bool, typer.Option("--latest")] = False,
-) -> None:
-    """Show a persisted Toss inspection evaluation."""
-    try:
-        initialize_database()
-        if (run_id is None) == (not latest):
-            raise CliError("input", "--run-id 또는 --latest 중 하나를 지정해야 합니다.")
-        evaluation = (
-            latest_evaluation_run() if latest else get_evaluation_run(int(run_id))
-        )
-        if evaluation is None:
-            raise CliError("persistence", "평가 실행을 찾을 수 없습니다.")
-        _emit_json(
-            {
-                "ok": True,
-                "command": "inspection show",
-                "run_id": evaluation["id"],
-                "snapshot_id": evaluation["snapshot_id"],
-                "performance_run_id": evaluation["performance_run_id"],
-                "policy_version_id": evaluation["policy_version_id"],
-                "evaluation": evaluation,
-                "contract_supported": _contract_supported(evaluation),
-                "error": None,
-            }
-        )
-    except Exception as exc:
-        _exit_with_command_error("inspection show", exc)
-
-
-@inspection_app.command("brief")
-def inspection_brief_command() -> None:
-    """Show only changes between the newest two persisted evaluations."""
-    try:
-        initialize_database()
-        evaluations = list_evaluation_runs(limit=2)
-        current = evaluations[0] if evaluations else None
-        previous = evaluations[1] if len(evaluations) > 1 else None
-        brief = build_change_brief(current, previous)
-        currentness = _evaluation_currentness(
-            current,
-            latest_complete(),
-            get_active_policy(),
-        )
-        brief["currentness"] = currentness
-        if current is not None and not currentness["is_current"]:
-            brief.update(
-                {
-                    "state": "stale_evaluation",
-                    "changes": [],
-                    "source_alert": {
-                        "state": "stale_evaluation",
-                        "message": "저장된 평가가 현재 Toss 스냅샷·활성 정책과 일치하지 않습니다.",
-                    },
-                }
-            )
-        _emit_json(
-            {
-                "ok": True,
-                "command": "inspection brief",
-                "current_run_id": current["id"] if current else None,
-                "previous_run_id": previous["id"] if previous else None,
-                "brief": brief,
-                "contract_supported": _contract_supported(current),
-                "error": None,
-            }
-        )
-    except Exception as exc:
-        _exit_with_command_error("inspection brief", exc)
-
-
 @market_app.command("sync")
 def market_sync_command(
     symbols: Annotated[str | None, typer.Option("--symbols")] = None,
     max_pages: Annotated[int, typer.Option("--max-pages")] = 5,
     target_points: Annotated[int, typer.Option("--target-points")] = 252,
-    research_only: Annotated[bool, typer.Option("--research-only")] = False,
 ) -> None:
-    """Read official Toss daily candles and persist immutable observations."""
+    """Sync adjusted daily candles for active-policy instruments only."""
     transport: TossTransport | None = None
     try:
         if target_points < 1:
@@ -620,26 +473,14 @@ def market_sync_command(
         active = get_active_policy()
         if active is None:
             raise CliError("persistence", "활성 정책을 찾을 수 없습니다.")
-        policy = active["policy"]
-        benchmarks = allocation_benchmarks(policy)
         service, transport = _build_toss_market_service()
-        identities = list_observed_identities()
         requested = [
             item.strip() for item in (symbols or "").split(",") if item.strip()
         ]
         selected_stocks = requested or [
-            f"{country}/{symbol}" for country, symbol in identities
-        ]
-        if research_only:
-            selected_stocks.extend(
-                f"{item['market_country']}/{item['symbol']}"
-                for item in policy.get("instruments", [])
-            )
-        selected_stocks.extend(
             f"{item['market_country']}/{item['symbol']}"
-            for item in benchmarks
-            if item["source_kind"] == "stock"
-        )
+            for item in active["policy"].get("instruments", [])
+        ]
         stock_symbols = _stable_identities(selected_stocks)
         stored: list[dict[str, Any]] = []
         for identity in stock_symbols:
@@ -650,53 +491,16 @@ def market_sync_command(
             candles = service.collect_history(
                 symbol=symbol,
                 market_country=market_country,
-                source_kind="stock",
                 max_pages=max_pages,
                 target_points=target_points,
             )
             stored.extend(insert_candles(item.as_dict() for item in candles))
-        indicator_keys: list[str] = []
-        for item in benchmarks:
-            if item["source_kind"] != "market_indicator":
-                continue
-            indicator_keys.append(item["key"])
-            candles = service.collect_history(
-                symbol=item["symbol"],
-                source_kind="market_indicator",
-                market_country=item["market_country"],
-                max_pages=max_pages,
-                target_points=target_points,
-            )
-            stored.extend(insert_candles(candle.as_dict() for candle in candles))
-        context = None
-        candidate = None
-        if not research_only:
-            context = evaluate_dynamic_allocation(
-                _stored_allocation_series(policy),
-                active_policy=policy,
-                instrument_series_by_identity=_stored_instrument_series(policy),
-                last_change_at=active.get("created_at"),
-            )
-            if context.get("candidate_state") == "candidate":
-                candidate = insert_policy_candidate(
-                    {
-                        "account_alias": active["account_alias"],
-                        "base_policy_version_id": active["id"],
-                        "candidate_json": {
-                            "strategy": policy["allocation_review"]["strategy"],
-                            "context": context,
-                        },
-                    }
-                )
         _emit_json(
             {
                 "ok": True,
                 "command": "market sync",
-                "symbols": stock_symbols + indicator_keys,
+                "symbols": stock_symbols,
                 "candle_count": len(stored),
-                "context": context,
-                "candidate": candidate,
-                "research_only": research_only,
                 "target_points": target_points,
                 "error": None,
             }
@@ -706,58 +510,6 @@ def market_sync_command(
     finally:
         if transport is not None:
             transport.close()
-
-
-@market_app.command("context")
-def market_context_command() -> None:
-    """Evaluate stored Toss market context without activating a policy."""
-    try:
-        initialize_database()
-        active = get_active_policy()
-        if active is None:
-            raise CliError("persistence", "활성 정책을 찾을 수 없습니다.")
-        policy = active["policy"]
-        context = evaluate_dynamic_allocation(
-            _stored_allocation_series(policy),
-            active_policy=policy,
-            instrument_series_by_identity=_stored_instrument_series(policy),
-            last_change_at=active.get("created_at"),
-        )
-        candidate = None
-        if context.get("candidate_state") == "candidate":
-            candidate = insert_policy_candidate(
-                {
-                    "account_alias": active["account_alias"],
-                    "base_policy_version_id": active["id"],
-                    "candidate_json": {
-                        "strategy": policy["allocation_review"]["strategy"],
-                        "context": context,
-                    },
-                }
-            )
-        candidate_evaluation = (
-            preview_inspection(context["proposed_policy"])
-            if isinstance(context.get("proposed_policy"), dict)
-            else None
-        )
-        _emit_json(
-            {
-                "ok": True,
-                "command": "market context",
-                "benchmarks": [item["key"] for item in allocation_benchmarks(policy)],
-                "policy_version_id": active["id"],
-                "context": context,
-                "candidate": candidate,
-                "candidate_evaluation": candidate_evaluation,
-                "latest_candidate": latest_policy_candidate(
-                    active["account_alias"], active["id"]
-                ),
-                "activation": "human approval required; active policy unchanged",
-                "error": None,
-            }
-        )
-    except Exception as exc:
-        _exit_with_command_error("market context", exc)
 
 
 @app.command("web")
@@ -917,37 +669,6 @@ def performance_decide_flow(
         )
     except Exception as exc:
         _exit_with_command_error("performance decide-flow", exc)
-
-
-@performance_app.command("history")
-def performance_history(
-    latest: Annotated[bool, typer.Option("--latest")] = False,
-    run_id: Annotated[int | None, typer.Option("--run-id")] = None,
-) -> None:
-    """Inspect one local account performance run."""
-    try:
-        initialize_database()
-        if latest and run_id is not None:
-            raise CliError("input", "--latest와 --run-id는 함께 사용할 수 없습니다.")
-        run = (
-            latest_performance_run()
-            if latest or run_id is None
-            else get_performance_run(run_id)
-        )
-        if run is None:
-            raise CliError("persistence", "성과 실행을 찾을 수 없습니다.")
-        _emit_json(
-            {
-                "ok": True,
-                "command": "performance history",
-                "latest": latest,
-                "run_id": run["id"],
-                "run": run,
-                "error": None,
-            }
-        )
-    except Exception as exc:
-        _exit_with_command_error("performance history", exc)
 
 
 if __name__ == "__main__":
