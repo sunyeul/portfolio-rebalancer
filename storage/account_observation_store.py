@@ -310,17 +310,28 @@ def list_complete_snapshots(
         return [_row_to_snapshot(conn, row) for row in rows]
 
 
-def list_snapshots(limit: int = 20) -> list[dict[str, Any]]:
+def list_snapshots(
+    limit: int = 20, account_alias: str | None = None
+) -> list[dict[str, Any]]:
     """Return recent normalized snapshots, newest first."""
     from storage.database import connect
 
     bounded_limit = max(1, min(int(limit), 100))
     with connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT * FROM broker_account_snapshots
-            ORDER BY synced_at DESC, id DESC LIMIT ?
-            """,
-            (bounded_limit,),
-        ).fetchall()
+        if account_alias is None:
+            rows = conn.execute(
+                """
+                SELECT * FROM broker_account_snapshots
+                ORDER BY synced_at DESC, id DESC LIMIT ?
+                """,
+                (bounded_limit,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT * FROM broker_account_snapshots WHERE account_alias = ?
+                ORDER BY synced_at DESC, id DESC LIMIT ?
+                """,
+                (account_alias, bounded_limit),
+            ).fetchall()
         return [_row_to_snapshot(conn, row) for row in rows]

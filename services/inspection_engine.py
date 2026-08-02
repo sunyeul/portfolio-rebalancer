@@ -246,6 +246,7 @@ def evaluate_inspection(
     evidence_refs: Mapping[str, Any] | None = None,
     *,
     source_error: str | None = None,
+    source_currentness: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate one immutable input set without side effects or broker actions."""
     risk_evidence = risk_evidence or {}
@@ -259,7 +260,15 @@ def evaluate_inspection(
     reconciled = (reconciliation.get("holdings") or {}).get(
         "all_within_tolerance"
     ) is True
-    source_ok = projection is not None and source_error is None and reconciled
+    source_current = (
+        source_currentness is None or source_currentness.get("is_current") is True
+    )
+    source_ok = (
+        projection is not None
+        and source_error is None
+        and reconciled
+        and source_current
+    )
 
     def _target_ready(target: Mapping[str, Any] | None) -> bool:
         return bool(
@@ -287,6 +296,7 @@ def evaluate_inspection(
             else None,
             "reconciled": reconciled,
             "synced_at": projection.get("synced_at") if projection else None,
+            "currentness": dict(source_currentness) if source_currentness else None,
         },
         "account": {},
         "account_profit_loss": risk_evidence.get("account_profit_loss", {}),
@@ -317,13 +327,9 @@ def evaluate_inspection(
             "account_return": latest_point.get("simple_return"),
         }
 
-    performance_policy = policy_dict.get("performance") or {
-        "annual_return_target": 0.10,
-        "measurement": "ytd_twr",
-        "minimum_history_days": 365,
-    }
-    measurement = str(performance_policy.get("measurement") or "ytd_twr")
-    minimum_days = int(performance_policy.get("minimum_history_days", 365))
+    performance_policy = policy_dict["performance"]
+    measurement = str(performance_policy["measurement"])
+    minimum_days = int(performance_policy["minimum_history_days"])
     history_days = _history_days(points)
     cumulative = _cumulative_twr(points) if performance_ok else None
     ytd = _ytd_twr(points) if performance_ok else None
@@ -333,7 +339,7 @@ def evaluate_inspection(
         else None
     )
     annual = ytd if measurement == "ytd_twr" else trailing
-    annual_target = performance_policy.get("annual_return_target")
+    annual_target = performance_policy["annual_return_target"]
     performance_status = "OK"
     performance_triggers: list[str] = []
     if not performance_ok:
@@ -401,8 +407,12 @@ def evaluate_inspection(
     # Required allocation evidence is evaluated independently from optional performance.
     positions = list(projection.get("positions", [])) if projection else []
     allocation_reason: str | None = None
-    if source_error is not None or projection is None:
-        allocation_reason = "source_not_current_evaluable"
+    if source_error is not None or projection is None or not source_current:
+        allocation_reason = (
+            str((source_currentness or {}).get("reasons", [])[0])
+            if (source_currentness or {}).get("reasons")
+            else "source_not_current_evaluable"
+        )
     elif not reconciled:
         allocation_reason = "holdings_reconciliation_failed"
     else:
@@ -738,7 +748,9 @@ def evaluate_inspection(
         for item in units:
             _queue_item(item)
 
-    if result["account_profit_loss"].get("status"):
+    if result["allocation_state"] != "not_evaluable" and result[
+        "account_profit_loss"
+    ].get("status"):
         _queue_item(
             attach_decision(
                 {
@@ -752,7 +764,7 @@ def evaluate_inspection(
                 }
             )
         )
-    if performance_status != "OK":
+    if result["allocation_state"] != "not_evaluable" and performance_status != "OK":
         _queue_item(
             {
                 "kind": "performance",
@@ -821,6 +833,7 @@ def evaluation_fingerprint(
     performance_fingerprint: str | None,
     policy_hash: str,
     market_evidence_fingerprint: str = "",
+    currentness_fingerprint: str = "",
     engine_version: str = ENGINE_VERSION,
 ) -> str:
     payload = "|".join(
@@ -829,6 +842,7 @@ def evaluation_fingerprint(
             performance_fingerprint or "",
             policy_hash,
             market_evidence_fingerprint,
+            currentness_fingerprint,
             engine_version,
         )
     )

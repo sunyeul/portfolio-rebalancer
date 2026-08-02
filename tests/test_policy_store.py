@@ -31,67 +31,7 @@ def _core_instrument():
     }
 
 
-def _allocation_review():
-    return {
-        "strategy": "us_kr_three_regime_v1",
-        "cooldown_days": 30,
-        "minimum_history_points": 200,
-        "max_data_age_days": 7,
-        "max_gap_days": 10,
-        "drawdown_review": -0.15,
-        "volatility_review": 0.30,
-        "risk_on_trend": 0.50,
-        "risk_off_trend": -0.50,
-        "risk_on_max_risk_weight": 0.30,
-        "risk_off_risk_weight": 0.50,
-        "benchmarks": [
-            {
-                "key": "US/SPY",
-                "source_kind": "stock",
-                "market_country": "US",
-                "symbol": "SPY",
-                "weight": 0.30,
-            },
-            {
-                "key": "US/QQQ",
-                "source_kind": "stock",
-                "market_country": "US",
-                "symbol": "QQQ",
-                "weight": 0.30,
-            },
-            {
-                "key": "KR/KOSPI",
-                "source_kind": "market_indicator",
-                "market_country": "KR",
-                "symbol": "KOSPI",
-                "weight": 0.25,
-            },
-            {
-                "key": "KR/KOSDAQ",
-                "source_kind": "market_indicator",
-                "market_country": "KR",
-                "symbol": "KOSDAQ",
-                "weight": 0.15,
-            },
-        ],
-        "regimes": {
-            "risk_on": {
-                "cash_target": 0.03,
-                "layers": {"core": 0.52, "satellite": 0.44, "experiment": 0.04},
-            },
-            "neutral": {
-                "cash_target": 0.05,
-                "layers": {"core": 0.60, "satellite": 0.38, "experiment": 0.02},
-            },
-            "risk_off": {
-                "cash_target": 0.10,
-                "layers": {"core": 0.70, "satellite": 0.29, "experiment": 0.01},
-            },
-        },
-    }
-
-
-def _dynamic_policy():
+def _current_policy():
     return {
         "cash_reserve": {"minimum": 0.03, "target": 0.05, "maximum": 0.10},
         "performance": {
@@ -132,21 +72,17 @@ def _dynamic_policy():
                 "maximum": 0.04,
             },
         ],
-        "allocation_review": _allocation_review(),
     }
 
 
-def test_policy_validation_ignores_legacy_allocation_review():
-    from services.policy_validation import validate_policy
+def test_policy_validation_rejects_unknown_top_level_fields():
+    from services.policy_validation import PolicyValidationError, validate_policy
 
-    policy = _dynamic_policy()
+    policy = _current_policy()
+    policy["allocation_review"] = {"strategy": "retired"}
 
-    normalized = validate_policy(
-        policy,
-        [("US", "SPY"), ("US", "QQQ"), ("US", "GLD")],
-    )
-
-    assert "allocation_review" not in normalized
+    with pytest.raises(PolicyValidationError, match="unknown policy fields"):
+        validate_policy(policy, [("US", "SPY"), ("US", "QQQ"), ("US", "GLD")])
 
 
 def test_default_policy_is_seeded_once_and_is_replayable(monkeypatch, tmp_path):
@@ -167,6 +103,15 @@ def test_default_policy_is_seeded_once_and_is_replayable(monkeypatch, tmp_path):
         assert (
             conn.execute("SELECT COUNT(*) FROM ips_policy_versions").fetchone()[0] == 1
         )
+
+
+def test_policy_template_requires_active_policy(monkeypatch):
+    from storage import policy_store
+
+    monkeypatch.setattr(policy_store, "get_active_policy", lambda account_alias: None)
+
+    with pytest.raises(policy_store.PolicyStoreError, match="active policy is required"):
+        policy_store.policy_template()
 
 
 def test_policy_validation_rejects_unseen_identity_and_bad_layer_sum():

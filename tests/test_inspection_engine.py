@@ -496,6 +496,28 @@ def test_stale_source_is_blocking_and_never_emits_adjustment_suggestion():
     assert result["review_queue"][0]["queue_class"] == "blocking"
     assert result["review_queue"][0]["priority"] is None
     assert result["review_queue"][0]["suggestion"] is None
+    assert len(result["review_queue"]) == 1
+
+
+def test_currentness_block_preserves_no_action_or_secondary_queue_items():
+    result = evaluate_inspection(
+        _projection(cash=0.01),
+        {"state": "complete", "points": []},
+        _policy(),
+        _layer_map(),
+        risk_evidence=_risk_evidence(aaa_drawdown=-0.5, bbb_drawdown=-0.5),
+        source_currentness={
+            "is_current": False,
+            "reasons": ["snapshot_stale"],
+            "snapshot_age_seconds": 259201,
+        },
+    )
+
+    assert result["allocation_state"] == "not_evaluable"
+    assert result["allocation_reason"] == "snapshot_stale"
+    assert result["adjustment_suggestions"] == []
+    assert [item["queue_class"] for item in result["review_queue"]] == ["blocking"]
+    assert all(item["status"] != "Action" for item in result["review_queue"])
 
 
 def test_configured_absent_instrument_uses_zero_current_weight():
@@ -551,7 +573,7 @@ def test_cash_shortfall_blocks_layer_and_instrument_p3_suggestions():
     assert all(item["priority"] != "P3" for item in result["adjustment_suggestions"])
 
 
-def test_underweight_allocation_review_uses_policy_layer_only():
+def test_underweight_instrument_review_uses_policy_layer_only():
     policy = _policy()
     policy["instruments"][0]["minimum"] = 0.9
     result = evaluate_inspection(

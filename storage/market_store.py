@@ -23,25 +23,6 @@ def candle_fingerprint(candle: Mapping[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _same_candle_values(existing: Mapping[str, Any], candle: Mapping[str, Any]) -> bool:
-    """Treat legacy fingerprint changes as idempotent when values are unchanged."""
-    return (
-        str(existing["currency"]) == str(candle["currency"])
-        and float(existing["open_price"]) == float(candle["open_price"])
-        and float(existing["high_price"]) == float(candle["high_price"])
-        and float(existing["low_price"]) == float(candle["low_price"])
-        and float(existing["close_price"]) == float(candle["close_price"])
-        and float(existing["volume"]) == float(candle["volume"])
-        and bool(existing["adjusted_supported"])
-        == bool(
-            candle.get(
-                "adjusted_supported",
-                candle["source_kind"] == "stock",
-            )
-        )
-    )
-
-
 def insert_candles(candles: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with connect() as conn:
@@ -73,22 +54,20 @@ def insert_candles(candles: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]
                 candle["interval"],
                 candle["candle_at"],
                 int(bool(candle["adjusted"])),
+                fingerprint,
             )
             existing = conn.execute(
                 """
                 SELECT * FROM toss_market_candles
                 WHERE source_kind = ? AND market_country = ? AND symbol = ?
                   AND interval = ? AND candle_at = ? AND adjusted = ?
-                ORDER BY id DESC LIMIT 1
+                  AND source_fingerprint = ?
                 """,
                 identity,
             ).fetchone()
             if existing is not None:
-                if existing["source_fingerprint"] == fingerprint or _same_candle_values(
-                    existing, candle
-                ):
-                    rows.append(dict(existing))
-                    continue
+                rows.append(dict(existing))
+                continue
             conn.execute(
                 """
                 INSERT INTO toss_market_candles (

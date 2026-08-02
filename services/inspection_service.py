@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from services.currentness import evaluate_currentness
 from services.account_projection import (
     AccountProjectionError,
     build_account_projection,
@@ -67,7 +68,7 @@ def _prepare_inputs(
     source_error: str | None = None
     source_snapshot = get_snapshot(snapshot_id) if snapshot_id is not None else None
     if source_snapshot is None and snapshot_id is None:
-        recent = list_snapshots(limit=1)
+        recent = list_snapshots(limit=1, account_alias=account_alias)
         source_snapshot = recent[0] if recent else None
     try:
         projection = build_account_projection(
@@ -88,6 +89,12 @@ def _prepare_inputs(
         performance = latest_performance_run(
             through_snapshot_id=projection["snapshot_id"]
         )
+    source_currentness = evaluate_currentness(
+        snapshot=source_snapshot,
+        active_policy={"id": policy_version_id if policy_version_id is not None else 0},
+    )
+    if not source_currentness["is_current"] and source_error is None:
+        source_error = str(source_currentness["reasons"][0])
     candles = (
         _select_market_candles(projection, policy["risk_review"])
         if projection is not None
@@ -124,6 +131,7 @@ def _prepare_inputs(
         risk_evidence=risk_evidence,
         evidence_refs=evidence_refs,
         source_error=source_error,
+        source_currentness=source_currentness,
     )
     if projection is None and source_snapshot is not None:
         result["source"]["snapshot_id"] = source_snapshot["id"]
@@ -135,8 +143,10 @@ def _prepare_inputs(
         else None,
         policy_hash=policy_hash_value,
         market_evidence_fingerprint=risk_evidence["market_evidence_fingerprint"],
+        currentness_fingerprint="currentness-v1|"
+        + "|".join(source_currentness["reasons"]),
     )
-    allocation_state = result.get("allocation_state", "not_evaluable")
+    allocation_state = result["allocation_state"]
     persisted_state = (
         "complete" if allocation_state in {"complete", "partial"} else "not_evaluable"
     )
@@ -153,8 +163,6 @@ def _prepare_inputs(
         else None,
         "policy_version_id": policy_version_id,
         "policy_hash": policy_hash_value,
-        # The persistence wrapper retains its historical state column while
-        # the result itself uses the explicit allocation evaluability axis.
         "state": persisted_state,
         "non_evaluable_reason": result.get("allocation_reason")
         if persisted_state == "not_evaluable"

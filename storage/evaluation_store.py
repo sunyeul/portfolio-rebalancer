@@ -9,8 +9,63 @@ from typing import Any
 from storage.database import connect
 
 
+ENGINE_VERSION = "phase5-v2"
+REQUIRED_RESULT_FIELDS = frozenset(
+    {
+        "engine_version",
+        "source",
+        "allocation_state",
+        "account",
+        "layers",
+        "instruments",
+        "review_queue",
+    }
+)
+ALLOCATION_STATES = frozenset({"complete", "partial", "not_evaluable"})
+
+
 class EvaluationStorageError(RuntimeError):
     """Raised when an evaluation run cannot be persisted or read."""
+
+
+def current_v2_result(result: Any) -> bool:
+    """Return whether a result is a complete current phase5-v2 payload."""
+    if not isinstance(result, dict):
+        return False
+    if result.get("engine_version") != ENGINE_VERSION:
+        return False
+    if not REQUIRED_RESULT_FIELDS <= result.keys():
+        return False
+    return (
+        result.get("allocation_state") in ALLOCATION_STATES
+        and isinstance(result.get("source"), dict)
+        and isinstance(result.get("account"), dict)
+        and isinstance(result.get("layers"), list)
+        and isinstance(result.get("instruments"), list)
+        and isinstance(result.get("review_queue"), list)
+    )
+
+
+def _invalid_current_v2_result_field(result: Any) -> str:
+    """Name the first invalid result field for a machine-readable store error."""
+    if not isinstance(result, dict):
+        return "result"
+    for field in sorted(REQUIRED_RESULT_FIELDS - result.keys()):
+        return f"result.{field}"
+    if result.get("engine_version") != ENGINE_VERSION:
+        return "result.engine_version"
+    if result.get("allocation_state") not in ALLOCATION_STATES:
+        return "result.allocation_state"
+    for field, expected_type in (
+        ("source", dict),
+        ("account", dict),
+        ("layers", list),
+        ("instruments", list),
+        ("review_queue", list),
+    ):
+        if not isinstance(result.get(field), expected_type):
+            return f"result.{field}"
+    return "result"
 
 
 def _json(value: Any) -> str:
@@ -36,6 +91,12 @@ def insert_evaluation_run(evaluation: dict[str, Any]) -> dict[str, Any]:
         raise EvaluationStorageError(f"evaluation missing fields: {', '.join(missing)}")
     if evaluation["state"] not in {"complete", "not_evaluable", "failed"}:
         raise EvaluationStorageError("invalid evaluation state")
+    if evaluation["engine_version"] != ENGINE_VERSION:
+        raise EvaluationStorageError("unsupported evaluation engine_version")
+    if not current_v2_result(evaluation["result"]):
+        raise EvaluationStorageError(
+            f"invalid phase5-v2 evaluation {_invalid_current_v2_result_field(evaluation['result'])}"
+        )
     with connect() as conn:
         existing = conn.execute(
             "SELECT id FROM ips_evaluation_runs WHERE evaluation_fingerprint = ?",

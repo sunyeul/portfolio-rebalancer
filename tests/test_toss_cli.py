@@ -119,3 +119,25 @@ def test_toss_health_returns_machine_readable_config_error(monkeypatch):
     assert payload["command"] == "toss-health"
     assert "TOSS_OPEN_API_CLIENT_SECRET" in payload["error"]["message"]
     assert "access-token" not in result.stdout
+
+
+def test_inspection_run_exposes_backend_currentness_and_candidate_boundary(monkeypatch):
+    evaluation = {
+        "id": 7,
+        "snapshot_id": 9,
+        "state": "complete",
+        "engine_version": "phase5-v2",
+        "result": {"source": {"currentness": {"is_current": True, "reasons": []}}},
+    }
+    monkeypatch.setattr("cli.run_inspection", lambda snapshot_id=None: evaluation)
+    monkeypatch.setattr("cli.get_active_policy", lambda: {"id": 4})
+
+    result = runner.invoke(app, ["inspection", "run"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["currentness"] == {"is_current": True, "reasons": []}
+    assert payload["policy_candidate_assessment"]["state"] == "not_implemented"
+    assert (
+        payload["policy_candidate_assessment"]["may_change_primary_evaluation"] is False
+    )

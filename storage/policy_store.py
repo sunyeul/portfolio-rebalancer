@@ -70,37 +70,6 @@ def ensure_default_policy(
         """,
         (account_alias, encoded, fingerprint, account_alias),
     )
-    active = conn.execute(
-        """
-        SELECT id, version, policy_json, policy_hash
-        FROM ips_policy_versions
-        WHERE account_alias = ? AND superseded_at IS NULL
-        ORDER BY version DESC, id DESC LIMIT 1
-        """,
-        (account_alias,),
-    ).fetchone()
-    if active is None:
-        return
-    current = json.loads(active["policy_json"])
-    required_defaults = {key: DEFAULT_POLICY[key] for key in ("performance", "cadence")}
-    if all(key in current for key in required_defaults):
-        return
-    upgraded = dict(current)
-    for key, value in required_defaults.items():
-        upgraded.setdefault(key, value)
-    upgraded_encoded = canonical_policy_json(upgraded)
-    upgraded_hash = policy_hash(upgraded)
-    conn.execute(
-        "UPDATE ips_policy_versions SET superseded_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (active["id"],),
-    )
-    conn.execute(
-        """
-        INSERT INTO ips_policy_versions (account_alias, version, policy_json, policy_hash)
-        VALUES (?, ?, ?, ?)
-        """,
-        (account_alias, int(active["version"]) + 1, upgraded_encoded, upgraded_hash),
-    )
 
 
 def get_active_policy(
@@ -249,14 +218,21 @@ def policy_template(
     )
 
     active = get_active_policy(account_alias)
-    active_policy = active["policy"] if active is not None else None
+    if active is None:
+        raise PolicyStoreError("active policy is required")
+    active_policy = active["policy"]
+    from services.policy_validation import PolicyValidationError, validate_policy
+
+    try:
+        validate_policy(active_policy, list_observed_identities(account_alias))
+    except PolicyValidationError as error:
+        raise PolicyStoreError(f"active policy is invalid: {error}") from error
     projection = build_account_projection(
         snapshot_id=snapshot_id,
         account_alias=account_alias,
         layer_map=layer_map_from_policy(active_policy),
     )
-    policy = dict(active["policy"]) if active is not None else dict(DEFAULT_POLICY)
-    policy.setdefault("risk_review", DEFAULT_POLICY["risk_review"])
+    policy = dict(active_policy)
     policy["instruments"] = [
         {
             "market_country": position["market_country"],
@@ -271,6 +247,6 @@ def policy_template(
     return {
         "account_alias": account_alias,
         "snapshot_id": projection["snapshot_id"],
-        "active_policy_version": active["version"] if active else None,
+        "active_policy_version": active["version"],
         "policy": policy,
     }

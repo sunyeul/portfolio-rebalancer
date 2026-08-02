@@ -19,6 +19,8 @@ from integrations.toss.observation import TossObservationService
 from integrations.toss.market import TossMarketDataService
 from integrations.toss.transport import TossTransport
 from services.inspection_service import preview_inspection, run_inspection
+from services.policy_candidate_assessment import unavailable_policy_candidate_assessment
+from storage.evaluation_store import ENGINE_VERSION, current_v2_result
 from storage.account_observation_store import (
     get_snapshot as get_account_snapshot,
     list_snapshots as list_account_snapshots,
@@ -99,61 +101,13 @@ app.add_typer(inspection_app, name="inspection")
 app.add_typer(market_app, name="market")
 
 
-SUPPORTED_INSPECTION_ENGINE_VERSION = "phase5-v2"
-
-
 def _contract_supported(evaluation: dict[str, Any] | None) -> bool:
     """Gate consumers on the approved v2 evaluation contract only."""
-    if not isinstance(evaluation, dict):
-        return False
-    return evaluation.get("engine_version") == SUPPORTED_INSPECTION_ENGINE_VERSION
-
-
-def _evaluation_currentness(
-    evaluation: dict[str, Any] | None,
-    current_snapshot: dict[str, Any] | None,
-    active_policy: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """Compare one immutable evaluation with the current source contracts."""
-    evaluation_snapshot_id = (
-        evaluation.get("snapshot_id") if evaluation is not None else None
+    return (
+        isinstance(evaluation, dict)
+        and evaluation.get("engine_version") == ENGINE_VERSION
+        and current_v2_result(evaluation.get("result"))
     )
-    current_snapshot_id = (
-        current_snapshot.get("id") if current_snapshot is not None else None
-    )
-    evaluation_policy_version_id = (
-        evaluation.get("policy_version_id") if evaluation is not None else None
-    )
-    active_policy_version_id = (
-        active_policy.get("id") if active_policy is not None else None
-    )
-    reasons: list[str] = []
-    if evaluation is None:
-        reasons.append("evaluation_missing")
-    if current_snapshot is None:
-        reasons.append("current_snapshot_missing")
-    if active_policy is None:
-        reasons.append("active_policy_missing")
-    if (
-        evaluation is not None
-        and current_snapshot is not None
-        and evaluation_snapshot_id != current_snapshot_id
-    ):
-        reasons.append("snapshot_mismatch")
-    if (
-        evaluation is not None
-        and active_policy is not None
-        and evaluation_policy_version_id != active_policy_version_id
-    ):
-        reasons.append("policy_version_mismatch")
-    return {
-        "is_current": not reasons,
-        "reasons": reasons,
-        "evaluation_snapshot_id": evaluation_snapshot_id,
-        "current_snapshot_id": current_snapshot_id,
-        "evaluation_policy_version_id": evaluation_policy_version_id,
-        "active_policy_version_id": active_policy_version_id,
-    }
 
 
 class CliError(Exception):
@@ -442,6 +396,7 @@ def inspection_run_command(
     """Run or reuse one deterministic Toss inspection evaluation."""
     try:
         evaluation = run_inspection(snapshot_id=snapshot_id)
+        active_policy = get_active_policy()
         _emit_json(
             {
                 "ok": True,
@@ -451,6 +406,12 @@ def inspection_run_command(
                 "state": evaluation["state"],
                 "evaluation": evaluation,
                 "contract_supported": _contract_supported(evaluation),
+                "currentness": (
+                    evaluation.get("result", {}).get("source", {}).get("currentness")
+                ),
+                "policy_candidate_assessment": unavailable_policy_candidate_assessment(
+                    active_policy
+                ),
                 "error": None,
             }
         )

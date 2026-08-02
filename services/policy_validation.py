@@ -10,6 +10,16 @@ from storage.policy_store import canonical_policy_json, policy_hash
 
 LAYERS = ("core", "satellite", "experiment")
 SUM_TOLERANCE = 1e-9
+POLICY_FIELDS = frozenset(
+    {
+        "cash_reserve",
+        "performance",
+        "risk_review",
+        "cadence",
+        "layers",
+        "instruments",
+    }
+)
 
 
 class PolicyValidationError(ValueError):
@@ -73,240 +83,6 @@ def _negative_rate(value: Any, path: str, errors: list[str]) -> float | None:
     return number
 
 
-def _signed_unit(value: Any, path: str, errors: list[str]) -> float | None:
-    if isinstance(value, bool):
-        errors.append(f"{path} must be a finite number between -1 and 1")
-        return None
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        errors.append(f"{path} must be a finite number between -1 and 1")
-        return None
-    if not math.isfinite(number) or not -1 <= number <= 1:
-        errors.append(f"{path} must be a finite number between -1 and 1")
-        return None
-    return number
-
-
-def _allocation_benchmarks(value: Any, errors: list[str]) -> list[dict[str, Any]]:
-    path = "allocation_review.benchmarks"
-    if not isinstance(value, list):
-        errors.append(f"{path} must be an array")
-        return []
-    required = {
-        "US/SPY": ("stock", "US", "SPY"),
-        "US/QQQ": ("stock", "US", "QQQ"),
-        "KR/KOSPI": ("market_indicator", "KR", "KOSPI"),
-        "KR/KOSDAQ": ("market_indicator", "KR", "KOSDAQ"),
-    }
-    result: list[dict[str, Any]] = []
-    seen_keys: set[str] = set()
-    seen_identities: set[tuple[str, str, str]] = set()
-    for index, raw in enumerate(value):
-        item_path = f"{path}[{index}]"
-        if not isinstance(raw, dict):
-            errors.append(f"{item_path} must be an object")
-            continue
-        key = str(raw.get("key", "")).strip().upper()
-        source_kind = str(raw.get("source_kind", "")).strip().lower()
-        market_country = str(raw.get("market_country", "")).strip().upper()
-        symbol = str(raw.get("symbol", "")).strip().upper()
-        weight = _number(raw.get("weight"), f"{item_path}.weight", errors)
-        identity = (source_kind, market_country, symbol)
-        if not key:
-            errors.append(f"{item_path}.key is required")
-        if source_kind not in {"stock", "market_indicator"}:
-            errors.append(f"{item_path}.source_kind is invalid")
-        if not market_country or not symbol:
-            errors.append(f"{item_path} requires market_country and symbol")
-        if key in seen_keys or identity in seen_identities:
-            errors.append(f"{path} contains a duplicate key or identity")
-        seen_keys.add(key)
-        seen_identities.add(identity)
-        if weight is not None:
-            result.append(
-                {
-                    "key": key,
-                    "source_kind": source_kind,
-                    "market_country": market_country,
-                    "symbol": symbol,
-                    "weight": weight,
-                }
-            )
-    if set(seen_keys) != set(required):
-        errors.append(
-            f"{path} must contain exactly US/SPY, US/QQQ, KR/KOSPI, KR/KOSDAQ"
-        )
-    for item in result:
-        expected = required.get(item["key"])
-        actual = (item["source_kind"], item["market_country"], item["symbol"])
-        if expected is not None and actual != expected:
-            errors.append(f"{path} identity does not match {item['key']}")
-    if not math.isclose(
-        sum(float(item["weight"]) for item in result),
-        1.0,
-        abs_tol=SUM_TOLERANCE,
-    ):
-        errors.append(f"{path} weights must sum to 1")
-    return result
-
-
-def _allocation_regimes(
-    value: Any,
-    cash: dict[str, float] | None,
-    layers: dict[str, dict[str, float]],
-    errors: list[str],
-) -> dict[str, dict[str, Any]]:
-    path = "allocation_review.regimes"
-    regimes = ("risk_on", "neutral", "risk_off")
-    if not isinstance(value, dict):
-        errors.append(f"{path} must be an object")
-        return {}
-    if set(value) != set(regimes):
-        errors.append(f"{path} must contain exactly risk_on, neutral, risk_off")
-    result: dict[str, dict[str, Any]] = {}
-    for regime in regimes:
-        raw = value.get(regime)
-        item_path = f"{path}.{regime}"
-        if not isinstance(raw, dict):
-            errors.append(f"{item_path} must be an object")
-            continue
-        cash_target = _number(
-            raw.get("cash_target"), f"{item_path}.cash_target", errors
-        )
-        raw_layer_targets = raw.get("layers")
-        if not isinstance(raw_layer_targets, dict):
-            errors.append(f"{item_path}.layers must be an object")
-            continue
-        if set(raw_layer_targets) != set(LAYERS):
-            errors.append(
-                f"{item_path}.layers must contain exactly core, satellite, experiment"
-            )
-        layer_targets: dict[str, float] = {}
-        for layer in LAYERS:
-            target = _number(
-                raw_layer_targets.get(layer),
-                f"{item_path}.layers.{layer}",
-                errors,
-            )
-            if target is not None:
-                layer_targets[layer] = target
-        if len(layer_targets) == len(LAYERS) and not math.isclose(
-            sum(layer_targets.values()), 1.0, abs_tol=SUM_TOLERANCE
-        ):
-            errors.append(f"{item_path} layer targets must sum to 1")
-        if (
-            cash_target is not None
-            and cash is not None
-            and not (cash["minimum"] <= cash_target <= cash["maximum"])
-        ):
-            errors.append(f"{item_path} cash target must be within cash_reserve range")
-        for layer, target in layer_targets.items():
-            layer_range = layers.get(layer)
-            if layer_range is not None and not (
-                layer_range["minimum"] <= target <= layer_range["maximum"]
-            ):
-                errors.append(
-                    f"{item_path}.layers.{layer} must be within layers.{layer} range"
-                )
-        if cash_target is not None and len(layer_targets) == len(LAYERS):
-            result[regime] = {
-                "cash_target": cash_target,
-                "layers": layer_targets,
-            }
-    return result
-
-
-def _allocation_review(
-    value: Any,
-    cash: dict[str, float] | None,
-    layers: dict[str, dict[str, float]],
-    errors: list[str],
-) -> dict[str, Any] | None:
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        errors.append("allocation_review must be an object")
-        return None
-    before = len(errors)
-    strategy = str(value.get("strategy", "")).strip()
-    if strategy != "us_kr_three_regime_v1":
-        errors.append("allocation_review.strategy must be us_kr_three_regime_v1")
-    cooldown_days = _positive_integer(
-        value.get("cooldown_days"), "allocation_review.cooldown_days", errors
-    )
-    minimum_history_points = _positive_integer(
-        value.get("minimum_history_points"),
-        "allocation_review.minimum_history_points",
-        errors,
-    )
-    max_data_age_days = _positive_integer(
-        value.get("max_data_age_days"),
-        "allocation_review.max_data_age_days",
-        errors,
-    )
-    max_gap_days = _positive_integer(
-        value.get("max_gap_days"), "allocation_review.max_gap_days", errors
-    )
-    drawdown_review = _negative_rate(
-        value.get("drawdown_review"), "allocation_review.drawdown_review", errors
-    )
-    volatility_review = _number(
-        value.get("volatility_review"),
-        "allocation_review.volatility_review",
-        errors,
-    )
-    risk_on_trend = _signed_unit(
-        value.get("risk_on_trend"), "allocation_review.risk_on_trend", errors
-    )
-    risk_off_trend = _signed_unit(
-        value.get("risk_off_trend"), "allocation_review.risk_off_trend", errors
-    )
-    risk_on_max_risk_weight = _number(
-        value.get("risk_on_max_risk_weight"),
-        "allocation_review.risk_on_max_risk_weight",
-        errors,
-    )
-    risk_off_risk_weight = _number(
-        value.get("risk_off_risk_weight"),
-        "allocation_review.risk_off_risk_weight",
-        errors,
-    )
-    benchmarks = _allocation_benchmarks(value.get("benchmarks"), errors)
-    regimes = _allocation_regimes(value.get("regimes"), cash, layers, errors)
-    if (
-        risk_off_trend is not None
-        and risk_on_trend is not None
-        and risk_off_trend >= risk_on_trend
-    ):
-        errors.append("allocation_review risk_off_trend must be below risk_on_trend")
-    if (
-        risk_on_max_risk_weight is not None
-        and risk_off_risk_weight is not None
-        and risk_on_max_risk_weight > risk_off_risk_weight
-    ):
-        errors.append(
-            "allocation_review risk_on_max_risk_weight must not exceed risk_off_risk_weight"
-        )
-    if len(errors) != before:
-        return None
-    return {
-        "strategy": strategy,
-        "cooldown_days": cooldown_days,
-        "minimum_history_points": minimum_history_points,
-        "max_data_age_days": max_data_age_days,
-        "max_gap_days": max_gap_days,
-        "drawdown_review": drawdown_review,
-        "volatility_review": volatility_review,
-        "risk_on_trend": risk_on_trend,
-        "risk_off_trend": risk_off_trend,
-        "risk_on_max_risk_weight": risk_on_max_risk_weight,
-        "risk_off_risk_weight": risk_off_risk_weight,
-        "benchmarks": benchmarks,
-        "regimes": regimes,
-    }
-
-
 def _identity(
     item: dict[str, Any], index: int, errors: list[str]
 ) -> tuple[str, str] | None:
@@ -326,6 +102,9 @@ def validate_policy(
     errors: list[str] = []
     if not isinstance(policy, dict):
         raise PolicyValidationError(["policy must be an object"])
+    unknown = sorted(set(policy) - POLICY_FIELDS)
+    if unknown:
+        errors.append(f"unknown policy fields: {', '.join(unknown)}")
 
     cash = _range(policy.get("cash_reserve"), "cash_reserve", errors)
     performance = policy.get("performance")

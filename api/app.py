@@ -13,77 +13,30 @@ from fastapi.staticfiles import StaticFiles
 
 from api.schemas import ApiEnvelope
 from services.change_brief import build_change_brief
+from services.currentness import evaluate_currentness
+from services.policy_candidate_assessment import unavailable_policy_candidate_assessment
 from storage.account_observation_store import (
-    latest_complete,
     latest_verified_complete,
     list_snapshots,
 )
 from storage.database import initialize_database
-from storage.evaluation_store import list_evaluation_runs, latest_evaluation_run
+from storage.evaluation_store import (
+    ENGINE_VERSION,
+    current_v2_result,
+    list_evaluation_runs,
+    latest_evaluation_run,
+)
 from storage.performance_store import get_performance_run, latest_performance_run
 from storage.policy_store import get_active_policy
 
 
-SUPPORTED_INSPECTION_ENGINE_VERSION = "phase5-v2"
-
-
 def _contract_supported(evaluation: dict[str, Any] | None) -> bool:
-    """Return whether an evaluation uses the approved v2 result contract.
-
-    API evaluation payloads are persisted wrappers, so only their top-level
-    engine version is authoritative.  No nested result is adapted into a v2
-    wrapper at read time.
-    """
-    if not isinstance(evaluation, dict):
-        return False
-    return evaluation.get("engine_version") == SUPPORTED_INSPECTION_ENGINE_VERSION
-
-
-def _evaluation_currentness(
-    evaluation: dict[str, Any] | None,
-    current_snapshot: dict[str, Any] | None,
-    active_policy: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """Compare one immutable evaluation with the current source contracts."""
-    evaluation_snapshot_id = (
-        evaluation.get("snapshot_id") if evaluation is not None else None
+    """Return whether an evaluation has the approved persisted v2 result."""
+    return (
+        isinstance(evaluation, dict)
+        and evaluation.get("engine_version") == ENGINE_VERSION
+        and current_v2_result(evaluation.get("result"))
     )
-    current_snapshot_id = (
-        current_snapshot.get("id") if current_snapshot is not None else None
-    )
-    evaluation_policy_version_id = (
-        evaluation.get("policy_version_id") if evaluation is not None else None
-    )
-    active_policy_version_id = (
-        active_policy.get("id") if active_policy is not None else None
-    )
-    reasons: list[str] = []
-    if evaluation is None:
-        reasons.append("evaluation_missing")
-    if current_snapshot is None:
-        reasons.append("current_snapshot_missing")
-    if active_policy is None:
-        reasons.append("active_policy_missing")
-    if (
-        evaluation is not None
-        and current_snapshot is not None
-        and evaluation_snapshot_id != current_snapshot_id
-    ):
-        reasons.append("snapshot_mismatch")
-    if (
-        evaluation is not None
-        and active_policy is not None
-        and evaluation_policy_version_id != active_policy_version_id
-    ):
-        reasons.append("policy_version_mismatch")
-    return {
-        "is_current": not reasons,
-        "reasons": reasons,
-        "evaluation_snapshot_id": evaluation_snapshot_id,
-        "current_snapshot_id": current_snapshot_id,
-        "evaluation_policy_version_id": evaluation_policy_version_id,
-        "active_policy_version_id": active_policy_version_id,
-    }
 
 
 def _error(message: str, status_code: int = 200) -> JSONResponse:
@@ -114,63 +67,10 @@ def _snapshot_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-_ACCOUNT_SUMMARY_KEYS = (
-    "total_value_krw",
-    "invested_value_krw",
-    "cash_value_krw",
-    "cash_weight_gross",
-    "investment_principal_krw",
-    "account_profit_krw",
-    "account_return",
-)
-
-
-def _evaluation_view(evaluation: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Expose the current account contract for evaluations persisted by older code."""
-    if evaluation is None:
-        return None
-    visible = dict(evaluation)
-    result = dict(evaluation.get("result") or {})
-    account = dict(result.get("account") or {})
-    performance_run_id = evaluation.get("performance_run_id")
-    if performance_run_id is not None:
-        performance_run = get_performance_run(int(performance_run_id))
-        points = (
-            performance_run.get("points", [])
-            if isinstance(performance_run, dict)
-            else []
-        )
-        evaluable_points = [
-            point
-            for point in points
-            if isinstance(point, dict) and point.get("evaluation_state") == "evaluable"
-        ]
-        latest_point = max(
-            evaluable_points,
-            key=lambda point: (
-                str(point.get("point_at") or ""),
-                int(point.get("id") or 0),
-            ),
-            default=None,
-        )
-        if latest_point is not None:
-            account.update(
-                {
-                    "total_value_krw": latest_point.get("total_value_krw"),
-                    "invested_value_krw": latest_point.get("invested_value_krw"),
-                    "cash_value_krw": latest_point.get("cash_value_krw"),
-                    "investment_principal_krw": latest_point.get(
-                        "investment_principal_krw"
-                    ),
-                    "account_profit_krw": latest_point.get("account_gain_krw"),
-                    "account_return": latest_point.get("simple_return"),
-                }
-            )
-    result["account"] = {
-        key: account[key] for key in _ACCOUNT_SUMMARY_KEYS if key in account
-    }
-    visible["result"] = result
-    return visible
+def _latest_account_attempt() -> dict[str, Any] | None:
+    """Select the newest Toss attempt for the same source-currentness rule."""
+    snapshots = list_snapshots(limit=1, account_alias="toss-brokerage")
+    return snapshots[0] if snapshots else None
 
 
 def create_app() -> FastAPI:
@@ -242,11 +142,13 @@ def create_app() -> FastAPI:
 
     @app.get("/api/inspection", response_model=ApiEnvelope)
     async def inspection() -> dict[str, Any]:
-        evaluation = _evaluation_view(latest_evaluation_run())
-        currentness = _evaluation_currentness(
-            evaluation,
-            latest_complete(),
-            get_active_policy(),
+        evaluation = latest_evaluation_run()
+        active_policy = get_active_policy()
+        currentness = evaluate_currentness(
+            evaluation=evaluation,
+            snapshot=_latest_account_attempt(),
+            active_policy=active_policy,
+            require_evaluation=True,
         )
         return {
             "ok": True,
@@ -254,6 +156,9 @@ def create_app() -> FastAPI:
                 "evaluation": evaluation,
                 "contract_supported": _contract_supported(evaluation),
                 "currentness": currentness,
+                "policy_candidate_assessment": unavailable_policy_candidate_assessment(
+                    active_policy
+                ),
             },
             "error": None,
         }
@@ -263,10 +168,11 @@ def create_app() -> FastAPI:
         evaluations = list_evaluation_runs(limit=2)
         current = evaluations[0] if evaluations else latest_evaluation_run()
         previous = evaluations[1] if len(evaluations) > 1 else None
-        currentness = _evaluation_currentness(
-            current,
-            latest_complete(),
-            get_active_policy(),
+        currentness = evaluate_currentness(
+            evaluation=current,
+            snapshot=_latest_account_attempt(),
+            active_policy=get_active_policy(),
+            require_evaluation=True,
         )
         brief = build_change_brief(current, previous)
         brief["currentness"] = currentness

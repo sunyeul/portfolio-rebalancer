@@ -1,5 +1,10 @@
 # Balanced IPS judgment axes
 
+> Implementation note (2026-08-02): the shared 72-hour currentness gate is
+> implemented. Market/technical policy-candidate generation was removed from the
+> reduced-core surface, so it is explicitly reported as `not_implemented` rather
+> than inferred from incomplete evidence.
+
 ## Goal
 
 Keep the IPS inspection strict about the currently active policy while making
