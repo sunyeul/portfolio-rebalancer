@@ -40,7 +40,6 @@ def _current_policy():
             "minimum_history_days": 365,
         },
         "risk_review": _risk_review(),
-        "cadence": {"observation": "weekly", "inspection": "monthly"},
         "layers": {
             "core": {"minimum": 0.50, "target": 0.60, "maximum": 0.70},
             "satellite": {"minimum": 0.28, "target": 0.38, "maximum": 0.48},
@@ -125,7 +124,6 @@ def test_policy_validation_rejects_unseen_identity_and_bad_layer_sum():
             "minimum_history_days": 365,
         },
         "risk_review": _risk_review(),
-        "cadence": {"observation": "weekly", "inspection": "monthly"},
         "layers": {
             "core": {"minimum": 0, "target": 0.7, "maximum": 0.9},
             "satellite": {"minimum": 0, "target": 0.2, "maximum": 0.3},
@@ -159,7 +157,6 @@ def test_policy_validation_rejects_any_instrument_without_toss_observation():
             "minimum_history_days": 365,
         },
         "risk_review": _risk_review(),
-        "cadence": {"observation": "weekly", "inspection": "monthly"},
         "layers": {
             "core": {"minimum": 1, "target": 1, "maximum": 1},
             "satellite": {"minimum": 0, "target": 0, "maximum": 0},
@@ -203,6 +200,7 @@ def test_policy_validation_normalizes_risk_review():
     normalized = validate_policy(policy, [("US", "SPY")])
 
     assert normalized["risk_review"] == _risk_review()
+    assert "cadence" not in normalized
 
 
 @pytest.mark.parametrize(
@@ -241,7 +239,6 @@ def test_policy_validation_rejects_invalid_risk_review(mutator):
             "minimum_history_days": 365,
         },
         "risk_review": risk,
-        "cadence": {"observation": "weekly", "inspection": "monthly"},
         "layers": {
             "core": {"minimum": 1, "target": 1, "maximum": 1},
             "satellite": {"minimum": 0, "target": 0, "maximum": 0},

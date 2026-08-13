@@ -27,7 +27,6 @@ DEFAULT_POLICY: dict[str, Any] = {
             "experiment": -0.15,
         },
     },
-    "cadence": {"observation": "weekly", "inspection": "monthly"},
     "layers": {
         "core": {"minimum": 0.70, "target": 0.80, "maximum": 0.90},
         "satellite": {"minimum": 0.10, "target": 0.20, "maximum": 0.30},
@@ -224,15 +223,17 @@ def policy_template(
     from services.policy_validation import PolicyValidationError, validate_policy
 
     try:
-        validate_policy(active_policy, list_observed_identities(account_alias))
+        normalized_active = validate_policy(
+            active_policy, list_observed_identities(account_alias)
+        )
     except PolicyValidationError as error:
         raise PolicyStoreError(f"active policy is invalid: {error}") from error
     projection = build_account_projection(
         snapshot_id=snapshot_id,
         account_alias=account_alias,
-        layer_map=layer_map_from_policy(active_policy),
+        layer_map=layer_map_from_policy(normalized_active),
     )
-    policy = dict(active_policy)
+    policy = dict(normalized_active)
     policy["instruments"] = [
         {
             "market_country": position["market_country"],

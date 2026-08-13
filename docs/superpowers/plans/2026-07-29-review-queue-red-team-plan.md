@@ -2,9 +2,9 @@
 
 > **For agentic workers:** Execute this plan inline task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add deterministic, inspection-only counterarguments and evidence gaps to each Review Queue item and render them in the read-only workbench.
+**Goal:** Add deterministic, inspection-only counterarguments to each Review Queue item and render them in the read-only workbench.
 
-**Architecture:** Keep the inspection engine as the sole producer of Review Queue content. It will derive a `red_team` explanation from the existing item kind, blocking state, and verification task while preserving all decision fields. The frontend will only render that payload.
+**Architecture:** Keep the inspection engine as the sole producer of Review Queue content. It will derive a `red_team` explanation from the existing item kind and blocking state while preserving all decision fields. The frontend will only render that payload.
 
 **Tech Stack:** Python, pytest, React, TypeScript, Vite, Bun.
 
@@ -24,7 +24,6 @@ contains:
 ```python
 assert item["red_team"] == {
     "counterargument": "비중 범위 이탈만으로 거래나 예외 개입을 확정할 수 없습니다.",
-    "evidence_needed": item["verification_task"],
 }
 ```
 
@@ -44,17 +43,15 @@ Expected: failure because `red_team` is absent.
 - [x] **Step 3: Add a deterministic explanation helper**
 
 In `services/inspection_engine.py`, add a private helper that receives the
-queue item and `blocking`. It returns exactly `counterargument` and
-`evidence_needed`, using the existing `verification_task`. Use separate Korean
-counterarguments for blocking source, allocation (`cash`, `layer`,
+queue item and `blocking`. It returns exactly `counterargument`. Use separate
+Korean counterarguments for blocking source, allocation (`cash`, `layer`,
 `instrument`), and performance (`performance`, `account_risk`) items.
 
 - [x] **Step 4: Attach the helper result only during queue projection**
 
 Add `"red_team": _red_team(item, blocking=blocking)` to `_queue_item`'s
 existing dictionary. Do not change `_queue_item` sorting inputs, item status,
-priority, suggestion, queue class, evaluation persistence, or adjustment
-suggestions.
+priority, suggestion, queue class, or evaluation persistence.
 
 - [x] **Step 5: Run focused and full engine tests**
 
@@ -80,9 +77,9 @@ Extend the persisted evaluation fixture in
 
 - [x] **Step 2: Type the read-only field**
 
-Add an `InspectionRedTeam` type with optional `counterargument` and
-`evidence_needed` fields. Add `red_team?: InspectionRedTeam` to
-`InspectionItem`. Do not add client-side status or priority computation.
+Add an `InspectionRedTeam` type with an optional `counterargument` field. Add
+`red_team?: InspectionRedTeam` to `InspectionItem`. Do not add client-side
+status or priority computation.
 
 - [x] **Step 3: Run focused backend contract tests**
 
@@ -103,8 +100,8 @@ Expected: pass.
 - [x] **Step 1: Render only server-provided text**
 
 Within `ReviewQueue`, render a `반대 관점` block when `item.red_team` exists.
-Display `counterargument` and `추가 확인 · evidence_needed`; do not render the
-block from triggers or infer its content in the client.
+Display `counterargument`; do not render the block from triggers or infer its
+content in the client.
 
 - [x] **Step 2: Add compact responsive styling**
 
@@ -136,8 +133,8 @@ Expected: both commands pass.
 - [x] **Step 1: Check decision fields and order remain backend-owned**
 
 Inspect the final diff and confirm `red_team` is additive, is not consumed for
-sorting, and does not modify status, priority, suggestion, queue class,
-allocation state, or adjustment suggestions.
+sorting, and does not modify status, priority, suggestion, queue class, or
+allocation state.
 
 - [x] **Step 2: Scan for execution-language regressions**
 

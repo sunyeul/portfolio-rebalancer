@@ -54,6 +54,8 @@ def evaluate_currentness(
             reasons.append("snapshot_not_evaluable")
         if snapshot_at is None:
             reasons.append("snapshot_timestamp_invalid")
+        elif snapshot_at > now:
+            reasons.append("snapshot_timestamp_future")
         elif (
             snapshot_age_seconds is not None
             and snapshot_age_seconds > MAX_SNAPSHOT_AGE_SECONDS

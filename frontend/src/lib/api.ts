@@ -24,7 +24,6 @@ export type InspectionSuggestion = {
 
 export type InspectionRedTeam = {
   counterargument?: string;
-  evidence_needed?: string;
 };
 
 export type EvaluationCurrentness = {
@@ -77,7 +76,6 @@ export type InspectionResult = {
   cash?: InspectionItem | null;
   layers?: InspectionItem[];
   instruments?: InspectionItem[];
-  adjustment_suggestions?: InspectionItem[];
   review_queue?: InspectionItem[];
   evidence_refs?: JsonObject;
 };

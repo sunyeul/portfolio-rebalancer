@@ -2,19 +2,18 @@
 
 ## Goal
 
-Give every persisted Review Queue item a concise counterargument and the
-evidence still required, without changing its IPS status, priority,
-suggestion, queue order, policy, or source data.
+Give every persisted Review Queue item a concise counterargument without
+changing its IPS status, priority, suggestion, queue order, policy, or source
+data.
 
 ## Design
 
 `services.inspection_engine` will add a read-only `red_team` object while it
-projects evaluated items into the Review Queue. The object has two Korean text
-fields:
+projects evaluated items into the Review Queue. The object has one Korean text
+field:
 
 - `counterargument`: why the observed trigger alone is insufficient to make a
-  decision;
-- `evidence_needed`: the existing verification task that must be completed.
+  decision.
 
 The counterargument is deterministic and selected only from the queue item
 kind and whether the item blocks evaluation. It does not call an LLM, read an
@@ -48,8 +47,8 @@ does not derive a replacement status, priority, suggestion, or queue order.
 ## Verification
 
 - Focused engine tests prove that blocking, allocation, and performance queue
-  items receive the expected red-team text while their decision fields remain
-  unchanged.
+  items receive the expected counterargument while their decision fields
+  remain unchanged.
 - API contract tests verify that persisted red-team text is returned without a
   frontend or API reclassification.
 - Frontend TypeScript checking and production build verify the new typed,

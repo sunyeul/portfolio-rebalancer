@@ -40,6 +40,14 @@ def test_currentness_blocks_expired_or_non_evaluable_sources():
         "snapshot_stale",
     ]
 
+    future = evaluate_currentness(
+        snapshot=_snapshot(age_hours=-1),
+        active_policy={"id": 4},
+        evaluated_at=NOW,
+    )
+
+    assert future["reasons"] == ["snapshot_timestamp_future"]
+
 
 def test_api_and_cli_inputs_share_the_same_currentness_contract():
     snapshot = _snapshot(age_hours=1)

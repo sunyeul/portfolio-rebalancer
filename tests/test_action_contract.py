@@ -38,7 +38,6 @@ def test_cash_and_allocation_precedence_use_policy_review_language():
         current=0.05,
         minimum=0.10,
         maximum=0.20,
-        triggers=["cash_reserve_out_of_range"],
     ) == ("P1", suggestion("review_reduce_or_pause_regular_purchase_pace"))
     assert unit_suggestion(
         kind="instrument",
@@ -46,7 +45,6 @@ def test_cash_and_allocation_precedence_use_policy_review_language():
         current=0.31,
         minimum=0.10,
         maximum=0.30,
-        triggers=["instrument_out_of_range"],
     ) == ("P2", suggestion("review_overweight_normalization"))
     assert unit_suggestion(
         kind="instrument",
@@ -54,7 +52,6 @@ def test_cash_and_allocation_precedence_use_policy_review_language():
         current=0.05,
         minimum=0.10,
         maximum=0.30,
-        triggers=["instrument_out_of_range"],
         eligible_for_increase=True,
     ) == ("P3", suggestion("review_increase_regular_purchase_allocation"))
 
@@ -66,7 +63,6 @@ def test_evidence_only_review_uses_monthly_observation_semantics():
         current=0.20,
         minimum=0.10,
         maximum=0.30,
-        triggers=["strict_layer_drawdown_review_threshold"],
     )
 
     assert (priority, selected) == ("P2", suggestion("hold_and_observe"))

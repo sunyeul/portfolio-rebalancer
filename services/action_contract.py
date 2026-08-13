@@ -49,7 +49,6 @@ def unit_suggestion(
     current: float | None,
     minimum: float | None,
     maximum: float | None,
-    triggers: list[str],
     eligible_for_increase: bool = False,
 ) -> tuple[str, dict[str, str]]:
     """Apply the documented precedence and return ``(priority, suggestion)``."""
@@ -87,7 +86,6 @@ def attach_decision(
         current=values.get("current"),
         minimum=values.get("minimum"),
         maximum=values.get("maximum"),
-        triggers=list(values.get("triggers") or []),
         eligible_for_increase=eligible_for_increase,
     )
     values["priority"] = priority

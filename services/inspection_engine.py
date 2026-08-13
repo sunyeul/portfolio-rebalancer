@@ -185,7 +185,7 @@ def _unit(
     denominator: str,
     triggers: list[str],
     meaning: str,
-    next_step: str,
+    verification_task: str,
     status: str = "OK",
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -201,8 +201,7 @@ def _unit(
         "denominator": denominator,
         "triggers": sorted(set(triggers)),
         "meaning": meaning,
-        "next_step": next_step,
-        "verification_task": next_step,
+        "verification_task": verification_task,
     }
     if extra:
         values.update(extra)
@@ -229,22 +228,16 @@ def _red_team(item: Mapping[str, Any], *, blocking: bool) -> dict[str, str]:
         )
     else:
         counterargument = "현재 검사 신호만으로 결론을 확정할 수 없습니다."
-    return {
-        "counterargument": counterargument,
-        "evidence_needed": str(
-            item.get("verification_task") or "근거와 확인 과제를 검토합니다."
-        ),
-    }
+    return {"counterargument": counterargument}
 
 
 def evaluate_inspection(
     projection: Mapping[str, Any] | None,
     performance_run: Mapping[str, Any] | None,
     policy: Mapping[str, Any],
-    layer_map: Mapping[tuple[str, str], str] | None = None,
+    *,
     risk_evidence: Mapping[str, Any] | None = None,
     evidence_refs: Mapping[str, Any] | None = None,
-    *,
     source_error: str | None = None,
     source_currentness: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -260,8 +253,8 @@ def evaluate_inspection(
     reconciled = (reconciliation.get("holdings") or {}).get(
         "all_within_tolerance"
     ) is True
-    source_current = (
-        source_currentness is None or source_currentness.get("is_current") is True
+    source_current = bool(
+        source_currentness and source_currentness.get("is_current") is True
     )
     source_ok = (
         projection is not None
@@ -304,7 +297,6 @@ def evaluate_inspection(
         "cash": None,
         "layers": [],
         "instruments": [],
-        "adjustment_suggestions": [],
         "review_queue": [],
         "evidence_refs": dict(evidence_refs),
     }
@@ -507,7 +499,7 @@ def evaluate_inspection(
                     denominator="gross_account_value",
                     triggers=cash_triggers,
                     meaning="예수금 비중이 설정한 총계좌 기준 보유 범위 안에 있는지 확인합니다.",
-                    next_step="현금 범위와 향후 정기매수 정책을 검토합니다.",
+                    verification_task="현금 범위와 향후 정기매수 정책을 검토합니다.",
                     status=cash_status,
                     extra={"cash_value_krw": projection.get("cash_value_krw")},
                 ),
@@ -548,7 +540,7 @@ def evaluate_inspection(
                         denominator="invested_account_value",
                         triggers=triggers,
                         meaning="투자금 기준 레이어 비중이 승인된 범위에 맞는지 확인합니다.",
-                        next_step="레이어 목표와 향후 정기매수 정책을 검토합니다.",
+                        verification_task="레이어 목표와 향후 정기매수 정책을 검토합니다.",
                         status=status,
                     ),
                     eligible_for_increase=eligible,
@@ -612,25 +604,12 @@ def evaluate_inspection(
                                 if layer == "core"
                                 else "strict_layer_drawdown_review_threshold"
                             )
-                pnl = _finite_number(
-                    evidence.get(
-                        "unrealized_pnl_krw",
-                        position.get("profit_loss_krw") if position else None,
-                    )
-                )
-                hard_maximum_breach = current is not None and float(current) > float(
-                    target["maximum"]
-                )
-                if pnl is not None and pnl > 0 and hard_maximum_breach:
-                    status = _raise_status(status, "Review")
-                    triggers.append("gain_with_instrument_overweight")
             eligible = (
                 cash_allocation_available
                 and ready
                 and current is not None
                 and float(current) < float(target["minimum"])
             )
-            next_step = "레이어·종목 목표와 향후 정기매수 정책을 검토합니다."
             result["instruments"].append(
                 attach_decision(
                     _unit(
@@ -643,7 +622,7 @@ def evaluate_inspection(
                         denominator="invested_account_value",
                         triggers=triggers,
                         meaning="종목의 현재 비중과 IPS 레이어·목표 범위를 함께 확인합니다.",
-                        next_step=next_step,
+                        verification_task="레이어·종목 목표와 향후 정기매수 정책을 검토합니다.",
                         status=status,
                         extra={
                             "market_country": key[0],
@@ -704,7 +683,14 @@ def evaluate_inspection(
                 ),
                 "kind": item.get("kind"),
                 "identity": item.get("identity"),
+                "layer": item.get("layer"),
                 "status": item.get("status", "Review"),
+                "current": item.get("current"),
+                "minimum": item.get("minimum"),
+                "target": item.get("target"),
+                "maximum": item.get("maximum"),
+                "gap": item.get("gap"),
+                "denominator": item.get("denominator"),
                 "triggers": list(item.get("triggers") or []),
                 "suggestion": selected_suggestion,
                 "meaning": item.get("meaning"),
@@ -789,40 +775,22 @@ def evaluate_inspection(
             str(item.get("identity", "")),
         ),
     )
-    result["adjustment_suggestions"] = [
-        {
-            key: item[key]
-            for key in (
-                "priority",
-                "priority_label",
-                "kind",
-                "identity",
-                "status",
-                "current",
-                "minimum",
-                "target",
-                "maximum",
-                "gap",
-                "denominator",
-                "suggestion",
-                "meaning",
-                "verification_task",
-                "triggers",
-            )
-            if key in item
-        }
-        for item in sorted(
-            units,
-            key=lambda value: (
-                priority_rank(value.get("priority")),
-                value.get("kind", ""),
-                value.get("identity", ""),
-            ),
+
+    instrument_directions = {
+        (item.get("layer"), (item.get("suggestion") or {}).get("code"))
+        for item in result["review_queue"]
+        if item.get("queue_class") == "adjustment" and item.get("kind") == "instrument"
+    }
+    result["review_queue"] = [
+        item
+        for item in result["review_queue"]
+        if item.get("queue_class") != "adjustment"
+        or item.get("kind") != "layer"
+        or (
+            item.get("identity"),
+            (item.get("suggestion") or {}).get("code"),
         )
-        if item.get("status") != "OK"
-        and item.get("priority") in {"P1", "P2", "P3"}
-        and (item.get("suggestion") or {}).get("code") != "hold_and_observe"
-        and result["allocation_state"] in {"complete", "partial"}
+        not in instrument_directions
     ]
     return result
 

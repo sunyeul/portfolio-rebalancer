@@ -67,13 +67,12 @@ function TableEmptyRow({ colSpan }: { colSpan: number }) {
   return <tr><td className="table-empty" colSpan={colSpan}>조건에 맞는 항목이 없습니다.</td></tr>;
 }
 
-function AdjustmentSuggestions({ items, contractSupported, allocationState, allocationReason }: { items: InspectionItem[]; contractSupported: boolean; allocationState?: unknown; allocationReason?: unknown }) {
+function AdjustmentSuggestions({ items, allocationState, allocationReason }: { items: InspectionItem[]; allocationState?: unknown; allocationReason?: unknown }) {
   return <section className="adjustment-suggestions" aria-labelledby="adjustment-suggestions-title">
     <div className="section-title"><div><p className="eyebrow">NEXT ALLOCATION REVIEW</p><h2 id="adjustment-suggestions-title">다음 조정 검토</h2></div><span className="denominator">백엔드 우선순위 순</span></div>
-    {!contractSupported && <div className="contract-notice"><CircleAlert size={18} /><div><strong>새 조정 계약을 아직 적용하지 않았습니다.</strong><span>현재 저장된 평가는 이전 엔진 결과이므로 우선순위와 조정 제안을 추정하지 않습니다. 새 Toss 평가를 저장하면 이 영역이 활성화됩니다.</span></div></div>}
-    {contractSupported && allocationState === "not_evaluable" && <div className="allocation-blocked"><CircleAlert size={18} /><div><strong>비중 조정 판단 보류</strong><span>{formatAllocationReason(allocationReason)} 원천 상태와 정책 근거를 확인하세요.</span></div></div>}
-    {contractSupported && allocationState !== "not_evaluable" && items.length === 0 && <div className="suggestion-empty"><CircleCheck size={18} /><span>현재 우선 검토할 비중 조정 항목이 없습니다. 허용 범위 안에서 관찰을 유지합니다.</span></div>}
-    {contractSupported && allocationState !== "not_evaluable" && items.length > 0 && <div className="suggestion-list">{items.slice(0, 3).map((item, index) => {
+    {allocationState === "not_evaluable" && <div className="allocation-blocked"><CircleAlert size={18} /><div><strong>비중 조정 판단 보류</strong><span>{formatAllocationReason(allocationReason)} 원천 상태와 정책 근거를 확인하세요.</span></div></div>}
+    {allocationState !== "not_evaluable" && items.length === 0 && <div className="suggestion-empty"><CircleCheck size={18} /><span>현재 우선 검토할 비중 조정 항목이 없습니다. 허용 범위 안에서 관찰을 유지합니다.</span></div>}
+    {allocationState !== "not_evaluable" && items.length > 0 && <div className="suggestion-list">{items.map((item, index) => {
       const suggestion = item.suggestion;
       return <article className="suggestion-card" key={`${String(item.kind)}-${String(item.identity)}-${index}`}>
         <div className="suggestion-meta"><span className="priority-chip">{String(item.priority ?? "—")} · {String(item.priority_label ?? "검토 시점 미상")}</span><Status value={item.status} /></div>
@@ -166,8 +165,7 @@ function ReviewQueue({ items }: { items: InspectionItem[] }) {
     {items.length === 0 && <div className="queue-empty"><CircleCheck size={18} />현재 확인 항목 없음</div>}
     <div className="review-queue-list">{items.map((item, index) => {
       const counterargument = typeof item.red_team?.counterargument === "string" ? item.red_team.counterargument : null;
-      const evidenceNeeded = typeof item.red_team?.evidence_needed === "string" ? item.red_team.evidence_needed : null;
-      return <article className="queue-item" key={`${String(item.kind)}-${String(item.identity)}-${index}`}><div className="queue-top"><div className="queue-axis"><Status value={item.status} />{(item.priority || item.priority_label) && <span className="priority-label">{formatQueuePriority(item.priority, item.priority_label)}</span>}</div><small>{queueKindLabel[String(item.kind)] ?? String(item.kind ?? "근거")}</small></div><strong>{String(item.identity ?? "—")}</strong>{item.suggestion?.label && <p className="queue-suggestion">조정 방향 · {String(item.suggestion.label)}</p>}<p>{String(item.meaning ?? "점검 의미 근거가 필요합니다.")}</p><span>{String(item.verification_task ?? "확인 과제 근거가 필요합니다.")}</span>{(counterargument || evidenceNeeded) && <aside className="red-team-card" aria-label="반대 관점"><strong>반대 관점</strong>{counterargument && <p>{counterargument}</p>}{evidenceNeeded && <span>추가 확인 · {evidenceNeeded}</span>}</aside>}{item.evidence_refs !== undefined && <details className="evidence-detail"><summary>근거 연결</summary><pre>{String(JSON.stringify(item.evidence_refs as JsonObject, null, 2) ?? "")}</pre></details>}</article>;
+      return <article className="queue-item" key={`${String(item.kind)}-${String(item.identity)}-${index}`}><div className="queue-top"><div className="queue-axis"><Status value={item.status} />{(item.priority || item.priority_label) && <span className="priority-label">{formatQueuePriority(item.priority, item.priority_label)}</span>}</div><small>{queueKindLabel[String(item.kind)] ?? String(item.kind ?? "근거")}</small></div><strong>{String(item.identity ?? "—")}</strong>{item.suggestion?.label && <p className="queue-suggestion">조정 방향 · {String(item.suggestion.label)}</p>}<p>{String(item.meaning ?? "점검 의미 근거가 필요합니다.")}</p><span>{String(item.verification_task ?? "확인 과제 근거가 필요합니다.")}</span>{counterargument && <aside className="red-team-card" aria-label="반대 관점"><strong>반대 관점</strong><p>{counterargument}</p></aside>}{item.evidence_refs !== undefined && <details className="evidence-detail"><summary>근거 연결</summary><pre>{String(JSON.stringify(item.evidence_refs as JsonObject, null, 2) ?? "")}</pre></details>}</article>;
     })}</div>
     <div className="queue-footer">이 목록은 읽기 전용 검사 신호이며, 상태와 순서는 백엔드 평가를 그대로 따릅니다.</div>
   </section>;
@@ -343,9 +341,10 @@ export default function App() {
   const evaluationUsable = contractSupported && evaluationCurrent;
   const result = evaluationUsable ? currentEvaluationResult(evaluation, currentness) : undefined;
   const queue = result?.review_queue ?? [];
-  const adjustmentSuggestions = result?.adjustment_suggestions ?? [];
   const layers = result?.layers ?? [];
   const instruments = result?.instruments ?? [];
+  const units = [result?.cash, ...layers, ...instruments].filter((item): item is InspectionItem => item != null);
+  const adjustmentSuggestions = queue.filter(item => item.queue_class === "adjustment").map(item => ({ ...(units.find(unit => unit.kind === item.kind && unit.identity === item.identity) ?? {}), ...item }));
   const performance = result?.performance as Record<string, unknown> | undefined;
   const account = result?.account as Record<string, unknown> | undefined;
   const source = result?.source as Record<string, unknown> | undefined;
@@ -392,7 +391,7 @@ export default function App() {
             <article className="fact-card"><span>매입원가 대비 보유 수익률</span><strong>{formatAccountReturn(accountReturn)}</strong><small>투자자산 평가금 - 매입원가 기준</small></article>
             <article className="fact-card"><span>YTD 계좌 수익률</span><strong>{percent(performance?.ytd_twr ?? (String(performance?.measurement ?? "") === "ytd_twr" ? performance?.annual_twr : null))}</strong><small>연간 목표 {percent(performance?.annual_target)} · 전략 평가용</small></article>
           </section>
-          <AdjustmentSuggestions items={adjustmentSuggestions} contractSupported={contractSupported} allocationState={result.allocation_state} allocationReason={result.allocation_reason} />
+          <AdjustmentSuggestions items={adjustmentSuggestions} allocationState={result.allocation_state} allocationReason={result.allocation_reason} />
           <AllocationOverview cash={result.cash} layers={layers} instruments={sortedInstruments} layerByIdentity={layerByIdentity} />
         </> : activeTab === "performance" ? <PerformancePanel summary={performance} run={performanceRun} accountProfitLoss={result.account_profit_loss} /> : activeTab === "allocation" ? <AllocationPanel cash={result.cash} layers={layers} instruments={sortedInstruments} layerByIdentity={layerByIdentity} /> : <ReviewQueue items={queue} />}
       </>}

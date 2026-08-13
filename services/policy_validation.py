@@ -15,7 +15,7 @@ POLICY_FIELDS = frozenset(
         "cash_reserve",
         "performance",
         "risk_review",
-        "cadence",
+        "cadence",  # accepted only to normalize legacy policy versions
         "layers",
         "instruments",
     }
@@ -200,17 +200,6 @@ def validate_policy(
             "instrument_drawdown_review": instrument_drawdown_review,
         }
 
-    cadence = policy.get("cadence")
-    if not isinstance(cadence, dict):
-        errors.append("cadence must be an object")
-        cadence = {}
-    observation = str(cadence.get("observation", "")).strip().lower()
-    inspection = str(cadence.get("inspection", "")).strip().lower()
-    if observation != "weekly":
-        errors.append("cadence.observation must be weekly")
-    if inspection != "monthly":
-        errors.append("cadence.inspection must be monthly")
-
     layers: dict[str, dict[str, float]] = {}
     raw_layers = policy.get("layers")
     if not isinstance(raw_layers, dict):
@@ -299,7 +288,6 @@ def validate_policy(
             "minimum_history_days": minimum_days,
         },
         "risk_review": risk_review,
-        "cadence": {"observation": observation, "inspection": inspection},
         "layers": layers,
         "instruments": sorted(
             instruments, key=lambda item: (item["market_country"], item["symbol"])

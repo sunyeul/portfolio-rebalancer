@@ -21,10 +21,6 @@
       "experiment": -0.15
     }
   },
-  "cadence": {
-    "observation": "weekly",
-    "inspection": "monthly"
-  },
   "layers": {
     "core": {
       "minimum": 0.70,
