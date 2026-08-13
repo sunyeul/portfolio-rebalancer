@@ -66,6 +66,29 @@ uv run ips-pilot performance candidates
 실패·부분 동기화가 새로 들어오면 이전 완료 스냅샷은 `last_verified_complete`로만 남고 현재 평가 대상으로 승격되지 않습니다.
 Overview의 기본 흐름은 `매입원가 → 투자자산 평가금 → 보유 수익률`입니다. 보유 손익은 `투자자산 평가금 - 매입원가`, 보유 수익률은 그 손익을 매입원가로 나눈 값입니다. 연간 목표 10%는 별도의 YTD 계좌 TWR 지표로 관리하며, 현금 포함 계좌 성과와 매입원가 기준 보유 성과를 섞지 않습니다.
 
+## 리밸런싱 정책 후보 연구
+
+명시한 후보 정책과 정기납입 가정을 저장된 Toss 스냅샷에 읽기 전용으로 적용할 수 있습니다. 이 연구는 활성 정책, 평가 실행, Review Queue, 후보 저장을 바꾸지 않으며 주문 지시를 만들지 않습니다.
+
+```json
+// scenario.json
+{
+  "monthly_contribution_krw": 1000000,
+  "horizon_months": 12,
+  "review_interval_days": 30,
+  "transaction_cost_bps": 10
+}
+```
+
+```bash
+uv run ips-pilot inspection candidate-preview \
+  --policy-file candidate.json \
+  --scenario-file scenario.json \
+  --snapshot-limit 100
+```
+
+가격은 고정, 분할투자는 가능, 매도는 없다고 가정합니다. 거래비용은 매월 신규 납입액에서 차감하고, 매도가 없으므로 실현세금은 적용하지 않습니다. 결과는 밴드 복귀의 구조적 가능성 검사이며 실제 배분이나 주문 계획이 아닙니다.
+
 ## 정책과 운영 검사
 
 현금 리저브는 총계좌 평가금 기준 3% 최소·5% 중립 목표·10% 최대 범위로 관찰합니다. 중립 레이어 목표는 투자금 평가금 기준 Core 60%·Satellite 38%·Experiment 2%이며, 시장 국면에 따라 승인된 범위 안에서 함께 조정할 수 있습니다. 연간 목표 수익률은 누적 수익률과 분리한 연초 기준 YTD TWR 10%이며, 최근 1년 TWR은 보조 뷰로 함께 표시합니다.

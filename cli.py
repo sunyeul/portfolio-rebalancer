@@ -19,13 +19,19 @@ from integrations.toss.observation import TossObservationService
 from integrations.toss.market import TossMarketDataService
 from integrations.toss.transport import TossTransport
 from services.inspection_service import preview_inspection, run_inspection
-from services.policy_candidate_assessment import unavailable_policy_candidate_assessment
+from services.policy_candidate_assessment import (
+    CandidateScenarioError,
+    assess_candidate_history,
+    normalize_candidate_scenario,
+    unavailable_policy_candidate_assessment,
+)
 from storage.evaluation_store import ENGINE_VERSION, current_v2_result
 from storage.account_observation_store import (
     get_snapshot as get_account_snapshot,
     list_snapshots as list_account_snapshots,
 )
 from storage.database import initialize_database
+from storage.database import DatabaseIntegrityError, connect_readonly
 from storage.policy_store import (
     activate_policy,
     get_active_policy,
@@ -387,6 +393,69 @@ def inspection_preview_command(
         )
     except Exception as exc:
         _exit_with_command_error("inspection preview", exc)
+
+
+@inspection_app.command("candidate-preview")
+def inspection_candidate_preview_command(
+    policy_file: Annotated[Path, typer.Option("--policy-file")],
+    scenario_file: Annotated[Path, typer.Option("--scenario-file")],
+    snapshot_limit: Annotated[int, typer.Option("--snapshot-limit")] = 100,
+) -> None:
+    """Research one explicit allocation-policy candidate without changing IPS state."""
+    try:
+        if not 1 <= snapshot_limit <= 100:
+            raise CliError("input", "--snapshot-limit은 1 이상 100 이하여야 합니다.")
+        if not policy_file.is_file():
+            raise CliError("input", f"정책 파일을 찾을 수 없습니다: {policy_file}")
+        if not scenario_file.is_file():
+            raise CliError(
+                "input", f"시나리오 파일을 찾을 수 없습니다: {scenario_file}"
+            )
+        from services.policy_validation import PolicyValidationError, validate_policy
+
+        try:
+            policy_payload = json.loads(policy_file.read_text(encoding="utf-8"))
+            scenario_payload = json.loads(scenario_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise CliError(
+                "input", f"JSON 형식이 올바르지 않습니다: {exc.msg}"
+            ) from exc
+        policy = (
+            policy_payload.get("policy", policy_payload)
+            if isinstance(policy_payload, dict)
+            else policy_payload
+        )
+        try:
+            normalized_scenario = normalize_candidate_scenario(scenario_payload)
+            conn = connect_readonly()
+            try:
+                observed = list_observed_identities(conn=conn)
+            finally:
+                conn.close()
+            normalized_policy = validate_policy(policy, observed)
+        except (CandidateScenarioError, PolicyValidationError) as exc:
+            raise CliError("input", str(exc)) from exc
+        except (FileNotFoundError, DatabaseIntegrityError) as exc:
+            raise CliError("persistence", str(exc)) from exc
+        try:
+            assessment = assess_candidate_history(
+                normalized_policy,
+                normalized_scenario,
+                snapshot_limit=snapshot_limit,
+            )
+        except (FileNotFoundError, DatabaseIntegrityError) as exc:
+            raise CliError("persistence", str(exc)) from exc
+        _emit_json(
+            {
+                "ok": True,
+                "command": "inspection candidate-preview",
+                "persisted": False,
+                "assessment": assessment,
+                "error": None,
+            }
+        )
+    except Exception as exc:
+        _exit_with_command_error("inspection candidate-preview", exc)
 
 
 @inspection_app.command("run")

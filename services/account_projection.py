@@ -44,7 +44,7 @@ def layer_map_from_policy(
     return result
 
 
-def _project_complete_snapshot(
+def project_complete_snapshot(
     snapshot: dict[str, Any],
     layer_map: Mapping[tuple[str, str], str],
 ) -> dict[str, Any]:
@@ -149,6 +149,9 @@ def _project_complete_snapshot(
     }
 
 
+_project_complete_snapshot = project_complete_snapshot
+
+
 def build_account_projection(
     snapshot_id: int | None = None,
     account_alias: str = "toss-brokerage",
@@ -172,4 +175,4 @@ def build_account_projection(
         raise AccountProjectionError(
             f"snapshot {snapshot['id']} is not current evaluable"
         )
-    return _project_complete_snapshot(snapshot, layer_map or {})
+    return project_complete_snapshot(snapshot, layer_map or {})

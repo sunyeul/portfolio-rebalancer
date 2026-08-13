@@ -73,23 +73,27 @@ def ensure_default_policy(
 
 def get_active_policy(
     account_alias: str = "toss-brokerage",
+    *,
+    conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any] | None:
     """Return the active policy and its replay metadata."""
     from storage.database import connect
 
-    with connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
-            """
+    if conn is None:
+        with connect() as owned_conn:
+            owned_conn.execute("BEGIN IMMEDIATE")
+            return get_active_policy(account_alias, conn=owned_conn)
+    row = conn.execute(
+        """
             SELECT id, account_alias, version, policy_json, policy_hash,
                    superseded_at, created_at
             FROM ips_policy_versions
             WHERE account_alias = ? AND superseded_at IS NULL
             ORDER BY version DESC, id DESC
             LIMIT 1
-            """,
-            (account_alias,),
-        ).fetchone()
+        """,
+        (account_alias,),
+    ).fetchone()
     if row is None:
         return None
     return {
@@ -134,11 +138,13 @@ def get_policy_version(
 
 def list_observed_identities(
     account_alias: str = "toss-brokerage",
+    *,
+    conn: sqlite3.Connection | None = None,
 ) -> list[tuple[str, str]]:
     """Return every Toss-observed instrument identity in stable order."""
     from storage.database import connect
 
-    with connect() as conn:
+    if conn is not None:
         rows = conn.execute(
             """
             SELECT DISTINCT h.market_country, h.symbol
@@ -149,7 +155,9 @@ def list_observed_identities(
             """,
             (account_alias,),
         ).fetchall()
-    return [(str(row["market_country"]), str(row["symbol"])) for row in rows]
+        return [(str(row["market_country"]), str(row["symbol"])) for row in rows]
+    with connect() as owned_conn:
+        return list_observed_identities(account_alias, conn=owned_conn)
 
 
 def activate_policy(

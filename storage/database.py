@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 
 from storage.policy_store import ensure_default_policy
-from storage.schema import migrate
+from storage.schema import LATEST_SCHEMA_VERSION, migrate, schema_version
 
 
 DEFAULT_DB_PATH = Path("data") / "portfolio_rebalancer.sqlite3"
@@ -29,6 +29,27 @@ def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def connect_readonly() -> sqlite3.Connection:
+    """Open the existing IPS database without creating or changing it."""
+    path = db_path()
+    if not path.is_file():
+        raise FileNotFoundError(f"database not found: {path}")
+    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA query_only = ON")
+    try:
+        if schema_version(conn) != LATEST_SCHEMA_VERSION:
+            raise DatabaseIntegrityError(
+                "read-only analysis requires the current database schema"
+            )
+        _assert_integrity(conn)
+    except Exception:
+        conn.close()
+        raise
     return conn
 
 

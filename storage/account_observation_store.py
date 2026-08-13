@@ -294,11 +294,13 @@ def latest_verified_complete(
 
 def list_complete_snapshots(
     account_alias: str = "toss-brokerage",
+    *,
+    conn: sqlite3.Connection | None = None,
 ) -> list[dict[str, Any]]:
     """Return complete account snapshots in deterministic projection order."""
     from storage.database import connect
 
-    with connect() as conn:
+    if conn is not None:
         rows = conn.execute(
             """
             SELECT * FROM broker_account_snapshots
@@ -308,16 +310,21 @@ def list_complete_snapshots(
             (account_alias,),
         ).fetchall()
         return [_row_to_snapshot(conn, row) for row in rows]
+    with connect() as owned_conn:
+        return list_complete_snapshots(account_alias, conn=owned_conn)
 
 
 def list_snapshots(
-    limit: int = 20, account_alias: str | None = None
+    limit: int = 20,
+    account_alias: str | None = None,
+    *,
+    conn: sqlite3.Connection | None = None,
 ) -> list[dict[str, Any]]:
     """Return recent normalized snapshots, newest first."""
     from storage.database import connect
 
     bounded_limit = max(1, min(int(limit), 100))
-    with connect() as conn:
+    if conn is not None:
         if account_alias is None:
             rows = conn.execute(
                 """
@@ -335,3 +342,5 @@ def list_snapshots(
                 (account_alias, bounded_limit),
             ).fetchall()
         return [_row_to_snapshot(conn, row) for row in rows]
+    with connect() as owned_conn:
+        return list_snapshots(limit, account_alias, conn=owned_conn)
