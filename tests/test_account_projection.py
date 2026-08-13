@@ -106,6 +106,21 @@ def test_latest_projection_reports_the_actual_snapshot_id(monkeypatch, tmp_path)
     assert first["id"] != second["id"]
 
 
+def test_historical_complete_projection_can_skip_currentness_requirement(monkeypatch, tmp_path):
+    monkeypatch.setenv("PORTFOLIO_DB_PATH", str(tmp_path / "projection.sqlite3"))
+    initialize_database()
+    first = insert_snapshot(_snapshot())
+    insert_snapshot(
+        _snapshot(fingerprint="projection-2", synced_at="2026-07-23T00:05:00+00:00")
+    )
+
+    result = build_account_projection(
+        snapshot_id=first["id"], require_current_evaluable=False
+    )
+
+    assert result["snapshot_id"] == first["id"]
+
+
 @pytest.mark.parametrize(
     "state", [SyncState.PARTIAL, SyncState.STALE, SyncState.FAILED]
 )

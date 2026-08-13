@@ -25,6 +25,14 @@ from services.policy_candidate_assessment import (
     normalize_candidate_scenario,
     unavailable_policy_candidate_assessment,
 )
+from services.retrospective import (
+    confirm as confirm_retrospective,
+    eligible as eligible_retrospective,
+    list_case_summaries,
+    preview as preview_retrospective,
+    show as show_retrospective,
+    start_case,
+)
 from storage.evaluation_store import ENGINE_VERSION, current_v2_result
 from storage.account_observation_store import (
     get_snapshot as get_account_snapshot,
@@ -101,10 +109,12 @@ performance_app = typer.Typer(help="Inspect Toss account performance history.")
 policy_app = typer.Typer(help="Inspect and activate versioned Toss IPS policies.")
 inspection_app = typer.Typer(help="Run and inspect deterministic Toss evaluations.")
 market_app = typer.Typer(help="Inspect official Toss market context.")
+retrospective_app = typer.Typer(help="Record and inspect IPS retrospective evidence.")
 app.add_typer(performance_app, name="performance")
 app.add_typer(policy_app, name="policy")
 app.add_typer(inspection_app, name="inspection")
 app.add_typer(market_app, name="market")
+app.add_typer(retrospective_app, name="retrospective")
 
 
 def _contract_supported(evaluation: dict[str, Any] | None) -> bool:
@@ -699,6 +709,100 @@ def performance_decide_flow(
         )
     except Exception as exc:
         _exit_with_command_error("performance decide-flow", exc)
+
+
+@retrospective_app.command("eligible")
+def retrospective_eligible() -> None:
+    """List current non-blocking Review Queue items eligible for a retrospective."""
+    try:
+        initialize_database()
+        payload = eligible_retrospective()
+        _emit_json({"ok": True, "command": "retrospective eligible", **payload, "error": None})
+    except Exception as exc:
+        _exit_with_command_error("retrospective eligible", exc)
+
+
+@retrospective_app.command("start")
+def retrospective_start(
+    kind: Annotated[str, typer.Option("--kind")],
+    identity: Annotated[str, typer.Option("--identity")],
+    disposition: Annotated[str, typer.Option("--disposition")],
+    note: Annotated[str, typer.Option("--note")] = "",
+) -> None:
+    """Anchor one current Review Queue item and the user's first decision."""
+    try:
+        initialize_database()
+        case = start_case(kind=kind, identity=identity, disposition=disposition, note=note)
+        _emit_json({"ok": True, "command": "retrospective start", "case": case, "error": None})
+    except Exception as exc:
+        _exit_with_command_error("retrospective start", exc)
+
+
+@retrospective_app.command("list")
+def retrospective_list(
+    state: Annotated[str, typer.Option("--state")] = "all",
+) -> None:
+    """List retrospective cases with due horizons and review flags."""
+    try:
+        initialize_database()
+        cases = list_case_summaries(state=state)
+        _emit_json({"ok": True, "command": "retrospective list", "state": state, "cases": cases, "error": None})
+    except Exception as exc:
+        _exit_with_command_error("retrospective list", exc)
+
+
+@retrospective_app.command("preview")
+def retrospective_preview(
+    case_id: Annotated[int, typer.Option("--case-id")],
+    horizon: Annotated[str, typer.Option("--horizon")],
+) -> None:
+    """Preview one due retrospective evidence set without persistence."""
+    try:
+        initialize_database()
+        payload = preview_retrospective(case_id, horizon)
+        _emit_json({"ok": True, "command": "retrospective preview", **payload, "error": None})
+    except Exception as exc:
+        _exit_with_command_error("retrospective preview", exc)
+
+
+@retrospective_app.command("confirm")
+def retrospective_confirm(
+    case_id: Annotated[int, typer.Option("--case-id")],
+    horizon: Annotated[str, typer.Option("--horizon")],
+    evidence_fingerprint: Annotated[str, typer.Option("--evidence-fingerprint")],
+    judgment: Annotated[str, typer.Option("--judgment")],
+    execution: Annotated[str, typer.Option("--execution")],
+    policy: Annotated[str, typer.Option("--policy")],
+    note: Annotated[str, typer.Option("--note")] = "",
+) -> None:
+    """Append a human-confirmed retrospective review for one evidence set."""
+    try:
+        initialize_database()
+        review = confirm_retrospective(
+            case_id=case_id,
+            horizon=horizon,
+            evidence_fingerprint=evidence_fingerprint,
+            judgment=judgment,
+            execution=execution,
+            policy=policy,
+            note=note,
+        )
+        _emit_json({"ok": True, "command": "retrospective confirm", "review": review, "error": None})
+    except Exception as exc:
+        _exit_with_command_error("retrospective confirm", exc)
+
+
+@retrospective_app.command("show")
+def retrospective_show(
+    case_id: Annotated[int, typer.Option("--case-id")],
+) -> None:
+    """Show one case with append-only retrospective review revisions."""
+    try:
+        initialize_database()
+        payload = show_retrospective(case_id)
+        _emit_json({"ok": True, "command": "retrospective show", **payload, "error": None})
+    except Exception as exc:
+        _exit_with_command_error("retrospective show", exc)
 
 
 if __name__ == "__main__":

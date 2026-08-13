@@ -23,6 +23,8 @@ ACTIVE_TABLES = {
     "ips_policy_candidates",
     "toss_market_candles",
     "ips_evaluation_runs",
+    "ips_retrospective_cases",
+    "ips_retrospective_reviews",
 }
 
 
@@ -74,7 +76,7 @@ def test_fresh_database_uses_current_schema(monkeypatch, tmp_path):
 
     initialize_database()
 
-    assert _schema_version(path) == LATEST_SCHEMA_VERSION == 10
+    assert _schema_version(path) == LATEST_SCHEMA_VERSION == 11
     assert _table_names(path) == ACTIVE_TABLES
     with sqlite3.connect(path) as conn:
         evaluation_columns = {
@@ -92,6 +94,10 @@ def test_existing_v10_database_preserves_user_data(monkeypatch, tmp_path):
     _set_database_path(monkeypatch, path)
     initialize_database()
     snapshot_id = _insert_snapshot(path)
+    with sqlite3.connect(path) as conn:
+        conn.execute("DROP TABLE ips_retrospective_reviews")
+        conn.execute("DROP TABLE ips_retrospective_cases")
+        conn.execute("PRAGMA user_version = 10")
 
     initialize_database()
 
@@ -104,6 +110,9 @@ def test_existing_v10_database_preserves_user_data(monkeypatch, tmp_path):
             ).fetchone()[0]
             == "preservation-source"
         )
+        assert conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ips_retrospective_cases'"
+        ).fetchone()
 
 
 def test_empty_unversioned_database_is_initialized(monkeypatch, tmp_path):
@@ -146,12 +155,27 @@ def test_unsupported_schema_is_rejected_without_mutation(
         conn.execute(f"PRAGMA user_version = {version}")
     _set_database_path(monkeypatch, path)
 
-    with pytest.raises(SchemaVersionError, match="only schema 10 is supported"):
+    with pytest.raises(SchemaVersionError, match="Unsupported.*schema"):
         initialize_database()
 
     assert _schema_version(path) == version
     with sqlite3.connect(path) as conn:
         assert conn.execute("SELECT value FROM sentinel").fetchone()[0] == "unchanged"
+
+
+def test_incomplete_v10_database_is_rejected_before_retrospective_ddl(monkeypatch, tmp_path):
+    path = tmp_path / "incomplete-v10.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE broker_account_snapshots (id INTEGER PRIMARY KEY)")
+        conn.execute("CREATE TABLE ips_evaluation_runs (id INTEGER PRIMARY KEY)")
+        conn.execute("PRAGMA user_version = 10")
+    _set_database_path(monkeypatch, path)
+
+    with pytest.raises(SchemaVersionError, match="Unsupported schema 10"):
+        initialize_database()
+
+    assert _schema_version(path) == 10
+    assert "ips_retrospective_cases" not in _table_names(path)
 
 
 def test_failed_baseline_creation_rolls_back(monkeypatch, tmp_path):

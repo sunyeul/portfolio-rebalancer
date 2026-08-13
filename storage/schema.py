@@ -5,7 +5,26 @@ from __future__ import annotations
 import sqlite3
 
 
-LATEST_SCHEMA_VERSION = 10
+LATEST_SCHEMA_VERSION = 11
+V10_REQUIRED_TABLES = frozenset(
+    {
+        "broker_account_snapshots",
+        "broker_holdings",
+        "broker_cash_observations",
+        "broker_exchange_rates",
+        "broker_orders",
+        "account_tracking_baselines",
+        "account_cash_flow_candidates",
+        "account_cash_flow_decisions",
+        "account_performance_runs",
+        "account_performance_points",
+        "account_execution_ledger",
+        "ips_policy_versions",
+        "ips_policy_candidates",
+        "toss_market_candles",
+        "ips_evaluation_runs",
+    }
+)
 
 
 class SchemaVersionError(RuntimeError):
@@ -266,6 +285,39 @@ CREATE TABLE IF NOT EXISTS ips_evaluation_runs (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS ips_retrospective_cases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_alias TEXT NOT NULL,
+    evaluation_run_id INTEGER NOT NULL REFERENCES ips_evaluation_runs(id),
+    queue_kind TEXT NOT NULL,
+    queue_identity TEXT NOT NULL,
+    queue_item_json TEXT NOT NULL,
+    disposition TEXT NOT NULL CHECK(disposition IN ('adopted', 'deferred', 'declined')),
+    decision_note TEXT NOT NULL DEFAULT '',
+    decided_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(evaluation_run_id, queue_kind, queue_identity)
+);
+
+CREATE TABLE IF NOT EXISTS ips_retrospective_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL REFERENCES ips_retrospective_cases(id),
+    horizon TEXT NOT NULL CHECK(horizon IN ('1m', '3m', '12m')),
+    revision INTEGER NOT NULL,
+    due_at TEXT NOT NULL,
+    observation_snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id),
+    performance_run_id INTEGER REFERENCES account_performance_runs(id),
+    evidence_json TEXT NOT NULL,
+    evidence_fingerprint TEXT NOT NULL,
+    judgment_assessment TEXT NOT NULL CHECK(judgment_assessment IN ('supported', 'mixed', 'challenged', 'insufficient_evidence')),
+    execution_assessment TEXT NOT NULL CHECK(execution_assessment IN ('aligned', 'partially_aligned', 'not_aligned', 'not_applicable', 'insufficient_evidence')),
+    policy_assessment TEXT NOT NULL CHECK(policy_assessment IN ('maintain', 'review_flag', 'insufficient_evidence')),
+    review_note TEXT NOT NULL DEFAULT '',
+    reviewed_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(case_id, horizon, revision)
+);
+
 CREATE INDEX IF NOT EXISTS idx_broker_snapshots_latest
     ON broker_account_snapshots(account_alias, synced_at, id);
 CREATE INDEX IF NOT EXISTS idx_broker_holdings_snapshot
@@ -287,6 +339,49 @@ CREATE INDEX IF NOT EXISTS idx_ips_evaluation_runs_account_created
     ON ips_evaluation_runs(account_alias, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_ips_evaluation_runs_snapshot
     ON ips_evaluation_runs(snapshot_id, id);
+CREATE INDEX IF NOT EXISTS idx_ips_retrospective_cases_account_created
+    ON ips_retrospective_cases(account_alias, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_ips_retrospective_reviews_case_horizon
+    ON ips_retrospective_reviews(case_id, horizon, revision DESC);
+"""
+
+
+MIGRATION_10_TO_11_SQL = """
+CREATE TABLE ips_retrospective_cases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_alias TEXT NOT NULL,
+    evaluation_run_id INTEGER NOT NULL REFERENCES ips_evaluation_runs(id),
+    queue_kind TEXT NOT NULL,
+    queue_identity TEXT NOT NULL,
+    queue_item_json TEXT NOT NULL,
+    disposition TEXT NOT NULL CHECK(disposition IN ('adopted', 'deferred', 'declined')),
+    decision_note TEXT NOT NULL DEFAULT '',
+    decided_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(evaluation_run_id, queue_kind, queue_identity)
+);
+CREATE TABLE ips_retrospective_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL REFERENCES ips_retrospective_cases(id),
+    horizon TEXT NOT NULL CHECK(horizon IN ('1m', '3m', '12m')),
+    revision INTEGER NOT NULL,
+    due_at TEXT NOT NULL,
+    observation_snapshot_id INTEGER NOT NULL REFERENCES broker_account_snapshots(id),
+    performance_run_id INTEGER REFERENCES account_performance_runs(id),
+    evidence_json TEXT NOT NULL,
+    evidence_fingerprint TEXT NOT NULL,
+    judgment_assessment TEXT NOT NULL CHECK(judgment_assessment IN ('supported', 'mixed', 'challenged', 'insufficient_evidence')),
+    execution_assessment TEXT NOT NULL CHECK(execution_assessment IN ('aligned', 'partially_aligned', 'not_aligned', 'not_applicable', 'insufficient_evidence')),
+    policy_assessment TEXT NOT NULL CHECK(policy_assessment IN ('maintain', 'review_flag', 'insufficient_evidence')),
+    review_note TEXT NOT NULL DEFAULT '',
+    reviewed_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(case_id, horizon, revision)
+);
+CREATE INDEX idx_ips_retrospective_cases_account_created
+    ON ips_retrospective_cases(account_alias, created_at, id);
+CREATE INDEX idx_ips_retrospective_reviews_case_horizon
+    ON ips_retrospective_reviews(case_id, horizon, revision DESC);
 """
 
 
@@ -309,6 +404,22 @@ def _schema_object_count(conn: sqlite3.Connection) -> int:
     )
 
 
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+        ).fetchone()
+        is not None
+    )
+
+
+def _has_tables(conn: sqlite3.Connection, names: frozenset[str]) -> bool:
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"
+    ).fetchall()
+    return names <= {str(row["name"]) for row in rows}
+
+
 def migrate(conn: sqlite3.Connection) -> int:
     """Initialize an empty database or validate the supported schema baseline."""
     current = schema_version(conn)
@@ -316,11 +427,25 @@ def migrate(conn: sqlite3.Connection) -> int:
         if _schema_object_count(conn):
             raise SchemaVersionError(
                 "Unsupported unversioned database; only an empty database "
-                "can be initialized as schema 10."
+                "can be initialized as schema 11."
             )
         try:
             conn.executescript(
                 f"BEGIN IMMEDIATE;\n{CURRENT_SCHEMA_SQL}\n"
+                f"PRAGMA user_version = {LATEST_SCHEMA_VERSION};\nCOMMIT;"
+            )
+        except Exception:
+            if conn.in_transaction:
+                conn.rollback()
+            raise
+        return schema_version(conn)
+
+    if current == 10:
+        if not _has_tables(conn, V10_REQUIRED_TABLES):
+            raise SchemaVersionError("Unsupported schema 10 database")
+        try:
+            conn.executescript(
+                f"BEGIN IMMEDIATE;\n{MIGRATION_10_TO_11_SQL}\n"
                 f"PRAGMA user_version = {LATEST_SCHEMA_VERSION};\nCOMMIT;"
             )
         except Exception:

@@ -66,6 +66,21 @@ uv run ips-pilot performance candidates
 실패·부분 동기화가 새로 들어오면 이전 완료 스냅샷은 `last_verified_complete`로만 남고 현재 평가 대상으로 승격되지 않습니다.
 Overview의 기본 흐름은 `매입원가 → 투자자산 평가금 → 보유 수익률`입니다. 보유 손익은 `투자자산 평가금 - 매입원가`, 보유 수익률은 그 손익을 매입원가로 나눈 값입니다. 연간 목표 10%는 별도의 YTD 계좌 TWR 지표로 관리하며, 현금 포함 계좌 성과와 매입원가 기준 보유 성과를 섞지 않습니다.
 
+## IPS 회고
+
+회고는 현재 Review Queue 항목의 최초 결정과 30·90·365일 뒤의 관측 근거를 보존합니다. 성과는 판단의 근거일 뿐 자동 정책 변경이나 거래 지시를 만들지 않습니다.
+
+```bash
+uv run ips-pilot retrospective eligible
+uv run ips-pilot retrospective start --kind cash --identity cash_reserve --disposition adopted
+uv run ips-pilot retrospective list --state due
+uv run ips-pilot retrospective preview --case-id 1 --horizon 1m
+uv run ips-pilot retrospective confirm --case-id 1 --horizon 1m --evidence-fingerprint "..." --judgment supported --execution aligned --policy maintain
+uv run ips-pilot retrospective show --case-id 1
+```
+
+`preview`는 저장하지 않으며, `confirm`은 동일 증거 fingerprint와 사용자의 판단·이행·정책 판정을 요구합니다. `review_flag`는 정책 재검토가 필요할 수 있음을 표시할 뿐 활성 정책이나 Review Queue를 바꾸지 않습니다.
+
 ## 리밸런싱 정책 후보 연구
 
 명시한 후보 정책과 정기납입 가정을 저장된 Toss 스냅샷에 읽기 전용으로 적용할 수 있습니다. 이 연구는 활성 정책, 평가 실행, Review Queue, 후보 저장을 바꾸지 않으며 주문 지시를 만들지 않습니다.

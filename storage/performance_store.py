@@ -494,3 +494,28 @@ def latest_performance_run(
                 (baseline_id,),
             ).fetchone()
         return _hydrate_run(conn, int(row["id"])) if row is not None else None
+
+
+def latest_performance_run_for_snapshots(
+    *,
+    account_alias: str,
+    start_snapshot_id: int,
+    end_snapshot_id: int,
+) -> dict[str, Any] | None:
+    """Return the newest complete run for one account containing both points."""
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT run.id
+            FROM account_performance_runs AS run
+            JOIN account_tracking_baselines AS baseline ON baseline.id = run.baseline_id
+            JOIN account_performance_points AS start_point
+                ON start_point.run_id = run.id AND start_point.snapshot_id = ?
+            JOIN account_performance_points AS end_point
+                ON end_point.run_id = run.id AND end_point.snapshot_id = ?
+            WHERE baseline.account_alias = ? AND run.state = 'complete'
+            ORDER BY run.id DESC LIMIT 1
+            """,
+            (start_snapshot_id, end_snapshot_id, account_alias),
+        ).fetchone()
+        return _hydrate_run(conn, int(row["id"])) if row is not None else None

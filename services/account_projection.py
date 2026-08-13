@@ -156,8 +156,10 @@ def build_account_projection(
     snapshot_id: int | None = None,
     account_alias: str = "toss-brokerage",
     layer_map: Mapping[tuple[str, str], str] | None = None,
+    *,
+    require_current_evaluable: bool = True,
 ) -> dict[str, Any]:
-    """Project one explicit or latest complete Toss snapshot."""
+    """Project one complete Toss snapshot, optionally for historical evidence."""
     snapshot = (
         get_snapshot(snapshot_id)
         if snapshot_id is not None
@@ -171,7 +173,7 @@ def build_account_projection(
         raise AccountProjectionError(
             f"snapshot {snapshot['id']} is not complete: {snapshot['state']}"
         )
-    if not snapshot.get("is_current_evaluable", False):
+    if require_current_evaluable and not snapshot.get("is_current_evaluable", False):
         raise AccountProjectionError(
             f"snapshot {snapshot['id']} is not current evaluable"
         )
