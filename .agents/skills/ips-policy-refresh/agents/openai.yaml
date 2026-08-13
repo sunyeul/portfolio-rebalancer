@@ -1,0 +1,4 @@
+interface:
+  display_name: "IPS Policy Refresh"
+  short_description: "Calculate instrument-first IPS policy candidates"
+  default_prompt: "Use $ips-policy-refresh to calculate and validate an instrument-first IPS policy candidate."
