@@ -18,7 +18,8 @@ IPS Pilot is an IPS inspection workbench, not a trading recommender. Keep change
 ## Local Skills
 
 - Use `ips-judgment-filter` before designing, reviewing, or changing IPS judgment behavior, especially language around buying, selling, DCA, drawdowns, core/satellite decisions, or conservative holds.
-- Use `ips-pilot-cli-review` when reviewing a saved portfolio snapshot through the v2 CLI. Pair it with `ips-judgment-filter` whenever the response includes investment action language.
+- Use `ips-policy-refresh` to recalculate instrument-first target weights, derive layer targets, validate a policy candidate, and keep activation behind explicit approval.
+- Use `ips-snapshot-evaluate` to acquire or select a Toss snapshot, compare it with the active policy, and report cash, instrument, layer, risk, and Review Queue results. Pair it with `ips-judgment-filter` whenever the response includes investment action language.
 - Do not edit snapshots, config, journal entries, or persistent app state unless the user explicitly asks for that change.
 
 ## CLI Contract

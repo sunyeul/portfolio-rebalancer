@@ -1,0 +1,4 @@
+interface:
+  display_name: "IPS Snapshot Evaluate"
+  short_description: "Evaluate Toss snapshots against active IPS policy"
+  default_prompt: "Use $ips-snapshot-evaluate to evaluate the latest Toss snapshot against the active IPS policy."
