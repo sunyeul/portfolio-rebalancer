@@ -1,4 +1,0 @@
-interface:
-  display_name: "IPS Rebalance Priority Table"
-  short_description: "Create safe IPS rebalance priority tables"
-  default_prompt: "Use $ips-rebalance-priority-table to review the latest Toss snapshot with layer tables, targets, gaps, returns, P&L, and request-specific rationales."
